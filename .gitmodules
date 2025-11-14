@@ -1,0 +1,12 @@
+[submodule "qcacld2"]
+	path = qcacld2
+	url = https://source.mnt.re/reform/qcacld2.git
+[submodule "linux"]
+	path = linux
+	url = https://github.com/gregkh/linux.git
+[submodule "reform-tools"]
+	path = reform-tools
+	url = https://source.mnt.re/reform/reform-tools.git
+[submodule "reform-debian-packages"]
+	path = reform-debian-packages
+	url = https://source.mnt.re/reform/reform-debian-packages.git
