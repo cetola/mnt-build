@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
 MNT Pocket Reform Kernel Build Script
 Compiles kernel, out-of-tree modules, and creates deployment tarball.

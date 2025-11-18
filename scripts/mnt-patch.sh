@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 cd ~/mnt-build/linux || exit 1  # your kernel tree
 PATCH_LIST=$(find ~/mnt-build/reform-debian-packages/linux/patches6.17 -name "*.patch" | sort)
 SUCCESS=0
