@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 export MNTVER=6.17.7
 cd ~/mnt-build/linux
 git fetch --tags
