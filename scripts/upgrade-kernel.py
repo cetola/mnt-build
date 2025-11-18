@@ -62,7 +62,7 @@ class BuildConfig:
                 linux_dir=linux_dir,
                 patches_dir=build_dir / "reform-debian-packages" / "linux" / f"patches{major_minor}",
                 config_file=build_dir / "configs" / f"config-{version}-mnt-reform-arm64",
-                dtb_file=build_dir / "configs" / f"imx8mp-mnt-pocket-reform-{version}.dtb",
+                dtb_file=linux_dir / "arch/arm64/boot/dts/freescale/imx8mp-mnt-pocket-reform.dtb",
                 output_tar=linux_dir / f"kernel-{version}-mnt.tar.gz",
                 log_file=build_dir / f"build-{version}-{timestamp}.log",
                 jobs=jobs
@@ -355,6 +355,18 @@ class KernelBuilder:
                     "Build will continue, but kernel may not work correctly."
                     )
 
+        # Copy DTS
+        self.logger.info("Adding custom DTS file...")
+        custom_dts = self.config.build_dir / "reform-debian-packages/linux/imx8mp-mnt-pocket-reform.dts"
+        dts_dest = self.config.linux_dir / "arch/arm64/boot/dts/freescale/imx8mp-mnt-pocket-reform.dts"
+        self.run_command(["cp", str(custom_dts), str(dts_dest)])
+
+        # Update the Freescale Makefile for the DTB creation
+        self.logger.info("Modifying freescale dts makefile...")
+        makefile = self.config.linux_dir / "arch/arm64/boot/dts/freescale/Makefile"
+        with open(makefile, "a") as f:
+            f.write("\ndtb-$(CONFIG_ARCH_MXC) += imx8mp-mnt-pocket-reform.dtb\n")
+
         # Copy config
         self.logger.info("Copying kernel config...")
         self.run_command(['cp', str(self.config.config_file), '.config'])
@@ -376,7 +388,7 @@ class KernelBuilder:
                     'Image', 'modules', 'dtbs'
                     ],
                 cwd=self.config.linux_dir,
-                stream_output=True, input_data="y"
+                stream_output=False, input_data="y"
                 )
 
         elapsed = (datetime.now() - start_time).total_seconds()
@@ -444,7 +456,7 @@ class KernelBuilder:
         self.run_command(
             ["bash", "./build.sh"],
             cwd=Path(qcacld2_dir),
-            stream_output=True
+            stream_output=False
         )
 
         # Verify output
