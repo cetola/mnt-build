@@ -6,9 +6,7 @@
 [submodule "linux"]
 	path = linux
 	url = https://github.com/gregkh/linux.git
-	ignore = all
-	update = checkout
-	pushurl = no_push
+	ignore = dirty
 	branch = master
 [submodule "reform-tools"]
 	path = reform-tools
