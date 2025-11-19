@@ -478,6 +478,7 @@ class KernelBuilder:
         required_files = {
                 'kernel': self.config.linux_dir / "arch/arm64/boot/Image",
                 'dtb': self.config.dtb_file,
+                'config': self.config.config_file,
                 'lpc_module': self.config.build_dir / "reform-tools/lpc/reform2_lpc.ko",
                 'wifi_module': self.config.build_dir / "qcacld2/wlan.ko",
                 'modules': self.config.linux_dir / "modules/lib/modules"
@@ -521,6 +522,12 @@ class KernelBuilder:
             tar.add(
                     self.config.linux_dir / "modules/lib/modules",
                     arcname="lib/modules"
+                    )
+
+            # Add the config file
+            tar.add(
+                    self.config.config_file,
+                    arcname=f"config-{self.config.version}-mnt-reform-arm64"
                     )
 
         dest_path = self.config.build_dir / self.config.output_tar.name
