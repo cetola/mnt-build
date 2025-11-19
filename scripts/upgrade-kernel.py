@@ -52,7 +52,7 @@ class BuildConfig:
         linux_dir = build_dir / "linux"
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 
-        # Extract major.minor version (e.g., "6.17" from "6.17.7")
+        # Extract major.minor version (e.g., "6.17" from "6.17.8")
         version_parts = version.split('.')
         major_minor = f"{version_parts[0]}.{version_parts[1]}"
 
@@ -372,10 +372,12 @@ class KernelBuilder:
         self.run_command(['cp', str(self.config.config_file), '.config'])
 
         # Run olddefconfig
-        self.logger.info("Running olddefconfig...")
-        self.run_command(['make', 'olddefconfig', f'ARCH={self.arch}'],
-                         cwd=self.config.linux_dir, stream_output=True,
-                         input_data="y")
+        # Skipping defconfig for now. For now we'll use complete config files.
+        # Need to fiture out out to auto-generate a config without interactive
+        # prompts.
+        # self.logger.info("Running olddefconfig...")
+        # self.run_command(['make', f'ARCH={self.arch}', 'olddefconfig'],
+        #                 cwd=self.config.linux_dir, stream_output=True)
 
         # Compile kernel
         self.logger.info(f"Compiling kernel with {self.config.jobs} jobs (this may take a while)...")
@@ -388,8 +390,7 @@ class KernelBuilder:
                     'Image', 'modules', 'dtbs'
                     ],
                 cwd=self.config.linux_dir,
-                stream_output=False, input_data="y"
-                )
+                stream_output=True)
 
         elapsed = (datetime.now() - start_time).total_seconds()
         self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Kernel compiled in {elapsed:.0f} seconds")
@@ -543,8 +544,8 @@ def main():
     parser.add_argument(
             'version',
             nargs='?',
-            default='6.17.7',
-            help='Kernel version to build (default: 6.17.7)'
+            default='6.17.8',
+            help='Kernel version to build (default: 6.17.8)'
             )
     parser.add_argument(
             '--build-dir',
