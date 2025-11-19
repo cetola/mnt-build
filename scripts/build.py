@@ -17,6 +17,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+__version__ = "0.1.0"
+
 
 # ANSI color codes for terminal output
 class Colors:
@@ -561,6 +563,12 @@ def main():
             '--dry-run',
             action='store_true',
             help='Check prerequisites only, do not build'
+            )
+    parser.add_argument(
+            '--version',
+            action='version',
+            help='Prints the version of the build script.',
+            version=f"%(prog)s {__version__}"
             )
 
     args = parser.parse_args()
