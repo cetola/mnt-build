@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 
 # ANSI color codes for terminal output
