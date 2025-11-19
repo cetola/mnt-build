@@ -1,0 +1,9 @@
+add_drivers+=" nvme nvme_core nvme_keyring nvme_auth "
+
+#add_drivers+=" pcie_dw_imx dw_pcie imx_pcie "
+
+#add_dracutmodules+=" crypt lvm "
+
+no_hostonly="yes"
+dracut_debug="yes"
+dracut_verbose="yes"
