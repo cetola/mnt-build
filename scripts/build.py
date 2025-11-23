@@ -418,12 +418,6 @@ class KernelBuilder:
 
         os.chdir(lpc_dir)
 
-        # Update repository
-        self.logger.info("Updating LPC repository...")
-        result = self.run_command(['git', 'pull'], check=False)
-        if result.returncode != 0:
-            self.logger.warning("Git pull failed or already up to date")
-
         # Build module
         self.logger.info("Compiling LPC module...")
         self.run_command([
@@ -447,12 +441,6 @@ class KernelBuilder:
         qcacld2_dir = self.config.build_dir / "qcacld2"
 
         os.chdir(qcacld2_dir)
-
-        # Update repository
-        self.logger.info("Updating QCACLD2 repository...")
-        result = self.run_command(['git', 'pull'], check=False)
-        if result.returncode != 0:
-            self.logger.warning("Git pull failed or already up to date")
 
         # Build module
         self.logger.info("Compiling QCACLD2 module...")
