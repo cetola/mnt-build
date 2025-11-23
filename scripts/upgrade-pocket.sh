@@ -1,13 +1,21 @@
 #!/bin/bash
 #Run this from the target machine from a directory with the tarball in it.
+#Probably don't run this in the root directory. Seriously, read the code.
+#This is a work in progress and will be a PKGBUILD someday.
 export MNTVER=6.17.8
 export KVER=$MNTVER-dirty
+echo "Extracting..."
 tar -xvzf kernel-$MNTVER-mnt.tar.gz
+sync && sync
 echo "Copy kernel modules: $KVER"
 sudo cp -r lib/modules/$KVER /lib/modules/
 sudo mkdir /lib/modules/$KVER/extra
 sudo cp reform2_lpc.ko /lib/modules/$KVER/extra/
 sudo cp wlan.ko /lib/modules/$KVER/extra/
+sync && sync
+echo "Copy the firmware and blacklist files."
+sudo cp -r ./usr /
+sudo cp -r ./etc /
 sync && sync
 echo "Backup old image, initramfs, and dtb"
 sudo cp /boot/Image-testing /boot/Image-old

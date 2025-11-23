@@ -518,6 +518,18 @@ class KernelBuilder:
                     arcname="wlan.ko"
                     )
 
+            # Add WiFi firmware 
+            tar.add(
+                    self.config.build_dir / "qcacld2/debian-meta/usr",
+                    arcname="usr"
+                    )
+
+            # Add atheros blacklist
+            tar.add(
+                    self.config.build_dir / "qcacld2/debian-meta/etc/modprobe.d/reform-qcacld2.conf",
+                    arcname="etc/modprobe.d/reform-qcacld2.conf"
+                    )
+
             # Add modules directory
             tar.add(
                     self.config.linux_dir / "modules/lib/modules",
