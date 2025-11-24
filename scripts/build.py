@@ -19,6 +19,8 @@ from typing import List, Optional, Tuple
 
 __version__ = "0.1.1"
 
+DEFAULT_KERNEL_VERSION = '6.17.9'
+
 
 # ANSI color codes for terminal output
 class Colors:
@@ -553,8 +555,8 @@ def main():
     parser.add_argument(
             'version',
             nargs='?',
-            default='6.17.8',
-            help='Kernel version to build (default: 6.17.8)'
+            default=DEFAULT_KERNEL_VERSION,
+            help=f'Kernel version to build (default: {DEFAULT_KERNEL_VERSION})'
             )
     parser.add_argument(
             '--build-dir',
