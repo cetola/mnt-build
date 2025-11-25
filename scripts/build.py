@@ -333,15 +333,17 @@ class KernelBuilder:
 
         os.chdir(self.config.linux_dir)
 
-        # Fetch tags
-        self.logger.info("Fetching git tags...")
-        self.run_command(['git', 'fetch', '--tags'])
 
         # Reset repository
         self.logger.info("Resetting repository state...")
         self.run_command(['git', 'reset', '--hard', 'HEAD'])
         self.run_command(['git', 'clean', '-fd'])
         self.run_command(['git', 'checkout', 'master'])
+        self.run_command(['git', 'tag', '-d', f'v{self.config.version}'], check=False)
+
+        # Fetch tags
+        self.logger.info("Fetching git tags...")
+        self.run_command(['git', 'fetch', '--tags'])
 
         # Checkout version
         branch_name = f"pocket-reform-{self.config.version}"
@@ -382,6 +384,13 @@ class KernelBuilder:
         # self.logger.info("Running olddefconfig...")
         # self.run_command(['make', f'ARCH={self.arch}', 'olddefconfig'],
         #                 cwd=self.config.linux_dir, stream_output=True)
+
+        # Commit changes
+        self.logger.info("Create git tag and commit.")
+        self.run_command(['git', 'add', '--all'])
+        self.run_command(['git', 'commit', '-s', '-m', f'MNT Pocket Arch {self.config.version}'])
+        self.run_command(['git', 'tag', '-d', f'v{self.config.version}'], check=False)
+        self.run_command(['git', 'tag', '-a', f'v{self.config.version}', '-m', f'MNT Pocket Arch {self.config.version}'])
 
         # Compile kernel
         self.logger.info(f"Compiling kernel with {self.config.jobs} jobs (this may take a while)...")
