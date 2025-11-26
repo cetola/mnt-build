@@ -5,9 +5,8 @@ import sys
 import shutil
 import subprocess
 import tarfile
+import argparse
 from pathlib import Path
-
-KERNEL_SRC = Path("~/mnt-build/linux").expanduser()
 
 ARCH = "arm64"
 CROSS_COMPILE = "aarch64-linux-gnu-"
@@ -27,6 +26,49 @@ FILES_TO_COPY = [
     "System.map",
     "Kconfig", 
 ]
+
+VERBOSE = False
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(
+        description="Package kernel headers for out-of-tree module compilation",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s
+  %(prog)s --pkgrel 2
+  %(prog)s -p 3 --kpath /path/to/linux
+        """
+    )
+    
+    parser.add_argument(
+        '-p', '--pkgrel',
+        type=int,
+        default=1,
+        metavar='N',
+        help='Package release number (must be a positive integer, default: 1)'
+    )
+    
+    parser.add_argument(
+        '-k', '--kpath',
+        type=str,
+        default="~/mnt-build/linux",
+        metavar='PATH',
+        help='Path to kernel source directory (default: ~/mnt-build/linux)'
+    )
+    
+    parser.add_argument(
+        '-v', '--verbose',
+        action='store_true',
+        help='Enable verbose output (show all copy operations)'
+    )
+    
+    args = parser.parse_args()
+    
+    if args.pkgrel < 1:
+        parser.error("pkgrel must be a positive integer (>= 1)")
+    
+    return args
 
 def read_kernel_release(src: Path) -> str:
     major = minor = patch = extra = None
@@ -89,9 +131,11 @@ def copy_selected(src: Path, dst: Path, relative: str):
     s = src / relative
     d = dst / relative
     if not s.exists():
-        print(f"[WARN] Skipping missing {s}")
+        if VERBOSE:
+            print(f"[WARN] Skipping missing {s}")
         return
-    print(f"[COPY] {s} → {d}")
+    if VERBOSE:
+        print(f"[COPY] {s} → {d}")
     if s.is_dir():
         shutil.copytree(s, d, symlinks=True)
     else:
@@ -101,7 +145,8 @@ def copy_selected(src: Path, dst: Path, relative: str):
 
 def copy_kconfig_files(src: Path, dst: Path):
     """Copy all Kconfig* files throughout the tree."""
-    print("=== Copying all Kconfig files ===")
+    if VERBOSE:
+        print("=== Copying all Kconfig files ===")
     for kconfig in src.rglob("Kconfig*"):
         # Skip Kconfig files in directories we're already copying wholesale
         rel_path = kconfig.relative_to(src)
@@ -119,20 +164,21 @@ def copy_kconfig_files(src: Path, dst: Path):
         dst_kconfig = dst / rel_path
         dst_kconfig.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(kconfig, dst_kconfig)
-        print(f"[COPY] {kconfig} → {dst_kconfig}")
+        if VERBOSE:
+            print(f"[COPY] {kconfig} → {dst_kconfig}")
 
 
 def main():
-    pkgrel = 1
-    if len(sys.argv) > 1:
-        try:
-            pkgrel = int(sys.argv[1])
-        except ValueError:
-            print(f"ERROR: Invalid pkgrel '{sys.argv[1]}'. Must be a number.")
-            print(f"Usage: {sys.argv[0]} [pkgrel]")
-            sys.exit(1)
+    global VERBOSE
+    
+    args = parse_arguments()
+    
+    VERBOSE = args.verbose
+    pkgrel = args.pkgrel
+    KERNEL_SRC = Path(args.kpath).expanduser().resolve()
     
     print(f"Using pkgrel: {pkgrel}")
+    print(f"Using kernel source: {KERNEL_SRC}")
 
     if not KERNEL_SRC.exists():
         raise SystemExit(f"ERROR: Kernel source path does not exist: {KERNEL_SRC}")
@@ -166,7 +212,8 @@ def main():
 
     print("\nDone.")
     print(f"Created: {OUTPUT_TARBALL}")
-    print("Staging directory: kernel_headers_staging")
+    if VERBOSE:
+        print("Staging directory: kernel_headers_staging")
 
 
 if __name__ == "__main__":
