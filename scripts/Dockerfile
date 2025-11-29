@@ -22,4 +22,4 @@ RUN useradd -m -G wheel -s /bin/bash builder && \
     echo '%wheel ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
 
 USER builder
-WORKDIR /build
+WORKDIR /home/builder/mnt-build
