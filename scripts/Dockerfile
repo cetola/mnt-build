@@ -16,7 +16,7 @@ RUN pacman -Sy --noconfirm archlinux-keyring && \
     pacman -Scc --noconfirm
 
 
-RUN useradd -m -G wheel -s /bin/bash builder && \
+RUN useradd -m -u 1001 -G wheel -s /bin/bash builder && \
     echo '%wheel ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
 
 RUN git config --global user.email "build@bot.net" && \
