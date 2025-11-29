@@ -342,8 +342,8 @@ class KernelBuilder:
         self.run_command(['git', 'tag', '-d', f'v{self.config.version}'], check=False)
 
         # Fetch tags
-        self.logger.info("Fetching git tags...")
-        self.run_command(['git', 'fetch', '--tags'])
+        self.logger.info(f"Fetching git tag v{self.config.version}...")
+        self.run_command(['git', 'fetch', 'origin', f'refs/tags/v{self.config.version}'])
 
         # Checkout version
         branch_name = f"pocket-reform-{self.config.version}"
@@ -351,6 +351,7 @@ class KernelBuilder:
 
         # Delete branch if it exists
         self.run_command(['git', 'branch', '-D', branch_name], check=False)
+        self.run_command(['pwd'], check=False)
         self.run_command(['git', 'checkout', '-b', branch_name, f'tags/v{self.config.version}'])
 
         # Apply patches
