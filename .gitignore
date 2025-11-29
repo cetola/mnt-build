@@ -4,3 +4,4 @@ build-*.log
 container*.log
 __pycache__/
 *.pyc
+kernel_headers_staging
