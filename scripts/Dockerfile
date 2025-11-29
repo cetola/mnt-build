@@ -1,6 +1,5 @@
 FROM archlinux:latest
 
-# Update and install build tools
 RUN pacman -Sy --noconfirm archlinux-keyring && \
     pacman-key --init && \
     pacman-key --populate archlinux && \
@@ -17,9 +16,14 @@ RUN pacman -Sy --noconfirm archlinux-keyring && \
     pacman -Scc --noconfirm
 
 
-# Set up a non-root user (optional but recommended)
 RUN useradd -m -G wheel -s /bin/bash builder && \
     echo '%wheel ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
 
+RUN git config --global user.email "build@bot.net" && \
+    git config --global user.name "Build Bot"
+
 USER builder
 WORKDIR /home/builder/mnt-build
+
+RUN git config --global user.email "build@bot.net" && \
+    git config --global user.name "Build Bot"
