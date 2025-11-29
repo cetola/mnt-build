@@ -32,10 +32,13 @@ git submodule update --init --recursive
 The first time you build, your config will not be correct. I'm still working on a portable way of doing this in the script. For now, run this:
 
 ```bash
+## From a release tag [KERN_VER]-[PKGREL]-mnt-pocket
+## e.g. Releases 6.17.9-2-mnt-pocket
 cd linux
+git checkout -b my-branch-name tags/v[KERN_VER]
 cp ../configs/defconfig .config
 make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
-cp .config ../configs/config-6.17.9-mnt-reform-arm64 ##Or whatever release you are on
+cp .config ../configs/config-[KERN_VER]-mnt-reform-arm64
 cd ..
 ./scripts/build.py
 ```
@@ -58,5 +61,7 @@ Likewise for the kernel headers you can use [this PKGBUILD](https://github.com/c
 ## Notes
 
 This is very much a work in progress. Do not try to use this unless you are on a release tag. Even then, YMMV.
+
+There is a container in the scripts directory if you happen to be building for Arch and care about toolchain skew.
 
 These scripts are an automation of a full guide that I posted on the [MNT Community Forum](https://community.mnt.re/t/guide-how-to-arch-linux-on-the-pocket-reform/3918). See there for more details. See the [Arch Linux Arm](https://archlinuxarm.org/) site to grab a filesystem.
