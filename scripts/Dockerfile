@@ -1,5 +1,8 @@
 FROM archlinux:latest
 
+ARG UID=1001
+ARG USERNAME=builder
+
 RUN pacman -Sy --noconfirm archlinux-keyring && \
     pacman-key --init && \
     pacman-key --populate archlinux && \
@@ -15,15 +18,15 @@ RUN pacman -Sy --noconfirm archlinux-keyring && \
     pacman -S --noconfirm qemu-full && \
     pacman -Scc --noconfirm
 
-
-RUN useradd -m -u 1001 -G wheel -s /bin/bash builder && \
+RUN useradd -m -u ${UID} -G wheel -s /bin/bash ${USERNAME} && \
     echo '%wheel ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
 
 RUN git config --global user.email "build@bot.net" && \
     git config --global user.name "Build Bot"
 
-USER builder
-WORKDIR /home/builder/mnt-build
+USER ${USERNAME}
+WORKDIR /home/${USERNAME}/mnt-build
 
 RUN git config --global user.email "build@bot.net" && \
     git config --global user.name "Build Bot"
+
