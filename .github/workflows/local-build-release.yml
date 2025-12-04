@@ -45,7 +45,8 @@ jobs:
           mkdir -p release-artifacts/logs
 
           echo "Copying logs..."
-          find . -name "*.log" -print -exec cp {} release-artifacts/logs/ \;
+          find . -maxdepth 1 -name "*.log" -type f -print -exec cp {} release-artifacts/logs/ \;
+          find ./scripts -name "*.log" -type f -print -exec cp {} release-artifacts/logs/ \;
 
           echo "Log archive contents:"
           ls -al release-artifacts/logs

@@ -100,7 +100,9 @@ jobs:
         if: always()
         run: |
           mkdir -p build-logs
-          scp ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/*.log build-logs/ || true
+          ssh ubuntu@${{ steps.launch-instance.outputs.public_ip }} 'find ~/mnt-build -maxdepth 1 -name "*.log" -type f -exec cp {} /tmp/ \;' || true
+          ssh ubuntu@${{ steps.launch-instance.outputs.public_ip }} 'find ~/mnt-build/scripts -name "*.log" -type f -exec cp {} /tmp/ \;' || true
+          scp ubuntu@${{ steps.launch-instance.outputs.public_ip }}:/tmp/*.log build-logs/ 2>/dev/null || true
           echo "Collected logs:"
           ls -lh build-logs/
 
