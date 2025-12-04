@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 
+import logging
 import os
 import sys
 import shutil
 import subprocess
 import tarfile
 import argparse
+from datetime import datetime
 from pathlib import Path
 
 ARCH = "arm64"
@@ -28,6 +30,56 @@ FILES_TO_COPY = [
 ]
 
 VERBOSE = False
+
+
+# ANSI color codes for terminal output
+class Colors:
+    RED = '\033[0;31m'
+    GREEN = '\033[0;32m'
+    YELLOW = '\033[1;33m'
+    BLUE = '\033[0;34m'
+    RESET = '\033[0m'
+
+
+class ColoredFormatter(logging.Formatter):
+    """Custom formatter with colors for different log levels."""
+
+    FORMATS = {
+        logging.DEBUG: f"{Colors.BLUE}[DEBUG]{Colors.RESET} %(asctime)s - %(message)s",
+        logging.INFO: f"{Colors.BLUE}[INFO]{Colors.RESET} %(asctime)s - %(message)s",
+        logging.WARNING: f"{Colors.YELLOW}[WARN]{Colors.RESET} %(asctime)s - %(message)s",
+        logging.ERROR: f"{Colors.RED}[ERROR]{Colors.RESET} %(asctime)s - %(message)s",
+        logging.CRITICAL: f"{Colors.RED}[CRITICAL]{Colors.RESET} %(asctime)s - %(message)s",
+    }
+
+    def format(self, record):
+        log_fmt = self.FORMATS.get(record.levelno)
+        formatter = logging.Formatter(log_fmt, datefmt='%Y-%m-%d %H:%M:%S')
+        return formatter.format(record)
+
+
+def setup_logging(log_file: Path) -> logging.Logger:
+    """Setup logging to both console and file."""
+    logger = logging.getLogger('headers_gen')
+    logger.setLevel(logging.DEBUG)
+
+    # Console handler with colors
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(ColoredFormatter())
+
+    # File handler without colors
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(
+        logging.Formatter('%(levelname)s %(asctime)s - %(message)s',
+                          datefmt='%Y-%m-%d %H:%M:%S')
+    )
+
+    logger.addHandler(console_handler)
+    logger.addHandler(file_handler)
+
+    return logger
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
@@ -71,27 +123,33 @@ Examples:
     return args
 
 def read_kernel_release(src: Path) -> str:
-    major = minor = patch = extra = None
+    major = minor = patch = None
     mf = src / "Makefile"
 
-    if mf.exists():
-        with mf.open() as f:
-            for line in f:
-                if line.startswith("VERSION ="):
-                    major = line.split("=")[1].strip()
-                elif line.startswith("PATCHLEVEL ="):
-                    minor = line.split("=")[1].strip()
-                elif line.startswith("SUBLEVEL ="):
-                    patch = line.split("=")[1].strip()
+    if not mf.exists():
+        raise SystemExit(f"ERROR: Kernel Makefile not found: {mf}")
 
-                if major is not None and minor is not None and patch is not None:
-                    break
+    with mf.open() as f:
+        for line in f:
+            if line.startswith("VERSION ="):
+                major = line.split("=")[1].strip()
+            elif line.startswith("PATCHLEVEL ="):
+                minor = line.split("=")[1].strip()
+            elif line.startswith("SUBLEVEL ="):
+                patch = line.split("=")[1].strip()
 
-    version = f"{major}.{minor}.{patch}"
+            if major is not None and minor is not None and patch is not None:
+                break
 
-    return version
+    if major is None or minor is None or patch is None:
+        raise SystemExit(
+            f"ERROR: Could not parse kernel version from {mf}. "
+            f"Found: VERSION={major}, PATCHLEVEL={minor}, SUBLEVEL={patch}"
+        )
 
-def prepare_kernel_headers(src: Path):
+    return f"{major}.{minor}.{patch}"
+
+def prepare_kernel_headers(src: Path, logger: logging.Logger):
     """Run make prepare and make modules_prepare to generate all needed files."""
     env = os.environ.copy()
     env["ARCH"] = ARCH
@@ -99,7 +157,7 @@ def prepare_kernel_headers(src: Path):
     
     num_jobs = os.cpu_count() or 1
     
-    print(f"=== Running 'make prepare' with ARCH={ARCH} CROSS_COMPILE={CROSS_COMPILE} -j{num_jobs} ===")
+    logger.info(f"Running 'make prepare' with ARCH={ARCH} CROSS_COMPILE={CROSS_COMPILE} -j{num_jobs}")
     result = subprocess.run(
         ["make", f"-j{num_jobs}", "prepare"],
         cwd=src,
@@ -108,11 +166,11 @@ def prepare_kernel_headers(src: Path):
         text=True
     )
     if result.returncode != 0:
-        print(f"STDOUT: {result.stdout}")
-        print(f"STDERR: {result.stderr}")
+        logger.error(f"STDOUT: {result.stdout}")
+        logger.error(f"STDERR: {result.stderr}")
         raise SystemExit(f"ERROR: 'make prepare' failed with exit code {result.returncode}")
     
-    print(f"=== Running 'make modules_prepare' with ARCH={ARCH} CROSS_COMPILE={CROSS_COMPILE} -j{num_jobs} ===")
+    logger.info(f"Running 'make modules_prepare' with ARCH={ARCH} CROSS_COMPILE={CROSS_COMPILE} -j{num_jobs}")
     result = subprocess.run(
         ["make", f"-j{num_jobs}", "modules_prepare"],
         cwd=src,
@@ -121,21 +179,21 @@ def prepare_kernel_headers(src: Path):
         text=True
     )
     if result.returncode != 0:
-        print(f"STDOUT: {result.stdout}")
-        print(f"STDERR: {result.stderr}")
+        logger.error(f"STDOUT: {result.stdout}")
+        logger.error(f"STDERR: {result.stderr}")
         raise SystemExit(f"ERROR: 'make modules_prepare' failed with exit code {result.returncode}")
     
-    print("Kernel headers prepared successfully!")
+    logger.info(f"{Colors.GREEN}✓{Colors.RESET} Kernel headers prepared successfully")
 
-def copy_selected(src: Path, dst: Path, relative: str):
+def copy_selected(src: Path, dst: Path, relative: str, logger: logging.Logger):
     s = src / relative
     d = dst / relative
     if not s.exists():
         if VERBOSE:
-            print(f"[WARN] Skipping missing {s}")
+            logger.warning(f"Skipping missing {s}")
         return
     if VERBOSE:
-        print(f"[COPY] {s} → {d}")
+        logger.debug(f"Copying {s} → {d}")
     if s.is_dir():
         shutil.copytree(s, d, symlinks=True)
     else:
@@ -143,10 +201,10 @@ def copy_selected(src: Path, dst: Path, relative: str):
         shutil.copy2(s, d)
 
 
-def copy_kconfig_files(src: Path, dst: Path):
+def copy_kconfig_files(src: Path, dst: Path, logger: logging.Logger):
     """Copy all Kconfig* files throughout the tree."""
     if VERBOSE:
-        print("=== Copying all Kconfig files ===")
+        logger.info("Copying all Kconfig files")
     for kconfig in src.rglob("Kconfig*"):
         # Skip Kconfig files in directories we're already copying wholesale
         rel_path = kconfig.relative_to(src)
@@ -165,7 +223,7 @@ def copy_kconfig_files(src: Path, dst: Path):
         dst_kconfig.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(kconfig, dst_kconfig)
         if VERBOSE:
-            print(f"[COPY] {kconfig} → {dst_kconfig}")
+            logger.debug(f"Copying {kconfig} → {dst_kconfig}")
 
 
 def main():
@@ -177,17 +235,26 @@ def main():
     pkgrel = args.pkgrel
     KERNEL_SRC = Path(args.kpath).expanduser().resolve()
     
-    print(f"Using pkgrel: {pkgrel}")
-    print(f"Using kernel source: {KERNEL_SRC}")
-
+    # Determine version first so we can include it in the log filename
     if not KERNEL_SRC.exists():
         raise SystemExit(f"ERROR: Kernel source path does not exist: {KERNEL_SRC}")
-
-    print("=== Determining kernel version ===")
+    
     version = read_kernel_release(KERNEL_SRC)
-    print(f"Kernel release version: {version}")
+    
+    # Setup logging with timestamp and version in filename
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    log_file = Path(f"headers-gen-{version}-{timestamp}.log")
+    logger = setup_logging(log_file)
+    
+    logger.info("=" * 60)
+    logger.info("Starting kernel headers generation")
+    logger.info(f"Package release: {pkgrel}")
+    logger.info(f"Kernel source: {KERNEL_SRC}")
+    logger.info(f"Kernel version: {version}")
+    logger.info(f"Log file: {log_file}")
+    logger.info("=" * 60)
 
-    prepare_kernel_headers(KERNEL_SRC)
+    prepare_kernel_headers(KERNEL_SRC, logger)
 
     OUTPUT_TARBALL = Path(f"headers-{version}-{pkgrel}-mnt.tar.gz")
     staging_dir = Path("kernel_headers_staging")
@@ -196,24 +263,27 @@ def main():
         shutil.rmtree(staging_dir)
     staging_dir.mkdir()
 
-    print("=== Copying required directories ===")
+    logger.info("Copying required directories")
     for d in DIRS_TO_COPY:
-        copy_selected(KERNEL_SRC, staging_dir, d)
+        copy_selected(KERNEL_SRC, staging_dir, d, logger)
 
-    print("=== Copying required files ===")
+    logger.info("Copying required files")
     for f in FILES_TO_COPY:
-        copy_selected(KERNEL_SRC, staging_dir, f)
+        copy_selected(KERNEL_SRC, staging_dir, f, logger)
 
-    copy_kconfig_files(KERNEL_SRC, staging_dir)
+    copy_kconfig_files(KERNEL_SRC, staging_dir, logger)
 
-    print(f"=== Creating tarball: {OUTPUT_TARBALL} ===")
+    logger.info(f"Creating tarball: {OUTPUT_TARBALL}")
     with tarfile.open(OUTPUT_TARBALL, "w:gz") as tar:
         tar.add(staging_dir, arcname=f"linux-{version}")
 
-    print("\nDone.")
-    print(f"Created: {OUTPUT_TARBALL}")
+    logger.info("=" * 60)
+    logger.info(f"{Colors.GREEN}✓ Headers generation complete!{Colors.RESET}")
+    logger.info(f"Output: {OUTPUT_TARBALL}")
+    logger.info(f"Log file: {log_file}")
     if VERBOSE:
-        print("Staging directory: kernel_headers_staging")
+        logger.info("Staging directory: kernel_headers_staging")
+    logger.info("=" * 60)
 
 
 if __name__ == "__main__":
