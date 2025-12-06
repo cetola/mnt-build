@@ -1,9 +1,6 @@
 name: Remote Build and Release
 
 on:
-  push:
-    tags:
-      - '*'
   workflow_dispatch:
 
 permissions:
