@@ -11,11 +11,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -28,20 +23,27 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
+          # Verify the key format
+          head -1 ~/.ssh/id_rsa
+          tail -1 ~/.ssh/id_rsa
 
       - name: Launch EC2 Spot Instance
         id: launch-instance
         run: |
           INSTANCE_ID=$(aws ec2 run-instances \
             --image-id ami-00f46ccd1cbfb363e \
-            --instance-type c6i.4xlarge \
-            --instance-market-options '{"MarketType":"spot","SpotOptions":{"SpotInstanceType":"one-time","MaxPrice":"0.30"}}' \
+            --instance-type c6i.8xlarge \
+            --instance-market-options '{"MarketType":"spot","SpotOptions":{"SpotInstanceType":"one-time","MaxPrice":"0.70"}}' \
             --key-name github-actions-runner \
             --security-group-ids sg-09c18dc7c46327e69 \
             --subnet-id subnet-fa96bbd2 \
             --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":30,"VolumeType":"gp3"}}]' \
             --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=github-runner}]' \
             --user-data '#!/bin/bash
+              # Change ubuntu user UID to 1001 to match GitHub Actions runner
+              usermod -u 1001 ubuntu
+              groupmod -g 1001 ubuntu
+              chown -R ubuntu:ubuntu /home/ubuntu
               apt-get update
               apt-get install -y docker.io git
               systemctl start docker
@@ -51,23 +53,36 @@ jobs:
           
           echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
           echo "Launched instance: $INSTANCE_ID"
-
           aws ec2 wait instance-running --instance-ids $INSTANCE_ID
-
           PUBLIC_IP=$(aws ec2 describe-instances \
             --instance-ids $INSTANCE_ID \
             --query 'Reservations[0].Instances[0].PublicIpAddress' \
             --output text)
-
           echo "public_ip=$PUBLIC_IP" >> $GITHUB_OUTPUT
           echo "Instance running at: $PUBLIC_IP"
+          
+          # Wait for SSH to be ready
+          echo "Waiting for SSH to be ready..."
+          for i in {1..30}; do
+            if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i ~/.ssh/id_rsa ubuntu@$PUBLIC_IP echo "SSH Ready" 2>/dev/null; then
+              echo "SSH is ready!"
+              break
+            fi
+            echo "Waiting for SSH... attempt $i/30"
+            sleep 10
+          done
 
-          sleep 60
-
-      - name: Copy repository to instance
+      - name: Setup build on instance
         run: |
           ssh-keyscan -H ${{ steps.launch-instance.outputs.public_ip }} >> ~/.ssh/known_hosts
-          scp -r $GITHUB_WORKSPACE ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/
+          ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }} << 'EOF'
+            cd ~
+            git clone --depth 1 --no-checkout https://github.com/${{ github.repository }} mnt-build
+            cd mnt-build
+            git fetch --depth 1 origin ${{ github.sha }}
+            git checkout ${{ github.sha }}
+            git submodule update --init --recursive --depth 1
+          EOF
 
       - name: Build the container 
         id: build_container
@@ -84,7 +99,7 @@ jobs:
         run: |
           ssh ubuntu@${{ steps.launch-instance.outputs.public_ip }} << 'EOF'
             cd ~/mnt-build/scripts
-            ./run-container.sh "cd scripts && python3 build-auto.py"
+            ./run-container.sh "python3 build-auto.py"
           EOF
 
       - name: Run headers-gen.py on instance
@@ -93,25 +108,33 @@ jobs:
         run: |
           ssh ubuntu@${{ steps.launch-instance.outputs.public_ip }} << 'EOF'
             cd ~/mnt-build/scripts
-            ./run-container.sh "cd scripts && python3 headers-gen.py"
+            ./run-container.sh "python3 headers-gen.py"
           EOF
 
       - name: Collect logs
         if: always()
         run: |
           mkdir -p build-logs
-          ssh ubuntu@${{ steps.launch-instance.outputs.public_ip }} 'find ~/mnt-build -maxdepth 1 -name "*.log" -type f -exec cp {} /tmp/ \;' || true
-          ssh ubuntu@${{ steps.launch-instance.outputs.public_ip }} 'find ~/mnt-build/scripts -name "*.log" -type f -exec cp {} /tmp/ \;' || true
-          scp ubuntu@${{ steps.launch-instance.outputs.public_ip }}:/tmp/*.log build-logs/ 2>/dev/null || true
+          ssh ubuntu@${{ steps.launch-instance.outputs.public_ip }} << 'EOF'
+            find ~/mnt-build -maxdepth 1 -name "*.log" -type f -exec cp {} /tmp/ \; || true
+            find ~/mnt-build/scripts -name "*.log" -type f -exec cp {} /tmp/ \; || true
+          EOF
+          scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:/tmp/*.log build-logs/ 2>/dev/null || true
           echo "Collected logs:"
           ls -lh build-logs/
 
-      - name: Copy artifacts back
-        if: ${{ steps.run_build.outcome == 'success' && steps.run_headers.outcome == 'success' }}
+      - name: Copy kernel artifacts back
+        if: ${{ steps.run_build.outcome == 'success' }}
         run: |
           mkdir -p release-artifacts
-          scp ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/headers-*-mnt.tar.gz release-artifacts/ || true
-          scp ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/kernel-*-mnt.tar.gz release-artifacts/ || true
+          scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/kernel-*-mnt.tar.gz release-artifacts/ || true
+          ls -lh release-artifacts/
+
+      - name: Copy headers artifacts back
+        if: ${{ steps.run_headers.outcome == 'success' }}
+        run: |
+          mkdir -p release-artifacts
+          scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/headers-*-mnt.tar.gz release-artifacts/ || true
           ls -lh release-artifacts/
 
       - name: Terminate EC2 instance

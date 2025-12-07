@@ -21,12 +21,9 @@ RUN pacman -Sy --noconfirm archlinux-keyring && \
 RUN useradd -m -u ${UID} -G wheel -s /bin/bash ${USERNAME} && \
     echo '%wheel ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
 
-RUN git config --global user.email "build@bot.net" && \
-    git config --global user.name "Build Bot"
-
 USER ${USERNAME}
 WORKDIR /home/${USERNAME}/mnt-build
 
 RUN git config --global user.email "build@bot.net" && \
-    git config --global user.name "Build Bot"
-
+    git config --global user.name "Build Bot" && \
+    git config --global --add safe.directory '*'
