@@ -36,7 +36,7 @@ jobs:
             --image-id ami-00f46ccd1cbfb363e \
             --instance-type c6i.4xlarge \
             --instance-market-options '{"MarketType":"spot","SpotOptions":{"SpotInstanceType":"one-time","MaxPrice":"0.30"}}' \
-            --key-name YOUR_KEY_NAME \
+            --key-name github-actions-runner \
             --security-group-ids sg-09c18dc7c46327e69 \
             --subnet-id subnet-fa96bbd2 \
             --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":30,"VolumeType":"gp3"}}]' \
