@@ -446,6 +446,11 @@ class KernelBuilder:
         """Create deployment tarball."""
         self.logger.info("Creating deployment tarball...")
 
+        def exclude_build(tarinfo):
+            if tarinfo.issym() and tarinfo.name.endswith("/build"):
+                return None
+            return tarinfo
+
         os.chdir(self.config.linux_dir)
 
         # Verify all required files exist
@@ -507,7 +512,8 @@ class KernelBuilder:
             # Add modules directory
             tar.add(
                     self.config.linux_dir / "modules/lib/modules",
-                    arcname="lib/modules"
+                    arcname="lib/modules",
+                    filter=exclude_build
                     )
 
             # Add the config file
