@@ -21,7 +21,7 @@ from typing import List, Optional, Tuple
 
 __version__ = "0.1.1"
 
-DEFAULT_KERNEL_VERSION = '6.17.10'
+DEFAULT_KERNEL_VERSION = '6.17.11'
 
 
 # ANSI color codes for terminal output
