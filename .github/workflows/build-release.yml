@@ -137,7 +137,7 @@ jobs:
         if: ${{ steps.run_headers.outcome == 'success' }}
         run: |
           mkdir -p release-artifacts
-          scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/headers-*-mnt.tar.gz release-artifacts/ || true
+          scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/scripts/headers-*-mnt.tar.gz release-artifacts/ || true
           ls -lh release-artifacts/
 
       - name: Terminate EC2 instance
