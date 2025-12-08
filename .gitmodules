@@ -5,7 +5,7 @@
 	branch = binary-deb
 [submodule "linux"]
 	path = linux
-	url = https://github.com/gregkh/linux.git
+	url = https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
 	ignore = dirty
 	branch = master
 [submodule "reform-tools"]
