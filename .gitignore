@@ -1,6 +1,7 @@
 # Ignore build artifacts
 *.tar.gz
 build-*.log
+headers-*.log
 container*.log
 __pycache__/
 *.pyc
