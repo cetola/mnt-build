@@ -17,10 +17,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-__version__ = "0.1.5"
+__version__ = "0.1.6"
 
 DEFAULT_KERNEL_VERSION = '6.17.11'
-DEFAULT_PKGREL = 1
+DEFAULT_PKGREL = 2
 
 
 # ANSI color codes for terminal output
