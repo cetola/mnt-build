@@ -20,6 +20,7 @@ from typing import List, Optional, Tuple
 __version__ = "0.1.5"
 
 DEFAULT_KERNEL_VERSION = '6.17.11'
+DEFAULT_PKGREL = 1
 
 
 # ANSI color codes for terminal output
@@ -43,15 +44,19 @@ class BuildConfig:
     output_tar: Path
     log_file: Path
     jobs: int
+    pkgrel: int
 
     @classmethod
-    def create(cls, version: str, build_dir: Optional[Path] = None, jobs: Optional[int] = None):
+    def create(cls, version: str, build_dir: Optional[Path] = None, jobs: Optional[int] = None, pkgrel: Optional[int] = None):
         """Create build configuration with sensible defaults."""
         if build_dir is None:
             build_dir = Path.home() / "mnt-build"
 
         if jobs is None:
             jobs = os.cpu_count() or 4
+
+        if pkgrel is None:
+            pkgrel = DEFAULT_PKGREL
 
         linux_dir = build_dir / "linux"
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -67,9 +72,10 @@ class BuildConfig:
                 patches_dir=build_dir / "reform-debian-packages" / "linux" / f"patches{major_minor}",
                 config_file=build_dir / "configs" / f"config-{version}-mnt-reform-arm64",
                 dtb_file=linux_dir / "arch/arm64/boot/dts/freescale/imx8mp-mnt-pocket-reform.dtb",
-                output_tar=linux_dir / f"kernel-{version}-mnt.tar.gz",
+                output_tar=linux_dir / f"kernel-{version}-{pkgrel}-mnt.tar.gz",
                 log_file=build_dir / f"build-{version}-{timestamp}.log",
-                jobs=jobs
+                jobs=jobs,
+                pkgrel=pkgrel
                 )
 
 
@@ -584,6 +590,12 @@ def main():
             help='Number of parallel jobs (default: number of CPUs)'
             )
     parser.add_argument(
+            '--pkgrel',
+            type=int,
+            default=DEFAULT_PKGREL,
+            help=f'Package release number (default: {DEFAULT_PKGREL})'
+            )
+    parser.add_argument(
             '--dry-run',
             action='store_true',
             help='Check prerequisites only, do not build'
@@ -601,7 +613,8 @@ def main():
     config = BuildConfig.create(
             version=args.version,
             build_dir=args.build_dir,
-            jobs=args.jobs
+            jobs=args.jobs,
+            pkgrel=args.pkgrel
             )
 
     # Setup logging
@@ -615,6 +628,7 @@ def main():
         logger.info("=" * 60)
         logger.info("Starting kernel build process")
         logger.info(f"Version: {config.version}")
+        logger.info(f"Package release: {config.pkgrel}")
         logger.info(f"Build directory: {config.build_dir}")
         logger.info(f"Patches directory: {config.patches_dir}")
         logger.info(f"Log file: {config.log_file}")
