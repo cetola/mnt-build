@@ -161,7 +161,6 @@ class KernelBuilder:
         self.logger.debug(f"Running: {' '.join(cmd)} (in {cwd})")
 
         if not stream_output:
-            # existing behavior (short commands)
             try:
                 result = subprocess.run(
                         cmd,
@@ -185,7 +184,7 @@ class KernelBuilder:
 
         # stream_output == True: use Popen and stream lines to logger + file
         logfile_path = Path(self.config.log_file)
-        with open(logfile_path, "a", buffering=1) as logfile:  # line-buffered
+        with open(logfile_path, "a", buffering=1) as logfile:
             proc = subprocess.Popen(
                     cmd,
                     cwd=cwd,
@@ -332,32 +331,37 @@ class KernelBuilder:
                 f"{result.stderr}\n"
                 )
 
-    def build_kernel(self):
-        """Build the Linux kernel."""
+    def build_kernel(self, skip_git_operations: bool = False):
+        """Build the Linux kernel.
+        
+        Args:
+            skip_git_operations: If True, skip git reset/checkout operations.
+                                Assumes kernel is already at the correct version.
+        """
         self.logger.info(f"Building kernel {self.config.version}...")
         start_time = datetime.now()
 
         os.chdir(self.config.linux_dir)
 
+        if not skip_git_operations:
+            # Reset repository
+            self.logger.info("Resetting repository state...")
+            self.run_command(['git', 'reset', '--hard', 'HEAD'])
+            self.run_command(['git', 'clean', '-fd'])
+            self.run_command(['git', 'checkout', 'master'])
+            self.run_command(['git', 'tag', '-d', f'v{self.config.version}'], check=False)
 
-        # Reset repository
-        self.logger.info("Resetting repository state...")
-        self.run_command(['git', 'reset', '--hard', 'HEAD'])
-        self.run_command(['git', 'clean', '-fd'])
-        self.run_command(['git', 'checkout', 'master'])
-        self.run_command(['git', 'tag', '-d', f'v{self.config.version}'], check=False)
+            # Fetch tags
+            self.logger.info("Fetching git tags...")
+            self.run_command(['git', 'fetch', '--tags'])
 
-        # Fetch tags
-        self.logger.info("Fetching git tags...")
-        self.run_command(['git', 'fetch', '--tags'])
+            # Checkout version
+            branch_name = f"pocket-reform-{self.config.version}"
+            self.logger.info(f"Checking out kernel version v{self.config.version}...")
 
-        # Checkout version
-        branch_name = f"pocket-reform-{self.config.version}"
-        self.logger.info(f"Checking out kernel version v{self.config.version}...")
-
-        # Delete branch if it exists
-        self.run_command(['git', 'branch', '-D', branch_name], check=False)
-        self.run_command(['git', 'checkout', '-b', branch_name, f'tags/v{self.config.version}'])
+            # Delete branch if it exists
+            self.run_command(['git', 'branch', '-D', branch_name], check=False)
+            self.run_command(['git', 'checkout', '-b', branch_name, f'tags/v{self.config.version}'])
 
         # Apply patches
         patch_stats = self.apply_patches()
@@ -382,14 +386,6 @@ class KernelBuilder:
         # Copy config
         self.logger.info("Copying kernel config...")
         self.run_command(['cp', str(self.config.config_file), '.config'])
-
-        # Run olddefconfig
-        # Skipping defconfig for now. For now we'll use complete config files.
-        # Need to fiture out out to auto-generate a config without interactive
-        # prompts.
-        # self.logger.info("Running olddefconfig...")
-        # self.run_command(['make', f'ARCH={self.arch}', 'olddefconfig'],
-        #                 cwd=self.config.linux_dir, stream_output=True)
 
         # Commit changes
         self.logger.info("Create git tag and commit.")
@@ -567,6 +563,85 @@ class KernelBuilder:
                 )
 
 
+def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] = None,
+              jobs: Optional[int] = None, pkgrel: int = DEFAULT_PKGREL,
+              skip_git_operations: bool = False, dry_run: bool = False) -> int:
+    """Run the kernel build process.
+    
+    Args:
+        version: Kernel version to build
+        build_dir: Build directory (default: ~/mnt-build)
+        jobs: Number of parallel jobs (default: number of CPUs)
+        pkgrel: Package release number
+        skip_git_operations: If True, skip git reset/checkout operations
+        dry_run: If True, only check prerequisites, do not build
+        
+    Returns:
+        Exit code (0 for success, non-zero for failure)
+    """
+    # Create configuration
+    config = BuildConfig.create(
+            version=version,
+            build_dir=build_dir,
+            jobs=jobs,
+            pkgrel=pkgrel
+            )
+
+    # Setup logging
+    config.build_dir.mkdir(parents=True, exist_ok=True)
+    logger = setup_logging(config.log_file)
+
+    # Create builder
+    builder = KernelBuilder(config, logger)
+
+    try:
+        logger.info("=" * 60)
+        logger.info("Starting kernel build process")
+        logger.info(f"Version: {config.version}")
+        logger.info(f"Package release: {config.pkgrel}")
+        logger.info(f"Build directory: {config.build_dir}")
+        logger.info(f"Patches directory: {config.patches_dir}")
+        logger.info(f"Log file: {config.log_file}")
+        logger.info(f"Parallel jobs: {config.jobs}")
+        logger.info("=" * 60)
+
+        start_time = datetime.now()
+
+        # Check prerequisites
+        builder.check_prerequisites()
+
+        if dry_run:
+            logger.info("Dry run mode - exiting after prerequisites check")
+            return 0
+
+        # Build everything
+        builder.build_kernel(skip_git_operations=skip_git_operations)
+        builder.build_lpc_module()
+        builder.build_qcacld2_module()
+        builder.create_tarball()
+
+        # Summary
+        elapsed = (datetime.now() - start_time).total_seconds()
+        logger.info("=" * 60)
+        logger.info(f"{Colors.GREEN}✓ Build completed successfully in {elapsed:.0f} seconds!{Colors.RESET}")
+        logger.info(f"Output: {config.output_tar}")
+        logger.info(f"Log file: {config.log_file}")
+        logger.info("=" * 60)
+
+        return 0
+
+    except BuildError as e:
+        logger.error(f"Build failed: {e}")
+        logger.error(f"Check log file for details: {config.log_file}")
+        return 1
+    except KeyboardInterrupt:
+        logger.warning("Build interrupted by user")
+        return 130
+    except Exception as e:
+        logger.exception(f"Unexpected error: {e}")
+        return 1
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -609,67 +684,14 @@ def main():
 
     args = parser.parse_args()
 
-    # Create configuration
-    config = BuildConfig.create(
+    return run_build(
             version=args.version,
             build_dir=args.build_dir,
             jobs=args.jobs,
-            pkgrel=args.pkgrel
+            pkgrel=args.pkgrel,
+            skip_git_operations=False,
+            dry_run=args.dry_run
             )
-
-    # Setup logging
-    config.build_dir.mkdir(parents=True, exist_ok=True)
-    logger = setup_logging(config.log_file)
-
-    # Create builder
-    builder = KernelBuilder(config, logger)
-
-    try:
-        logger.info("=" * 60)
-        logger.info("Starting kernel build process")
-        logger.info(f"Version: {config.version}")
-        logger.info(f"Package release: {config.pkgrel}")
-        logger.info(f"Build directory: {config.build_dir}")
-        logger.info(f"Patches directory: {config.patches_dir}")
-        logger.info(f"Log file: {config.log_file}")
-        logger.info(f"Parallel jobs: {config.jobs}")
-        logger.info("=" * 60)
-
-        start_time = datetime.now()
-
-        # Check prerequisites
-        builder.check_prerequisites()
-
-        if args.dry_run:
-            logger.info("Dry run mode - exiting after prerequisites check")
-            return 0
-
-        # Build everything
-        builder.build_kernel()
-        builder.build_lpc_module()
-        builder.build_qcacld2_module()
-        builder.create_tarball()
-
-        # Summary
-        elapsed = (datetime.now() - start_time).total_seconds()
-        logger.info("=" * 60)
-        logger.info(f"{Colors.GREEN}✓ Build completed successfully in {elapsed:.0f} seconds!{Colors.RESET}")
-        logger.info(f"Output: {config.output_tar}")
-        logger.info(f"Log file: {config.log_file}")
-        logger.info("=" * 60)
-
-        return 0
-
-    except BuildError as e:
-        logger.error(f"Build failed: {e}")
-        logger.error(f"Check log file for details: {config.log_file}")
-        return 1
-    except KeyboardInterrupt:
-        logger.warning("Build interrupted by user")
-        return 130
-    except Exception as e:
-        logger.exception(f"Unexpected error: {e}")
-        return 1
 
 
 if __name__ == '__main__':
