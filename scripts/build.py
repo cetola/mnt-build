@@ -19,8 +19,8 @@ from typing import List, Optional, Tuple
 
 __version__ = "0.1.6"
 
-DEFAULT_KERNEL_VERSION = '6.17.11'
-DEFAULT_PKGREL = 2
+DEFAULT_KERNEL_VERSION = '6.17.12'
+DEFAULT_PKGREL = 1
 
 
 # ANSI color codes for terminal output
