@@ -1,0 +1,31 @@
+From 33e011e724aa70cb19c8c1fd6aa69a1addebe6de Mon Sep 17 00:00:00 2001
+From: "Lukas F. Hartmann" <lukas@mntre.com>
+Date: Sun, 9 Jul 2023 22:19:23 +0200
+Subject: [PATCH 2/2] imx8mp-2ghz-opp
+
+---
+ arch/arm64/boot/dts/freescale/imx8mp.dtsi | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/freescale/imx8mp.dtsi b/arch/arm64/boot/dts/freescale/imx8mp.dtsi
+index 3dc2102cbb3d..d55db50df4a3 100644
+--- a/arch/arm64/boot/dts/freescale/imx8mp.dtsi
++++ b/arch/arm64/boot/dts/freescale/imx8mp.dtsi
+@@ -158,6 +158,14 @@ opp-1800000000 {
+ 			clock-latency-ns = <150000>;
+ 			opp-suspend;
+ 		};
++
++		opp-2000000000 {
++			opp-hz = /bits/ 64 <2000000000>;
++			opp-microvolt = <1000000>;
++			opp-supported-hw = <0x20>, <0x3>;
++			clock-latency-ns = <150000>;
++			opp-suspend;
++		};
+ 	};
+ 
+ 	osc_32k: clock-osc-32k {
+-- 
+2.40.0
+

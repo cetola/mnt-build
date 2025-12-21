@@ -19,7 +19,7 @@ from typing import List, Optional, Tuple
 
 __version__ = "0.2.0"
 
-DEFAULT_KERNEL_VERSION = '6.17.12'
+DEFAULT_KERNEL_VERSION = '6.18.2'
 DEFAULT_PKGREL = 1
 
 
@@ -69,7 +69,8 @@ class BuildConfig:
                 version=version,
                 build_dir=build_dir,
                 linux_dir=linux_dir,
-                patches_dir=build_dir / "reform-debian-packages" / "linux" / f"patches{major_minor}",
+                #patches_dir=build_dir / "reform-debian-packages" / "linux" / f"patches{major_minor}",
+                patches_dir=build_dir / "patch-linux",
                 config_file=build_dir / "configs" / f"config-{version}-mnt-reform-arm64",
                 dtb_file=linux_dir / "arch/arm64/boot/dts/freescale/imx8mp-mnt-pocket-reform.dtb",
                 output_tar=linux_dir / f"kernel-{version}-{pkgrel}-mnt.tar.gz",

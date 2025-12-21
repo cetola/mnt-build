@@ -1,0 +1,80 @@
+From a38d90dab271fd9911cf338e2693fd608744d9f7
+From: Lukas F. Hartmann <lukas@mntre.com>
+Subject: revert-crashy-audiomix-pm-support
+Date:   Tue Nov 12 03:00:14 2024 +0100
+
+diff --git a/drivers/clk/imx/clk-imx8mp-audiomix.c b/drivers/clk/imx/clk-imx8mp-audiomix.c
+index b2cb157703c5..73e4fe9c5ff1 100644
+--- a/drivers/clk/imx/clk-imx8mp-audiomix.c
++++ b/drivers/clk/imx/clk-imx8mp-audiomix.c
+@@ -13,7 +13,6 @@
+ #include <linux/module.h>
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
+-#include <linux/pm_runtime.h>
+ #include <linux/slab.h>
+ 
+ #include <dt-bindings/clock/imx8mp-clock.h>
+@@ -325,15 +324,6 @@ static int clk_imx8mp_audiomix_probe(struct platform_device *pdev)
+ 	priv->base = base;
+ 	dev_set_drvdata(dev, priv);
+ 
+-	/*
+-	 * pm_runtime_enable needs to be called before clk register.
+-	 * That is to make core->rpm_enabled to be true for clock
+-	 * usage.
+-	 */
+-	pm_runtime_get_noresume(dev);
+-	pm_runtime_set_active(dev);
+-	pm_runtime_enable(dev);
+-
+ 	for (i = 0; i < ARRAY_SIZE(sels); i++) {
+ 		if (sels[i].num_parents == 1) {
+ 			hw = devm_clk_hw_register_gate_parent_data(dev,
+@@ -411,20 +401,12 @@ static int clk_imx8mp_audiomix_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		goto err_clk_register;
+ 
+-	pm_runtime_put_sync(dev);
+ 	return 0;
+ 
+ err_clk_register:
+-	pm_runtime_put_sync(dev);
+-	pm_runtime_disable(dev);
+ 	return ret;
+ }
+ 
+-static void clk_imx8mp_audiomix_remove(struct platform_device *pdev)
+-{
+-	pm_runtime_disable(&pdev->dev);
+-}
+-
+ static int clk_imx8mp_audiomix_runtime_suspend(struct device *dev)
+ {
+ 	clk_imx8mp_audiomix_save_restore(dev, true);
+@@ -439,13 +421,6 @@ static int clk_imx8mp_audiomix_runtime_resume(struct device *dev)
+ 	return 0;
+ }
+ 
+-static const struct dev_pm_ops clk_imx8mp_audiomix_pm_ops = {
+-	RUNTIME_PM_OPS(clk_imx8mp_audiomix_runtime_suspend,
+-		       clk_imx8mp_audiomix_runtime_resume, NULL)
+-	SET_NOIRQ_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
+-				      pm_runtime_force_resume)
+-};
+-
+ static const struct of_device_id clk_imx8mp_audiomix_of_match[] = {
+ 	{ .compatible = "fsl,imx8mp-audio-blk-ctrl" },
+ 	{ /* sentinel */ }
+@@ -454,11 +429,9 @@ MODULE_DEVICE_TABLE(of, clk_imx8mp_audiomix_of_match);
+ 
+ static struct platform_driver clk_imx8mp_audiomix_driver = {
+ 	.probe	= clk_imx8mp_audiomix_probe,
+-	.remove = clk_imx8mp_audiomix_remove,
+ 	.driver = {
+ 		.name = "imx8mp-audio-blk-ctrl",
+ 		.of_match_table = clk_imx8mp_audiomix_of_match,
+-		.pm = pm_ptr(&clk_imx8mp_audiomix_pm_ops),
+ 	},
+ };
+ 

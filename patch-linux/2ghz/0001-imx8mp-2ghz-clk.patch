@@ -1,0 +1,29 @@
+From 02e8c29cac92595796138bf756006635e404b507 Mon Sep 17 00:00:00 2001
+From: "Lukas F. Hartmann" <lukas@mntre.com>
+Date: Sun, 9 Jul 2023 22:19:22 +0200
+Subject: [PATCH 1/2] imx8mp-2ghz-clk
+
+---
+ drivers/clk/imx/clk-pll14xx.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+--- a/drivers/clk/imx/clk-pll14xx.c
++++ b/drivers/clk/imx/clk-pll14xx.c
+@@ -45,6 +45,8 @@ struct clk_pll14xx {
+ #define to_clk_pll14xx(_hw) container_of(_hw, struct clk_pll14xx, hw)
+ 
+ static const struct imx_pll14xx_rate_table imx_pll1416x_tbl[] = {
++	PLL_1416X_RATE(2400000000U, 300, 3, 0),
++	PLL_1416X_RATE(2000000000U, 250, 3, 0),
+ 	PLL_1416X_RATE(1800000000U, 225, 3, 0),
+ 	PLL_1416X_RATE(1600000000U, 200, 3, 0),
+ 	PLL_1416X_RATE(1500000000U, 375, 3, 1),
+@@ -253,7 +255,7 @@ static unsigned long clk_pll14xx_recalc_
+ 
+ 	if (pll->type == PLL_1443X) {
+ 		pll_div_ctl1 = readl_relaxed(pll->base + DIV_CTL1);
+-		kdiv = (s16)FIELD_GET(KDIV_MASK, pll_div_ctl1);
++		kdiv = FIELD_GET(KDIV_MASK, pll_div_ctl1);
+ 	} else {
+ 		kdiv = 0;
+ 	}

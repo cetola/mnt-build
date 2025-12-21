@@ -1,0 +1,109 @@
+From 59e34fd41e32a11bd05494c44402ff202ef9e570 Mon Sep 17 00:00:00 2001
+From: Haibo Chen <haibo.chen@xxxxxxx>
+Date: Sun, 9 Jul 2023 22:16:01 +0200
+Subject: [PATCH 2/3] During the card init, the host side sometimes may need to
+ distinguish the card type to handle accordingly. So need to give host->card
+ value earlier.
+
+Signed-off-by: Haibo Chen <haibo.chen@xxxxxxx>
+---
+ drivers/mmc/core/mmc.c  |  9 +++++----
+ drivers/mmc/core/sd.c   |  7 +++++--
+ drivers/mmc/core/sdio.c | 10 ++++++----
+ 3 files changed, 16 insertions(+), 10 deletions(-)
+
+--- a/drivers/mmc/core/mmc.c
++++ b/drivers/mmc/core/mmc.c
+@@ -1657,6 +1657,8 @@ static int mmc_init_card(struct mmc_host
+ 			goto err;
+ 		}
+ 
++		host->card = card;
++
+ 		card->ocr = ocr;
+ 		card->type = MMC_TYPE_MMC;
+ 		card->rca = 1;
+@@ -1931,14 +1933,13 @@ static int mmc_init_card(struct mmc_host
+ 		goto free_card;
+ 	}
+ 
+-	if (!oldcard)
+-		host->card = card;
+-
+ 	return 0;
+ 
+ free_card:
+-	if (!oldcard)
++	if (!oldcard) {
+ 		mmc_remove_card(card);
++		host->card = NULL;
++	}
+ err:
+ 	return err;
+ }
+--- a/drivers/mmc/core/sd.c
++++ b/drivers/mmc/core/sd.c
+@@ -1431,6 +1431,8 @@ retry:
+ 		if (IS_ERR(card))
+ 			return PTR_ERR(card);
+ 
++		host->card = card;
++
+ 		card->ocr = ocr;
+ 		card->type = MMC_TYPE_SD;
+ 		memcpy(card->raw_cid, cid, sizeof(card->raw_cid));
+@@ -1577,12 +1579,13 @@ cont:
+ 		goto free_card;
+ 	}
+ 
+-	host->card = card;
+ 	return 0;
+ 
+ free_card:
+-	if (!oldcard)
++	if (!oldcard) {
+ 		mmc_remove_card(card);
++		host->card = NULL;
++	}
+ 
+ 	return err;
+ }
+--- a/drivers/mmc/core/sdio.c
++++ b/drivers/mmc/core/sdio.c
+@@ -699,6 +699,9 @@ try_again:
+ 	if (IS_ERR(card))
+ 		return PTR_ERR(card);
+ 
++	if (!oldcard)
++		host->card = card;
++
+ 	if ((rocr & R4_MEMORY_PRESENT) &&
+ 	    mmc_sd_get_cid(host, ocr & rocr, card->raw_cid, NULL) == 0) {
+ 		card->type = MMC_TYPE_SD_COMBO;
+@@ -800,8 +803,6 @@ try_again:
+ 
+ 		if (oldcard)
+ 			mmc_remove_card(card);
+-		else
+-			host->card = card;
+ 
+ 		return 0;
+ 	}
+@@ -898,14 +899,15 @@ try_again:
+ 		goto remove;
+ 	}
+ 
+-	host->card = card;
+ 	return 0;
+ 
+ mismatch:
+ 	pr_debug("%s: Perhaps the card was replaced\n", mmc_hostname(host));
+ remove:
+-	if (oldcard != card)
++	if (oldcard != card) {
+ 		mmc_remove_card(card);
++		host->card = NULL;
++	}
+ 	return err;
+ }
+ 
