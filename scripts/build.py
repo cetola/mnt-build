@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 DEFAULT_KERNEL_VERSION = '6.18.2'
 DEFAULT_PKGREL = 1
