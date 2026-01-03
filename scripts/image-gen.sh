@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-IMAGE="$(pwd)/mnt-pocket.img"
+KVER="6.18.3"
+PKGREL="1"
+IMAGE="$(pwd)/mnt-pocket-${KVER}-aarch64.img"
 IMAGE_SIZE_GB=12
 BOOT_SIZE_MB=1024
 WORKDIR="$(pwd)/work"
@@ -10,8 +12,8 @@ MOUNTDIR="$WORKDIR/mnt"
 BOOT_MNT="$MOUNTDIR/boot"
 ROOT_MNT="$MOUNTDIR/root"
 
-KERNEL_URL="https://github.com/cetola/mnt-build/releases/download/6.17.12-1-mnt-pocket/kernel-6.17.12-1-mnt.tar.gz"
-POCKET_URL="https://github.com/cetola/linux-mnt-pocket/archive/refs/tags/6.17.12-1-mnt-pocket.tar.gz"
+KERNEL_URL="https://github.com/cetola/mnt-build/releases/download/${KVER}-${PKGREL}-mnt-pocket/kernel-${KVER}-${PKGREL}-mnt.tar.gz"
+POCKET_URL="https://github.com/cetola/linux-mnt-pocket/archive/refs/tags/${KVER}-${PKGREL}-mnt-pocket.tar.gz"
 ARCH_URL="http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz"
 
 # Check for required tools
