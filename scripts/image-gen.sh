@@ -114,11 +114,11 @@ tar -xpf archlinuxarm.tar.gz -C "$ROOT_MNT"
 
 echo "Extracting kernel..."
 mkdir -p "$WORKDIR/kernel"
-tar -xpf kernel.tar.gz -C "$WORKDIR/kernel"
+tar --no-same-owner -xpf kernel.tar.gz -C "$WORKDIR/kernel"
 
 echo "Extracting linux-mnt-pocket..."
 mkdir -p "$WORKDIR/pocket"
-tar -xpf pocket.tar.gz -C "$WORKDIR/pocket"
+tar --no-same-owner -xpf pocket.tar.gz -C "$WORKDIR/pocket"
 
 echo "Populating boot partition..."
 cp "$WORKDIR/kernel/config-6.17.12-mnt-reform-arm64" "$BOOT_MNT/"
@@ -130,12 +130,22 @@ cp \
   "$WORKDIR/pocket/linux-mnt-pocket-6.17.12-1-mnt-pocket/extlinux.conf.example" \
   "$BOOT_MNT/extlinux/extlinux.conf"
 
+echo "Fixing extlinux.conf to use LABEL=ROOT..."
+sed -i 's|root=/dev/nvme0n1p1|root=LABEL=ROOT|g' "$BOOT_MNT/extlinux/extlinux.conf"
+
 echo "Overlaying kernel /etc, /usr, /lib into root filesystem..."
 for dir in etc usr lib; do
   if [[ -d "$WORKDIR/kernel/$dir" ]]; then
     cp -a "$WORKDIR/kernel/$dir/." "$ROOT_MNT/$dir/"
   fi
 done
+
+echo "Creating /etc/fstab..."
+cat > "$ROOT_MNT/etc/fstab" << 'EOF'
+# <source> <mountpoint> <fstype> <options> <dump> <pass>
+LABEL=ROOT / ext4 defaults 0 1
+LABEL=BOOT /boot ext4 defaults 0 2
+EOF
 
 # Prepare for chroot
 echo "Preparing chroot environment..."
