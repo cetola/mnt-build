@@ -3,8 +3,9 @@ set -euo pipefail
 
 KVER="6.18.3"
 PKGREL="1"
+KERNEL_VERSION="${KVER}-mnt-pocket"
 IMAGE="$(pwd)/mnt-pocket-${KVER}-aarch64.img"
-IMAGE_SIZE_GB=12
+IMAGE_SIZE_GB=5
 BOOT_SIZE_MB=1024
 WORKDIR="$(pwd)/work"
 DOWNLOADS="$WORKDIR/downloads"
@@ -16,7 +17,6 @@ KERNEL_URL="https://github.com/cetola/mnt-build/releases/download/${KVER}-${PKGR
 POCKET_URL="https://github.com/cetola/linux-mnt-pocket/archive/refs/tags/${KVER}-${PKGREL}-mnt-pocket.tar.gz"
 ARCH_URL="http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz"
 
-# Check for required tools
 echo "Checking for required tools..."
 MISSING_TOOLS=()
 
@@ -130,6 +130,7 @@ cp \
   "$WORKDIR/pocket/linux-mnt-pocket-${KVER}-${PKGREL}-mnt-pocket/extlinux.conf.example" \
   "$BOOT_MNT/extlinux/extlinux.conf"
 
+# Fix extlinux.conf to use /dev/mmcblk0p2 instead of /dev/nvme0n1p1
 echo "Fixing extlinux.conf to use LABEL=ROOT..."
 sed -i 's|root=/dev/nvme0n1p1|root=LABEL=ROOT|g' "$BOOT_MNT/extlinux/extlinux.conf"
 
@@ -147,14 +148,11 @@ LABEL=ROOT / ext4 defaults 0 1
 LABEL=BOOT /boot ext4 defaults 0 2
 EOF
 
-# Prepare for chroot
 echo "Preparing chroot environment..."
 
-# Copy qemu-aarch64-static for x86_64 -> aarch64 chroot
 echo "Setting up qemu-user-static for cross-architecture chroot..."
 cp /usr/bin/qemu-aarch64-static "$ROOT_MNT/usr/bin/"
 
-# Mount necessary filesystems for chroot
 echo "Mounting virtual filesystems..."
 mount -t proc /proc "$ROOT_MNT/proc"
 mount -t sysfs /sys "$ROOT_MNT/sys"
@@ -162,7 +160,6 @@ mount -o bind /dev "$ROOT_MNT/dev"
 mount -t devpts devpts "$ROOT_MNT/dev/pts"
 mount -o bind /run "$ROOT_MNT/run"
 
-# Set up networking - create a simple resolv.conf
 echo "Configuring DNS for chroot..."
 cat > "$ROOT_MNT/etc/resolv.conf" << EOF
 nameserver 8.8.8.8
@@ -170,10 +167,20 @@ nameserver 8.8.4.4
 nameserver 1.1.1.1
 EOF
 
-# Create a script to run inside the chroot
+if [[ ! -d "$ROOT_MNT/lib/modules/$KERNEL_VERSION" ]]; then
+  echo "ERROR: Kernel modules directory not found: $ROOT_MNT/lib/modules/$KERNEL_VERSION"
+  echo "Available modules:"
+  ls "$ROOT_MNT/lib/modules/"
+  exit 1
+fi
+
+
 cat > "$ROOT_MNT/tmp/generate_initramfs.sh" << 'CHROOT_SCRIPT'
 #!/bin/bash
 set -euo pipefail
+
+KERNEL_VERSION="__KERNEL_VERSION__"
+echo "Using kernel module directory: ${KERNEL_VERSION}"
 
 echo "Inside chroot - initializing pacman keyring..."
 pacman-key --init
@@ -185,14 +192,6 @@ pacman -Sy --noconfirm
 echo "Installing dracut..."
 pacman -S --noconfirm dracut
 
-echo "Detecting kernel version..."
-KERNEL_VERSION=$(ls /lib/modules/ | head -n 1)
-if [[ -z "$KERNEL_VERSION" ]]; then
-  echo "ERROR: No kernel modules found in /lib/modules/"
-  exit 1
-fi
-echo "Found kernel version: $KERNEL_VERSION"
-
 echo "Generating initramfs with dracut..."
 dracut --force --no-hostonly \
   "/boot/initramfs-linux-testing" \
@@ -200,7 +199,6 @@ dracut --force --no-hostonly \
 
 echo "Initramfs generated successfully: /boot/initramfs-linux-testing"
 
-# Verify it was created
 if [[ -f "/boot/initramfs-linux-testing" ]]; then
   ls -lh "/boot/initramfs-linux-testing"
 else
@@ -208,6 +206,9 @@ else
   exit 1
 fi
 CHROOT_SCRIPT
+
+# Replace placeholder with actual kernel version
+sed -i "s/__KERNEL_VERSION__/${KERNEL_VERSION}/g" "$ROOT_MNT/tmp/generate_initramfs.sh"
 
 chmod +x "$ROOT_MNT/tmp/generate_initramfs.sh"
 
@@ -217,10 +218,8 @@ echo "Entering chroot to generate initramfs..."
 echo "=========================================="
 echo
 
-# Run the script in chroot
 chroot "$ROOT_MNT" /tmp/generate_initramfs.sh
 
-# Move initramfs from root filesystem /boot to boot partition
 echo "Moving initramfs to boot partition..."
 if [[ -f "$ROOT_MNT/boot/initramfs-linux-testing" ]]; then
   mv "$ROOT_MNT/boot/initramfs-linux-testing" "$BOOT_MNT/"
@@ -230,12 +229,10 @@ else
   exit 1
 fi
 
-# Clean up
 echo "Cleaning up chroot environment..."
 rm "$ROOT_MNT/tmp/generate_initramfs.sh"
 rm "$ROOT_MNT/usr/bin/qemu-aarch64-static"
 
-# Unmount everything before generating bmap
 echo "Unmounting filesystems..."
 umount "$ROOT_MNT/run" 2>/dev/null || true
 umount "$ROOT_MNT/dev/pts" 2>/dev/null || true
@@ -262,7 +259,6 @@ losetup -D
 
 sync
 
-# Generate bmap file for faster writing (after everything is unmounted)
 echo "Generating bmap file for sparse image writing..."
 if command -v bmaptool >/dev/null 2>&1; then
   bmaptool create -o "${IMAGE}.bmap" "${IMAGE}"
