@@ -14,28 +14,40 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Registers binfmt handlers on the runner so aarch64 binaries can run via qemu
       - name: Set up QEMU (binfmt)
         uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build builder container
+      - name: Install required host packages
         run: |
           set -euo pipefail
-          cd scripts
-          chmod +x build-container.sh run-container.sh image-gen.sh
-          ./build-container.sh
+          sudo apt-get update
+          sudo apt-get install -y \
+            coreutils \
+            util-linux \
+            parted \
+            e2fsprogs \
+            curl \
+            tar \
+            qemu-user-static \
+            binfmt-support \
+            bmap-tools \
+            zstd
 
-      - name: Run image-gen.sh inside container (privileged, as root)
+          # Useful for debugging if anything still fails
+          echo "== Versions =="
+          parted --version || true
+          losetup --version || true
+          mkfs.ext4 -V || true
+          qemu-aarch64-static --version || true
+
+      - name: Run image-gen.sh on runner (as root)
         run: |
           set -euo pipefail
-          env \
-            GITHUB_WORKSPACE="${GITHUB_WORKSPACE}" \
-            DOCKER_FLAGS="--privileged" \
-            ./scripts/run-container.sh "sudo ./image-gen.sh"
+          chmod +x ./scripts/image-gen.sh
+          sudo ./scripts/image-gen.sh
 
       - name: Fix ownership and permissions of workspace outputs
         run: |
@@ -43,11 +55,6 @@ jobs:
           sudo chown -R "$(id -u):$(id -g)" .
           sudo find . -type d -exec chmod 755 {} +
           sudo find . -type f -exec chmod a+r {} +
-
-      - name: Install packaging tools on runner
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y zstd coreutils
 
       - name: Package outputs (zstd, bmap, logs, sha256)
         run: |
@@ -58,7 +65,11 @@ jobs:
           IMG="$(ls -1 mnt-pocket-*-aarch64.img | head -n 1)"
           BMAP="${IMG}.bmap"
 
-          cp -v "$IMG" dist/
+          # Compress in place and remove raw .img
+          zstd -T0 -19 --rm "$IMG"
+          IMG_ZST="${IMG}.zst"
+
+          cp -v "$IMG_ZST" dist/
           if [[ -f "$BMAP" ]]; then
             cp -v "$BMAP" dist/
           else
@@ -71,11 +82,7 @@ jobs:
 
           pushd dist >/dev/null
 
-          sha256sum "$(basename "$IMG")" > "$(basename "$IMG").sha256"
-
-          zstd -T0 -19 --rm "$(basename "$IMG")" -o "$(basename "$IMG").zst"
-
-          sha256sum "$(basename "$IMG").zst" > "$(basename "$IMG").zst.sha256"
+          sha256sum "$(basename "$IMG_ZST")" > "$(basename "$IMG_ZST").sha256"
 
           {
             echo "Build date (UTC): $(date -u +%Y-%m-%dT%H:%M:%SZ)"

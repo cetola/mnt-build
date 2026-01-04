@@ -82,7 +82,37 @@ parted --script "$IMAGE" \
   mkpart primary ext4 1MiB "$((BOOT_SIZE_MB + 1))"MiB \
   mkpart primary ext4 "$((BOOT_SIZE_MB + 1))"MiB 100%
 
-LOOPDEV=$(losetup --find --show --partscan "$IMAGE")
+# Attach AFTER partitioning; ask kernel to scan partitions immediately
+LOOPDEV="$(losetup --find --show --partscan "${IMAGE}")"
+echo "Using loop device: ${LOOPDEV}"
+
+# Let udev create /dev/loopXp1 nodes
+udevadm settle || true
+sleep 1
+
+# Optional: nudge the kernel to re-read partition table (best effort)
+partprobe "${LOOPDEV}" || true
+udevadm settle || true
+sleep 1
+
+# Wait until partition nodes exist (handles slow runners)
+for i in {1..20}; do
+  if [[ -b "${LOOPDEV}p1" && -b "${LOOPDEV}p2" ]]; then
+    break
+  fi
+  sleep 0.2
+  udevadm settle || true
+done
+
+# Hard fail with useful diagnostics if still missing
+if [[ ! -b "${LOOPDEV}p1" || ! -b "${LOOPDEV}p2" ]]; then
+  echo "ERROR: partition nodes not created for ${LOOPDEV}"
+  ls -l "${LOOPDEV}"* || true
+  ls -l /dev/loop* || true
+  cat /proc/partitions | grep -E 'loop|mapper' || true
+  exit 1
+fi
+
 echo "Using loop device: $LOOPDEV"
 
 BOOT_PART="${LOOPDEV}p1"
