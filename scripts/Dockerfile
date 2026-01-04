@@ -9,9 +9,11 @@ RUN pacman -Sy --noconfirm archlinux-keyring && \
     pacman -Syu --noconfirm && \
     pacman -S --noconfirm base base-devel && \
     pacman -S --noconfirm \
-        dracut git bc kmod inetutils cpio perl tar xz wget python python-pip vim \
+        dracut git bc kmod inetutils cpio perl tar xz wget python python-pip vim sudo \
         aarch64-linux-gnu-binutils aarch64-linux-gnu-gcc aarch64-linux-gnu-gdb \
         dtc libelf flex bison openssl rsync && \
+    pacman -S --noconfirm \
+        parted qemu-user-static qemu-user-static-binfmt && \
     pacman -S --noconfirm \
         gdb strace lsof pciutils usbutils iproute2 net-tools \
         man-db man-pages less which file htop tmux unzip zip && \
@@ -23,6 +25,14 @@ RUN useradd -m -u ${UID} -G wheel -s /bin/bash ${USERNAME} && \
 
 USER ${USERNAME}
 WORKDIR /home/${USERNAME}/mnt-build
+
+RUN set -euo pipefail && \
+    cd /tmp && \
+    git clone https://aur.archlinux.org/yay.git && \
+    cd yay && \
+    makepkg -si --noconfirm && \
+    yay -S --noconfirm --needed bmaptool && \
+    rm -rf /tmp/yay
 
 RUN git config --global user.email "build@bot.net" && \
     git config --global user.name "Build Bot" && \
