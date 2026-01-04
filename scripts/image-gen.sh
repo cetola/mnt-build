@@ -13,9 +13,17 @@ MOUNTDIR="$WORKDIR/mnt"
 BOOT_MNT="$MOUNTDIR/boot"
 ROOT_MNT="$MOUNTDIR/root"
 
-KERNEL_URL="https://github.com/cetola/mnt-build/releases/download/${KVER}-${PKGREL}-mnt-pocket/kernel-${KVER}-${PKGREL}-mnt.tar.gz"
 POCKET_URL="https://github.com/cetola/linux-mnt-pocket/archive/refs/tags/${KVER}-${PKGREL}-mnt-pocket.tar.gz"
 ARCH_URL="http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz"
+
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+LOGFILE="$(pwd)/image-gen-${KVER}-${TIMESTAMP}.log"
+
+exec > >(tee -a "$LOGFILE") 2>&1
+
+echo "Logging to: $LOGFILE"
+echo "Started at: $(date)"
+echo
 
 echo "Checking for required tools..."
 MISSING_TOOLS=()
@@ -54,13 +62,10 @@ fi
 
 cleanup() {
   set +e
-  # Only cleanup if bmaptool hasn't run yet
-  umount "$ROOT_MNT/run" 2>/dev/null || true
-  umount "$ROOT_MNT/dev/pts" 2>/dev/null || true
-  umount "$ROOT_MNT/dev" 2>/dev/null || true
-  umount "$ROOT_MNT/sys" 2>/dev/null || true
-  umount "$ROOT_MNT/proc" 2>/dev/null || true
-  umount "$BOOT_MNT" 2>/dev/null || true
+  # Note: unshare -m creates a private mount namespace, so mounts inside
+  # the chroot don't need cleanup - they're automatically cleaned up when
+  # the namespace exits. We only clean up mounts we created before chroot.
+  umount "$ROOT_MNT/boot" 2>/dev/null || true
   umount "$ROOT_MNT" 2>/dev/null || true
   losetup -D 2>/dev/null || true
 }
@@ -92,7 +97,6 @@ mount "$ROOT_PART" "$ROOT_MNT"
 
 cd "$DOWNLOADS"
 
-# Download with caching
 download_if_missing() {
   local url="$1"
   local output="$2"
@@ -105,41 +109,15 @@ download_if_missing() {
   fi
 }
 
-download_if_missing "$KERNEL_URL" "kernel.tar.gz"
 download_if_missing "$POCKET_URL" "pocket.tar.gz"
 download_if_missing "$ARCH_URL" "archlinuxarm.tar.gz"
 
 echo "Extracting ArchLinuxARM root filesystem..."
 tar -xpf archlinuxarm.tar.gz -C "$ROOT_MNT"
 
-echo "Extracting kernel..."
-mkdir -p "$WORKDIR/kernel"
-tar --no-same-owner -xpf kernel.tar.gz -C "$WORKDIR/kernel"
-
 echo "Extracting linux-mnt-pocket..."
 mkdir -p "$WORKDIR/pocket"
 tar --no-same-owner -xpf pocket.tar.gz -C "$WORKDIR/pocket"
-
-echo "Populating boot partition..."
-cp "$WORKDIR/kernel/config-${KVER}-mnt-reform-arm64" "$BOOT_MNT/"
-cp "$WORKDIR/kernel/imx8mp-mnt-pocket-reform-${KVER}.dtb" "$BOOT_MNT/imx8mp-mnt-pocket-reform.dtb"
-cp "$WORKDIR/kernel/arch/arm64/boot/Image" "$BOOT_MNT/Image-testing"
-
-mkdir -p "$BOOT_MNT/extlinux"
-cp \
-  "$WORKDIR/pocket/linux-mnt-pocket-${KVER}-${PKGREL}-mnt-pocket/extlinux.conf.example" \
-  "$BOOT_MNT/extlinux/extlinux.conf"
-
-# Fix extlinux.conf to use /dev/mmcblk0p2 instead of /dev/nvme0n1p1
-echo "Fixing extlinux.conf to use LABEL=ROOT..."
-sed -i 's|root=/dev/nvme0n1p1|root=LABEL=ROOT|g' "$BOOT_MNT/extlinux/extlinux.conf"
-
-echo "Overlaying kernel /etc, /usr, /lib into root filesystem..."
-for dir in etc usr lib; do
-  if [[ -d "$WORKDIR/kernel/$dir" ]]; then
-    cp -a "$WORKDIR/kernel/$dir/." "$ROOT_MNT/$dir/"
-  fi
-done
 
 echo "Creating /etc/fstab..."
 cat > "$ROOT_MNT/etc/fstab" << 'EOF'
@@ -153,11 +131,25 @@ echo "Preparing chroot environment..."
 echo "Setting up qemu-user-static for cross-architecture chroot..."
 cp /usr/bin/qemu-aarch64-static "$ROOT_MNT/usr/bin/"
 
+echo "Mounting /boot inside root filesystem..."
+mkdir -p "$ROOT_MNT/boot"
+mount "$BOOT_PART" "$ROOT_MNT/boot"
+
+echo "Setting up bootloader configuration..."
+mkdir -p "$ROOT_MNT/boot/extlinux"
+cp \
+  "$WORKDIR/pocket/linux-mnt-pocket-${KVER}-${PKGREL}-mnt-pocket/extlinux.conf.example" \
+  "$ROOT_MNT/boot/extlinux/extlinux.conf"
+
+# Fix extlinux.conf to use LABEL=ROOT instead of /dev/nvme0n1p1
+echo "Fixing extlinux.conf to use LABEL=ROOT..."
+sed -i 's|root=/dev/nvme0n1p1|root=LABEL=ROOT|g' "$ROOT_MNT/boot/extlinux/extlinux.conf"
+
 echo "Mounting virtual filesystems..."
 mount -t proc /proc "$ROOT_MNT/proc"
 mount -t sysfs /sys "$ROOT_MNT/sys"
-mount -o bind /dev "$ROOT_MNT/dev"
-mount -t devpts devpts "$ROOT_MNT/dev/pts"
+mount --rbind /dev "$ROOT_MNT/dev"
+mount --make-rslave "$ROOT_MNT/dev"
 mount -o bind /run "$ROOT_MNT/run"
 
 echo "Configuring DNS for chroot..."
@@ -167,20 +159,12 @@ nameserver 8.8.4.4
 nameserver 1.1.1.1
 EOF
 
-if [[ ! -d "$ROOT_MNT/lib/modules/$KERNEL_VERSION" ]]; then
-  echo "ERROR: Kernel modules directory not found: $ROOT_MNT/lib/modules/$KERNEL_VERSION"
-  echo "Available modules:"
-  ls "$ROOT_MNT/lib/modules/"
-  exit 1
-fi
+echo "Copying PKGBUILD into chroot..."
+cp -r "$WORKDIR/pocket/linux-mnt-pocket-${KVER}-${PKGREL}-mnt-pocket" "$ROOT_MNT/tmp/linux-mnt-pocket"
 
-
-cat > "$ROOT_MNT/tmp/generate_initramfs.sh" << 'CHROOT_SCRIPT'
+cat > "$ROOT_MNT/tmp/install_kernel.sh" << 'CHROOT_SCRIPT'
 #!/bin/bash
 set -euo pipefail
-
-KERNEL_VERSION="__KERNEL_VERSION__"
-echo "Using kernel module directory: ${KERNEL_VERSION}"
 
 echo "Inside chroot - initializing pacman keyring..."
 pacman-key --init
@@ -189,71 +173,49 @@ pacman-key --populate archlinuxarm
 echo "Updating package database..."
 pacman -Sy --noconfirm
 
-echo "Installing dracut..."
-pacman -S --noconfirm dracut
+echo "Installing essential packages..."
+pacman -S --needed --noconfirm base base-devel dracut networkmanager
 
-echo "Generating initramfs with dracut..."
-dracut --force --no-hostonly \
-  "/boot/initramfs-linux-testing" \
-  "$KERNEL_VERSION"
+echo "Removing conflicting linux-aarch64 package if present..."
+pacman -R --noconfirm linux-aarch64 || true
 
-echo "Initramfs generated successfully: /boot/initramfs-linux-testing"
+echo "Building and installing linux-mnt-pocket kernel..."
+cd /tmp/linux-mnt-pocket
 
-if [[ -f "/boot/initramfs-linux-testing" ]]; then
-  ls -lh "/boot/initramfs-linux-testing"
-else
-  echo "ERROR: Initramfs file not found after generation!"
-  exit 1
-fi
+# Run makepkg as nobody user (makepkg refuses to run as root)
+chown -R nobody:nobody /tmp/linux-mnt-pocket
+sudo -u nobody makepkg --noconfirm
+
+echo "Installing kernel package..."
+pacman -U --noconfirm linux-mnt-pocket-*.pkg.tar.xz
+
+echo "Kernel installed successfully!"
+ls -lh /boot/
 CHROOT_SCRIPT
 
-# Replace placeholder with actual kernel version
-sed -i "s/__KERNEL_VERSION__/${KERNEL_VERSION}/g" "$ROOT_MNT/tmp/generate_initramfs.sh"
-
-chmod +x "$ROOT_MNT/tmp/generate_initramfs.sh"
+chmod +x "$ROOT_MNT/tmp/install_kernel.sh"
 
 echo
 echo "=========================================="
-echo "Entering chroot to generate initramfs..."
+echo "Entering chroot to install kernel..."
 echo "=========================================="
 echo
 
-chroot "$ROOT_MNT" /tmp/generate_initramfs.sh
-
-echo "Moving initramfs to boot partition..."
-if [[ -f "$ROOT_MNT/boot/initramfs-linux-testing" ]]; then
-  mv "$ROOT_MNT/boot/initramfs-linux-testing" "$BOOT_MNT/"
-  echo "Initramfs moved to boot partition successfully"
-else
-  echo "ERROR: Initramfs not found at $ROOT_MNT/boot/initramfs-linux-testing"
-  exit 1
-fi
+unshare -m chroot "$ROOT_MNT" /tmp/install_kernel.sh
 
 echo "Cleaning up chroot environment..."
-rm "$ROOT_MNT/tmp/generate_initramfs.sh"
+rm -rf "$ROOT_MNT/tmp/linux-mnt-pocket"
+rm "$ROOT_MNT/tmp/install_kernel.sh"
 rm "$ROOT_MNT/usr/bin/qemu-aarch64-static"
 
 echo "Unmounting filesystems..."
 umount "$ROOT_MNT/run" 2>/dev/null || true
-umount "$ROOT_MNT/dev/pts" 2>/dev/null || true
 
-# Unmount /dev with retry and lazy umount if needed
-for i in {1..3}; do
-  if umount "$ROOT_MNT/dev" 2>/dev/null; then
-    break
-  fi
-  echo "Retrying /dev unmount (attempt $i)..."
-  sleep 1
-done
-# If still mounted, use lazy unmount
-if mountpoint -q "$ROOT_MNT/dev" 2>/dev/null; then
-  echo "Using lazy unmount for /dev..."
-  umount -l "$ROOT_MNT/dev"
-fi
+umount -R "$ROOT_MNT/dev" 2>/dev/null || umount -l "$ROOT_MNT/dev" 2>/dev/null || true
 
 umount "$ROOT_MNT/sys" 2>/dev/null || true
 umount "$ROOT_MNT/proc" 2>/dev/null || true
-umount "$BOOT_MNT" 2>/dev/null || true
+umount "$ROOT_MNT/boot" 2>/dev/null || true
 umount "$ROOT_MNT" 2>/dev/null || true
 losetup -D
 
@@ -274,10 +236,12 @@ echo "  $IMAGE"
 echo "  $IMAGE.bmap (if bmaptool available)"
 echo "=========================================="
 echo
+echo "Log file saved to: $LOGFILE"
+echo
 echo "Contents:"
 echo "  - Boot partition with kernel, DTB, and initramfs"
 echo "  - Root filesystem with Arch Linux ARM and kernel modules"
-echo "  - Initramfs: /boot/initramfs-linux-testing"
+echo "  - Kernel installed via pacman from PKGBUILD"
 echo
 echo "To write to SD card:"
 if command -v bmaptool >/dev/null 2>&1; then
@@ -290,3 +254,4 @@ else
   echo "  sudo pacman -S bmap-tools"
 fi
 echo
+echo "Completed at: $(date)"
