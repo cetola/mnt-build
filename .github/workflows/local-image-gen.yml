@@ -1,0 +1,98 @@
+name: Local Image Gen
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU (binfmt)
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build builder container
+        run: |
+          set -euo pipefail
+          cd scripts
+          chmod +x build-container.sh run-container.sh image-gen.sh
+          ./build-container.sh
+
+      - name: Run image-gen.sh inside container (privileged, as root)
+        run: |
+          set -euo pipefail
+          env \
+            GITHUB_WORKSPACE="${GITHUB_WORKSPACE}" \
+            DOCKER_FLAGS="--privileged" \
+            ./scripts/run-container.sh "sudo ./image-gen.sh"
+
+      - name: Fix ownership and permissions of workspace outputs
+        run: |
+          set -euo pipefail
+          sudo chown -R "$(id -u):$(id -g)" .
+          sudo find . -type d -exec chmod 755 {} +
+          sudo find . -type f -exec chmod a+r {} +
+
+      - name: Install packaging tools on runner
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zstd coreutils
+
+      - name: Package outputs (zstd, bmap, logs, sha256)
+        run: |
+          set -euo pipefail
+
+          mkdir -p dist
+
+          IMG="$(ls -1 mnt-pocket-*-aarch64.img | head -n 1)"
+          BMAP="${IMG}.bmap"
+
+          cp -v "$IMG" dist/
+          if [[ -f "$BMAP" ]]; then
+            cp -v "$BMAP" dist/
+          else
+            echo "WARNING: ${BMAP} not found." | tee dist/WARNING-no-bmap.txt
+          fi
+
+          if ls -1 image-gen-*.log >/dev/null 2>&1; then
+            cp -v image-gen-*.log dist/
+          fi
+
+          pushd dist >/dev/null
+
+          sha256sum "$(basename "$IMG")" > "$(basename "$IMG").sha256"
+
+          zstd -T0 -19 --rm "$(basename "$IMG")" -o "$(basename "$IMG").zst"
+
+          sha256sum "$(basename "$IMG").zst" > "$(basename "$IMG").zst.sha256"
+
+          {
+            echo "Build date (UTC): $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo
+            echo "Files:"
+            ls -lh
+            echo
+            echo "SHA256:"
+            cat *.sha256
+          } > MANIFEST.txt
+
+          popd >/dev/null
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mnt-pocket-image
+          path: dist/*
+          if-no-files-found: error
+
