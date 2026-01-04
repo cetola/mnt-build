@@ -121,13 +121,13 @@ mkdir -p "$WORKDIR/pocket"
 tar --no-same-owner -xpf pocket.tar.gz -C "$WORKDIR/pocket"
 
 echo "Populating boot partition..."
-cp "$WORKDIR/kernel/config-6.17.12-mnt-reform-arm64" "$BOOT_MNT/"
-cp "$WORKDIR/kernel/imx8mp-mnt-pocket-reform-6.17.12.dtb" "$BOOT_MNT/imx8mp-mnt-pocket-reform.dtb"
+cp "$WORKDIR/kernel/config-${KVER}-mnt-reform-arm64" "$BOOT_MNT/"
+cp "$WORKDIR/kernel/imx8mp-mnt-pocket-reform-${KVER}.dtb" "$BOOT_MNT/imx8mp-mnt-pocket-reform.dtb"
 cp "$WORKDIR/kernel/arch/arm64/boot/Image" "$BOOT_MNT/Image-testing"
 
 mkdir -p "$BOOT_MNT/extlinux"
 cp \
-  "$WORKDIR/pocket/linux-mnt-pocket-6.17.12-1-mnt-pocket/extlinux.conf.example" \
+  "$WORKDIR/pocket/linux-mnt-pocket-${KVER}-${PKGREL}-mnt-pocket/extlinux.conf.example" \
   "$BOOT_MNT/extlinux/extlinux.conf"
 
 echo "Fixing extlinux.conf to use LABEL=ROOT..."
