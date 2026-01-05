@@ -113,17 +113,19 @@ check_required_tools() {
 cleanup_mounts() {
   set +e
   log "Cleaning up mounts..."
-  
-  # Unmount in reverse order
+
   umount "$ROOT_MNT/run" 2>/dev/null || true
   umount -R "$ROOT_MNT/dev" 2>/dev/null || umount -l "$ROOT_MNT/dev" 2>/dev/null || true
   umount "$ROOT_MNT/sys" 2>/dev/null || true
   umount "$ROOT_MNT/proc" 2>/dev/null || true
   umount "$ROOT_MNT/boot" 2>/dev/null || true
   umount "$ROOT_MNT" 2>/dev/null || true
-  
+  umount "$BOOT_MNT" 2>/dev/null || true  # Add this - clean up boot mount point too
+
+  sync
+  sleep 1
   if [[ -n "$LOOPDEV" ]]; then
-    losetup -d "$LOOPDEV" 2>/dev/null || losetup -D 2>/dev/null || true
+    losetup -d "$LOOPDEV" 2>/dev/null || true
   fi
 }
 
