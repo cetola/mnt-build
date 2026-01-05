@@ -49,13 +49,6 @@ jobs:
           chmod +x ./scripts/image-gen.sh
           sudo ./scripts/image-gen.sh
 
-      - name: Fix ownership and permissions of workspace outputs
-        run: |
-          set -euo pipefail
-          sudo chown -R "$(id -u):$(id -g)" .
-          sudo find . -type d -exec chmod 755 {} +
-          sudo find . -type f -exec chmod a+r {} +
-
       - name: Package outputs (zstd, bmap, logs, sha256)
         run: |
           set -euo pipefail

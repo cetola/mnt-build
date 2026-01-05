@@ -251,9 +251,31 @@ losetup -D
 
 sync
 
+sync
+
+echo "Fixing ownership and permissions of output files..."
+if [[ -n "${SUDO_UID:-}" && -n "${SUDO_GID:-}" ]]; then
+  TARGET_UID="$SUDO_UID"
+  TARGET_GID="$SUDO_GID"
+  echo "Detected sudo user: UID=$TARGET_UID, GID=$TARGET_GID"
+else
+  TARGET_UID=1000
+  TARGET_GID=1000
+  echo "Could not detect sudo user, using UID=$TARGET_UID, GID=$TARGET_GID"
+fi
+
+chown "$TARGET_UID:$TARGET_GID" "$IMAGE"
+chown -R "$TARGET_UID:$TARGET_GID" "$WORKDIR"
+chown "$TARGET_UID:$TARGET_GID" "$LOGFILE"
+
+chmod 644 "$IMAGE"
+chmod 644 "$LOGFILE"
+
 echo "Generating bmap file for sparse image writing..."
 if command -v bmaptool >/dev/null 2>&1; then
   bmaptool create -o "${IMAGE}.bmap" "${IMAGE}"
+  chown "$TARGET_UID:$TARGET_GID" "${IMAGE}.bmap"
+  chmod 644 "${IMAGE}.bmap"
   echo "Bmap file created: ${IMAGE}.bmap"
 else
   echo "Warning: bmaptool not found. Install 'bmap-tools' for faster SD card writing."
