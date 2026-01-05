@@ -1,198 +1,313 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-KVER="6.18.3"
-PKGREL="1"
-KERNEL_VERSION="${KVER}-mnt-pocket"
-IMAGE="$(pwd)/mnt-pocket-${KVER}-aarch64.img"
-IMAGE_SIZE_GB=5
-BOOT_SIZE_MB=1024
-WORKDIR="$(pwd)/image-gen"
-DOWNLOADS="$WORKDIR/downloads"
-MOUNTDIR="$WORKDIR/mnt"
-BOOT_MNT="$MOUNTDIR/boot"
-ROOT_MNT="$MOUNTDIR/root"
+# ============================================================================
+# Configuration
+# ============================================================================
+readonly KVER="6.18.3"
+readonly PKGREL="1"
+readonly KERNEL_VERSION="${KVER}-mnt-pocket"
+readonly IMAGE_SIZE_GB=5
+readonly BOOT_SIZE_MB=1024
+readonly PARTITION_WAIT_MAX_ATTEMPTS=20
+readonly PARTITION_WAIT_INTERVAL=0.2
 
-POCKET_URL="https://github.com/cetola/linux-mnt-pocket/archive/refs/tags/${KVER}-${PKGREL}-mnt-pocket.tar.gz"
-ARCH_URL="http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz"
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly WORK_DIR="$(pwd)/image-gen"
+readonly DOWNLOADS_DIR="$WORK_DIR/downloads"
+readonly MOUNT_DIR="$WORK_DIR/mnt"
+readonly BOOT_MNT="$MOUNT_DIR/boot"
+readonly ROOT_MNT="$MOUNT_DIR/root"
+readonly IMAGE="$(pwd)/mnt-pocket-${KVER}-aarch64.img"
 
-TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-LOGFILE="$(pwd)/image-gen-${KVER}-${TIMESTAMP}.log"
+readonly POCKET_URL="https://github.com/cetola/linux-mnt-pocket/archive/refs/tags/${KVER}-${PKGREL}-mnt-pocket.tar.gz"
+readonly ARCH_URL="http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz"
 
-exec > >(tee -a "$LOGFILE") 2>&1
+readonly TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+readonly LOGFILE="$(pwd)/image-gen-${KVER}-${TIMESTAMP}.log"
 
-echo "Logging to: $LOGFILE"
-echo "Started at: $(date)"
-echo
+# Global state
+LOOPDEV=""
+BOOT_PART=""
+ROOT_PART=""
 
-echo "Checking for required tools..."
-MISSING_TOOLS=()
+# ============================================================================
+# Utility Functions
+# ============================================================================
 
-command -v dd >/dev/null 2>&1 || MISSING_TOOLS+=("coreutils")
-command -v parted >/dev/null 2>&1 || MISSING_TOOLS+=("parted")
-command -v losetup >/dev/null 2>&1 || MISSING_TOOLS+=("util-linux")
-command -v mkfs.ext4 >/dev/null 2>&1 || MISSING_TOOLS+=("e2fsprogs")
-command -v curl >/dev/null 2>&1 || MISSING_TOOLS+=("curl")
-command -v tar >/dev/null 2>&1 || MISSING_TOOLS+=("tar")
-command -v chroot >/dev/null 2>&1 || MISSING_TOOLS+=("arch-install-scripts")
+log() {
+  echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*"
+}
 
-# Check for qemu-aarch64-static (required for x86_64 -> aarch64 chroot)
-if [[ ! -f /usr/bin/qemu-aarch64-static ]]; then
-  MISSING_TOOLS+=("qemu-user-static qemu-user-static-binfmt")
-fi
+log_error() {
+  echo "ERROR: $*" >&2
+}
 
-if [[ ${#MISSING_TOOLS[@]} -gt 0 ]]; then
-  echo "ERROR: Missing required tools/packages:"
-  for tool in "${MISSING_TOOLS[@]}"; do
-    echo "  - $tool"
-  done
+log_section() {
   echo
-  echo "Install them with:"
-  echo "  sudo pacman -S ${MISSING_TOOLS[*]}"
-  exit 1
-fi
+  echo "=========================================="
+  echo "$*"
+  echo "=========================================="
+  echo
+}
 
-echo "All required tools found."
-echo
-
-if [[ $EUID -ne 0 ]]; then
-  echo "This script must be run as root."
+die() {
+  log_error "$@"
   exit 1
-fi
+}
+
+# ============================================================================
+# Validation Functions
+# ============================================================================
+
+check_root() {
+  if [[ $EUID -ne 0 ]]; then
+    die "This script must be run as root."
+  fi
+}
+
+check_required_tools() {
+  local missing_tools=()
+  local tool_map=(
+    "dd:coreutils"
+    "parted:parted"
+    "losetup:util-linux"
+    "mkfs.ext4:e2fsprogs"
+    "curl:curl"
+    "tar:tar"
+    "chroot:arch-install-scripts"
+  )
+
+  log "Checking for required tools..."
+  
+  for entry in "${tool_map[@]}"; do
+    IFS=':' read -r cmd pkg <<< "$entry"
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      missing_tools+=("$pkg")
+    fi
+  done
+
+  # Check for qemu-aarch64-static (required for x86_64 -> aarch64 chroot)
+  if [[ ! -f /usr/bin/qemu-aarch64-static ]]; then
+    missing_tools+=("qemu-user-static qemu-user-static-binfmt")
+  fi
+
+  if [[ ${#missing_tools[@]} -gt 0 ]]; then
+    log_error "Missing required tools/packages:"
+    for tool in "${missing_tools[@]}"; do
+      echo "  - $tool"
+    done
+    echo
+    echo "Install them with:"
+    echo "  sudo pacman -S ${missing_tools[*]}"
+    exit 1
+  fi
+
+  log "All required tools found."
+}
+
+# ============================================================================
+# Cleanup Functions
+# ============================================================================
+
+cleanup_mounts() {
+  set +e
+  log "Cleaning up mounts..."
+  
+  # Unmount in reverse order
+  umount "$ROOT_MNT/run" 2>/dev/null || true
+  umount -R "$ROOT_MNT/dev" 2>/dev/null || umount -l "$ROOT_MNT/dev" 2>/dev/null || true
+  umount "$ROOT_MNT/sys" 2>/dev/null || true
+  umount "$ROOT_MNT/proc" 2>/dev/null || true
+  umount "$ROOT_MNT/boot" 2>/dev/null || true
+  umount "$ROOT_MNT" 2>/dev/null || true
+  
+  if [[ -n "$LOOPDEV" ]]; then
+    losetup -d "$LOOPDEV" 2>/dev/null || losetup -D 2>/dev/null || true
+  fi
+}
 
 cleanup() {
   set +e
   # Note: unshare -m creates a private mount namespace, so mounts inside
   # the chroot don't need cleanup - they're automatically cleaned up when
   # the namespace exits. We only clean up mounts we created before chroot.
-  umount "$ROOT_MNT/boot" 2>/dev/null || true
-  umount "$ROOT_MNT" 2>/dev/null || true
-  losetup -D 2>/dev/null || true
+  cleanup_mounts
 }
 trap cleanup EXIT
 
-mkdir -p "$DOWNLOADS" "$BOOT_MNT" "$ROOT_MNT"
+# ============================================================================
+# Image Creation Functions
+# ============================================================================
 
-echo "Creating disk image..."
-dd if=/dev/zero of="$IMAGE" bs=1M count=$((IMAGE_SIZE_GB * 1024)) status=progress
+create_disk_image() {
+  log "Creating disk image..."
+  dd if=/dev/zero of="$IMAGE" bs=1M count=$((IMAGE_SIZE_GB * 1024)) status=progress
+}
 
-echo "Partitioning image..."
-parted --script "$IMAGE" \
-  mklabel msdos \
-  mkpart primary ext4 1MiB "$((BOOT_SIZE_MB + 1))"MiB \
-  mkpart primary ext4 "$((BOOT_SIZE_MB + 1))"MiB 100%
+partition_image() {
+  log "Partitioning image..."
+  parted --script "$IMAGE" \
+    mklabel msdos \
+    mkpart primary ext4 1MiB "$((BOOT_SIZE_MB + 1))"MiB \
+    mkpart primary ext4 "$((BOOT_SIZE_MB + 1))"MiB 100%
+}
 
-# Attach AFTER partitioning; ask kernel to scan partitions immediately
-LOOPDEV="$(losetup --find --show --partscan "${IMAGE}")"
-echo "Using loop device: ${LOOPDEV}"
+setup_loop_device() {
+  log "Setting up loop device..."
+  
+  # Attach AFTER partitioning; ask kernel to scan partitions immediately
+  LOOPDEV="$(losetup --find --show --partscan "${IMAGE}")"
+  log "Using loop device: ${LOOPDEV}"
 
-# Let udev create /dev/loopXp1 nodes
-udevadm settle || true
-sleep 1
-
-# Optional: nudge the kernel to re-read partition table (best effort)
-partprobe "${LOOPDEV}" || true
-udevadm settle || true
-sleep 1
-
-# Wait until partition nodes exist (handles slow runners)
-for i in {1..20}; do
-  if [[ -b "${LOOPDEV}p1" && -b "${LOOPDEV}p2" ]]; then
-    break
-  fi
-  sleep 0.2
+  # Let udev create /dev/loopXp1 nodes
   udevadm settle || true
-done
+  sleep 1
 
-# Hard fail with useful diagnostics if still missing
-if [[ ! -b "${LOOPDEV}p1" || ! -b "${LOOPDEV}p2" ]]; then
-  echo "ERROR: partition nodes not created for ${LOOPDEV}"
-  ls -l "${LOOPDEV}"* || true
-  ls -l /dev/loop* || true
-  cat /proc/partitions | grep -E 'loop|mapper' || true
-  exit 1
-fi
+  # Optional: nudge the kernel to re-read partition table (best effort)
+  partprobe "${LOOPDEV}" || true
+  udevadm settle || true
+  sleep 1
 
-echo "Using loop device: $LOOPDEV"
+  # Wait until partition nodes exist (handles slow runners)
+  local attempt=0
+  while [[ $attempt -lt $PARTITION_WAIT_MAX_ATTEMPTS ]]; do
+    if [[ -b "${LOOPDEV}p1" && -b "${LOOPDEV}p2" ]]; then
+      break
+    fi
+    sleep $PARTITION_WAIT_INTERVAL
+    udevadm settle || true
+    ((attempt++))
+  done
 
-BOOT_PART="${LOOPDEV}p1"
-ROOT_PART="${LOOPDEV}p2"
+  # Hard fail with useful diagnostics if still missing
+  if [[ ! -b "${LOOPDEV}p1" || ! -b "${LOOPDEV}p2" ]]; then
+    log_error "Partition nodes not created for ${LOOPDEV}"
+    ls -l "${LOOPDEV}"* || true
+    ls -l /dev/loop* || true
+    cat /proc/partitions | grep -E 'loop|mapper' || true
+    exit 1
+  fi
 
-echo "Formatting partitions..."
-mkfs.ext4 -F -L BOOT "$BOOT_PART"
-mkfs.ext4 -F -L ROOT "$ROOT_PART"
+  BOOT_PART="${LOOPDEV}p1"
+  ROOT_PART="${LOOPDEV}p2"
+  
+  log "Partitions ready: boot=$BOOT_PART, root=$ROOT_PART"
+}
 
-mount "$BOOT_PART" "$BOOT_MNT"
-mount "$ROOT_PART" "$ROOT_MNT"
+format_partitions() {
+  log "Formatting partitions..."
+  mkfs.ext4 -F -L BOOT "$BOOT_PART"
+  mkfs.ext4 -F -L ROOT "$ROOT_PART"
+}
 
-cd "$DOWNLOADS"
+mount_partitions() {
+  log "Mounting partitions..."
+  mount "$BOOT_PART" "$BOOT_MNT"
+  mount "$ROOT_PART" "$ROOT_MNT"
+}
+
+# ============================================================================
+# Download Functions
+# ============================================================================
 
 download_if_missing() {
   local url="$1"
   local output="$2"
   
   if [[ -f "$output" ]]; then
-    echo "Using cached $output"
+    log "Using cached $output"
   else
-    echo "Downloading $output..."
+    log "Downloading $output..."
     curl -L -o "$output" "$url"
   fi
 }
 
-download_if_missing "$POCKET_URL" "pocket.tar.gz"
-download_if_missing "$ARCH_URL" "archlinuxarm.tar.gz"
+download_dependencies() {
+  log "Downloading dependencies..."
+  cd "$DOWNLOADS_DIR"
+  download_if_missing "$POCKET_URL" "pocket.tar.gz"
+  download_if_missing "$ARCH_URL" "archlinuxarm.tar.gz"
+}
 
-echo "Extracting ArchLinuxARM root filesystem..."
-tar -xpf archlinuxarm.tar.gz -C "$ROOT_MNT"
+# ============================================================================
+# Filesystem Setup Functions
+# ============================================================================
 
-echo "Extracting linux-mnt-pocket..."
-mkdir -p "$WORKDIR/pocket"
-tar --no-same-owner -xpf pocket.tar.gz -C "$WORKDIR/pocket"
+extract_rootfs() {
+  log "Extracting ArchLinuxARM root filesystem..."
+  tar -xpf "$DOWNLOADS_DIR/archlinuxarm.tar.gz" -C "$ROOT_MNT"
+}
 
-echo "Creating /etc/fstab..."
-cat > "$ROOT_MNT/etc/fstab" << 'EOF'
+extract_pocket_kernel() {
+  log "Extracting linux-mnt-pocket..."
+  mkdir -p "$WORK_DIR/pocket"
+  tar --no-same-owner -xpf "$DOWNLOADS_DIR/pocket.tar.gz" -C "$WORK_DIR/pocket"
+}
+
+create_fstab() {
+  log "Creating /etc/fstab..."
+  cat > "$ROOT_MNT/etc/fstab" << 'EOF'
 # <source> <mountpoint> <fstype> <options> <dump> <pass>
 LABEL=ROOT / ext4 defaults 0 1
 LABEL=BOOT /boot ext4 defaults 0 2
 EOF
+}
 
-echo "Preparing chroot environment..."
+setup_chroot_environment() {
+  log "Preparing chroot environment..."
+  
+  log "Setting up qemu-user-static for cross-architecture chroot..."
+  cp /usr/bin/qemu-aarch64-static "$ROOT_MNT/usr/bin/"
+  
+  log "Mounting /boot inside root filesystem..."
+  mkdir -p "$ROOT_MNT/boot"
+  mount "$BOOT_PART" "$ROOT_MNT/boot"
+  
+  setup_bootloader_config
+  mount_virtual_filesystems
+  configure_dns
+  copy_pkgbuild
+}
 
-echo "Setting up qemu-user-static for cross-architecture chroot..."
-cp /usr/bin/qemu-aarch64-static "$ROOT_MNT/usr/bin/"
+setup_bootloader_config() {
+  log "Setting up bootloader configuration..."
+  mkdir -p "$ROOT_MNT/boot/extlinux"
+  cp \
+    "$WORK_DIR/pocket/linux-mnt-pocket-${KVER}-${PKGREL}-mnt-pocket/extlinux.conf.example" \
+    "$ROOT_MNT/boot/extlinux/extlinux.conf"
+  
+  # Fix extlinux.conf to use LABEL=ROOT instead of /dev/nvme0n1p1
+  log "Fixing extlinux.conf to use LABEL=ROOT..."
+  sed -i 's|root=/dev/nvme0n1p1|root=LABEL=ROOT|g' "$ROOT_MNT/boot/extlinux/extlinux.conf"
+}
 
-echo "Mounting /boot inside root filesystem..."
-mkdir -p "$ROOT_MNT/boot"
-mount "$BOOT_PART" "$ROOT_MNT/boot"
+mount_virtual_filesystems() {
+  log "Mounting virtual filesystems..."
+  mount -t proc /proc "$ROOT_MNT/proc"
+  mount -t sysfs /sys "$ROOT_MNT/sys"
+  mount --rbind /dev "$ROOT_MNT/dev"
+  mount --make-rslave "$ROOT_MNT/dev"
+  mount -o bind /run "$ROOT_MNT/run"
+}
 
-echo "Setting up bootloader configuration..."
-mkdir -p "$ROOT_MNT/boot/extlinux"
-cp \
-  "$WORKDIR/pocket/linux-mnt-pocket-${KVER}-${PKGREL}-mnt-pocket/extlinux.conf.example" \
-  "$ROOT_MNT/boot/extlinux/extlinux.conf"
-
-# Fix extlinux.conf to use LABEL=ROOT instead of /dev/nvme0n1p1
-echo "Fixing extlinux.conf to use LABEL=ROOT..."
-sed -i 's|root=/dev/nvme0n1p1|root=LABEL=ROOT|g' "$ROOT_MNT/boot/extlinux/extlinux.conf"
-
-echo "Mounting virtual filesystems..."
-mount -t proc /proc "$ROOT_MNT/proc"
-mount -t sysfs /sys "$ROOT_MNT/sys"
-mount --rbind /dev "$ROOT_MNT/dev"
-mount --make-rslave "$ROOT_MNT/dev"
-mount -o bind /run "$ROOT_MNT/run"
-
-echo "Configuring DNS for chroot..."
-cat > "$ROOT_MNT/etc/resolv.conf" << EOF
+configure_dns() {
+  log "Configuring DNS for chroot..."
+  cat > "$ROOT_MNT/etc/resolv.conf" << EOF
 nameserver 8.8.8.8
 nameserver 8.8.4.4
 nameserver 1.1.1.1
 EOF
+}
 
-echo "Copying PKGBUILD into chroot..."
-cp -r "$WORKDIR/pocket/linux-mnt-pocket-${KVER}-${PKGREL}-mnt-pocket" "$ROOT_MNT/tmp/linux-mnt-pocket"
+copy_pkgbuild() {
+  log "Copying PKGBUILD into chroot..."
+  cp -r "$WORK_DIR/pocket/linux-mnt-pocket-${KVER}-${PKGREL}-mnt-pocket" "$ROOT_MNT/tmp/linux-mnt-pocket"
+}
 
-cat > "$ROOT_MNT/tmp/install_kernel.sh" << 'CHROOT_SCRIPT'
+create_chroot_script() {
+  log "Creating chroot installation script..."
+  cat > "$ROOT_MNT/tmp/install_kernel.sh" << 'CHROOT_SCRIPT'
 #!/bin/bash
 set -euo pipefail
 
@@ -222,88 +337,139 @@ pacman -U --noconfirm linux-mnt-pocket-*.pkg.tar.xz
 echo "Kernel installed successfully!"
 ls -lh /boot/
 CHROOT_SCRIPT
+  
+  chmod +x "$ROOT_MNT/tmp/install_kernel.sh"
+}
 
-chmod +x "$ROOT_MNT/tmp/install_kernel.sh"
+run_chroot_installation() {
+  log_section "Entering chroot to install kernel..."
+  unshare -m chroot "$ROOT_MNT" /tmp/install_kernel.sh
+}
 
-echo
-echo "=========================================="
-echo "Entering chroot to install kernel..."
-echo "=========================================="
-echo
+cleanup_chroot_environment() {
+  log "Cleaning up chroot environment..."
+  rm -rf "$ROOT_MNT/tmp/linux-mnt-pocket"
+  rm -f "$ROOT_MNT/tmp/install_kernel.sh"
+  rm -f "$ROOT_MNT/usr/bin/qemu-aarch64-static"
+}
 
-unshare -m chroot "$ROOT_MNT" /tmp/install_kernel.sh
+# ============================================================================
+# Post-Processing Functions
+# ============================================================================
 
-echo "Cleaning up chroot environment..."
-rm -rf "$ROOT_MNT/tmp/linux-mnt-pocket"
-rm "$ROOT_MNT/tmp/install_kernel.sh"
-rm "$ROOT_MNT/usr/bin/qemu-aarch64-static"
+get_target_ownership() {
+  if [[ -n "${SUDO_UID:-}" && -n "${SUDO_GID:-}" ]]; then
+    TARGET_UID="$SUDO_UID"
+    TARGET_GID="$SUDO_GID"
+    log "Detected sudo user: UID=$TARGET_UID, GID=$TARGET_GID"
+  else
+    TARGET_UID=1000
+    TARGET_GID=1000
+    log "Could not detect sudo user, using UID=$TARGET_UID, GID=$TARGET_GID"
+  fi
+}
 
-echo "Unmounting filesystems..."
-umount "$ROOT_MNT/run" 2>/dev/null || true
+fix_file_ownership() {
+  log "Fixing ownership and permissions of output files..."
+  get_target_ownership
+  
+  chown "$TARGET_UID:$TARGET_GID" "$IMAGE"
+  chown -R "$TARGET_UID:$TARGET_GID" "$WORK_DIR"
+  chown "$TARGET_UID:$TARGET_GID" "$LOGFILE"
+  
+  chmod 644 "$IMAGE"
+  chmod 644 "$LOGFILE"
+}
 
-umount -R "$ROOT_MNT/dev" 2>/dev/null || umount -l "$ROOT_MNT/dev" 2>/dev/null || true
+generate_bmap() {
+  log "Generating bmap file for sparse image writing..."
+  if command -v bmaptool >/dev/null 2>&1; then
+    bmaptool create -o "${IMAGE}.bmap" "${IMAGE}"
+    get_target_ownership
+    chown "$TARGET_UID:$TARGET_GID" "${IMAGE}.bmap"
+    chmod 644 "${IMAGE}.bmap"
+    log "Bmap file created: ${IMAGE}.bmap"
+  else
+    log "Warning: bmaptool not found. Install 'bmap-tools' for faster SD card writing."
+  fi
+}
 
-umount "$ROOT_MNT/sys" 2>/dev/null || true
-umount "$ROOT_MNT/proc" 2>/dev/null || true
-umount "$ROOT_MNT/boot" 2>/dev/null || true
-umount "$ROOT_MNT" 2>/dev/null || true
-losetup -D
-
-sync
-
-sync
-
-echo "Fixing ownership and permissions of output files..."
-if [[ -n "${SUDO_UID:-}" && -n "${SUDO_GID:-}" ]]; then
-  TARGET_UID="$SUDO_UID"
-  TARGET_GID="$SUDO_GID"
-  echo "Detected sudo user: UID=$TARGET_UID, GID=$TARGET_GID"
-else
-  TARGET_UID=1000
-  TARGET_GID=1000
-  echo "Could not detect sudo user, using UID=$TARGET_UID, GID=$TARGET_GID"
-fi
-
-chown "$TARGET_UID:$TARGET_GID" "$IMAGE"
-chown -R "$TARGET_UID:$TARGET_GID" "$WORKDIR"
-chown "$TARGET_UID:$TARGET_GID" "$LOGFILE"
-
-chmod 644 "$IMAGE"
-chmod 644 "$LOGFILE"
-
-echo "Generating bmap file for sparse image writing..."
-if command -v bmaptool >/dev/null 2>&1; then
-  bmaptool create -o "${IMAGE}.bmap" "${IMAGE}"
-  chown "$TARGET_UID:$TARGET_GID" "${IMAGE}.bmap"
-  chmod 644 "${IMAGE}.bmap"
-  echo "Bmap file created: ${IMAGE}.bmap"
-else
-  echo "Warning: bmaptool not found. Install 'bmap-tools' for faster SD card writing."
-fi
-
-echo
-echo "=========================================="
-echo "Disk image successfully created:"
-echo "  $IMAGE"
-echo "  $IMAGE.bmap (if bmaptool available)"
-echo "=========================================="
-echo
-echo "Log file saved to: $LOGFILE"
-echo
-echo "Contents:"
-echo "  - Boot partition with kernel, DTB, and initramfs"
-echo "  - Root filesystem with Arch Linux ARM and kernel modules"
-echo "  - Kernel installed via pacman from PKGBUILD"
-echo
-echo "To write to SD card:"
-if command -v bmaptool >/dev/null 2>&1; then
-  echo "  (Fast) sudo bmaptool copy $IMAGE /dev/sdX"
-  echo "  (Slow) sudo dd if=$IMAGE of=/dev/sdX bs=4M status=progress conv=fsync"
-else
-  echo "  sudo dd if=$IMAGE of=/dev/sdX bs=4M status=progress conv=fsync"
+print_summary() {
+  log_section "Disk image successfully created"
+  echo "  $IMAGE"
+  if command -v bmaptool >/dev/null 2>&1; then
+    echo "  $IMAGE.bmap"
+  fi
   echo
-  echo "  For faster writing, install bmap-tools:"
-  echo "  sudo pacman -S bmap-tools"
-fi
-echo
-echo "Completed at: $(date)"
+  echo "Log file saved to: $LOGFILE"
+  echo
+  echo "Contents:"
+  echo "  - Boot partition with kernel, DTB, and initramfs"
+  echo "  - Root filesystem with Arch Linux ARM and kernel modules"
+  echo "  - Kernel installed via pacman from PKGBUILD"
+  echo
+  echo "To write to SD card:"
+  if command -v bmaptool >/dev/null 2>&1; then
+    echo "  (Fast) sudo bmaptool copy $IMAGE /dev/sdX"
+    echo "  (Slow) sudo dd if=$IMAGE of=/dev/sdX bs=4M status=progress conv=fsync"
+  else
+    echo "  sudo dd if=$IMAGE of=/dev/sdX bs=4M status=progress conv=fsync"
+    echo
+    echo "  For faster writing, install bmap-tools:"
+    echo "  sudo pacman -S bmap-tools"
+  fi
+}
+
+# ============================================================================
+# Main Execution
+# ============================================================================
+
+main() {
+  # Setup logging
+  exec > >(tee -a "$LOGFILE") 2>&1
+  
+  log "Logging to: $LOGFILE"
+  log "Started at: $(date)"
+  echo
+  
+  # Validation
+  check_root
+  check_required_tools
+  echo
+  
+  # Create working directories
+  mkdir -p "$DOWNLOADS_DIR" "$BOOT_MNT" "$ROOT_MNT"
+  
+  # Image creation
+  create_disk_image
+  partition_image
+  setup_loop_device
+  format_partitions
+  mount_partitions
+  
+  # Download and extract
+  download_dependencies
+  extract_rootfs
+  extract_pocket_kernel
+  
+  # Filesystem configuration
+  create_fstab
+  setup_chroot_environment
+  
+  # Kernel installation
+  create_chroot_script
+  run_chroot_installation
+  cleanup_chroot_environment
+  
+  # Finalization
+  cleanup_mounts
+  sync
+  
+  fix_file_ownership
+  generate_bmap
+  print_summary
+  
+  log "Completed at: $(date)"
+}
+
+main "$@"
