@@ -732,6 +732,16 @@ def main():
                  'then saves the updated config back to configs/config-[VERSION]-mnt-reform-arm64'
             )
     parser.add_argument(
+            '--skip-git-ops',
+            action='store_true',
+            default=False,
+            help='Skip git reset, checkout, and tag operations. '
+                 'Assumes the kernel repository is already at the correct version and state. '
+                 'Useful for automated builds or when you have manually prepared the repository. '
+                 'When enabled, the script will not reset the repo, fetch tags, checkout the version, '
+                 'or create git commits/tags during the build process.'
+            )
+    parser.add_argument(
             '--version',
             action='version',
             help='Prints the version of the build script.',
@@ -745,7 +755,7 @@ def main():
             build_dir=args.build_dir,
             jobs=args.jobs,
             pkgrel=args.pkgrel,
-            skip_git_operations=False,
+            skip_git_operations=args.skip_git_ops,
             dry_run=args.dry_run,
             run_olddefconfig=args.olddefconfig
             )
