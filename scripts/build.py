@@ -223,8 +223,12 @@ class KernelBuilder:
         return cp
 
 
-    def check_prerequisites(self):
-        """Verify all required tools and files exist."""
+    def check_prerequisites(self, run_olddefconfig: bool = False):
+        """Verify all required tools and files exist.
+
+        Args:
+            run_olddefconfig: If True, check for defconfig instead of final config file.
+        """
         self.logger.info("Checking prerequisites...")
 
         required_tools = ['git', 'make', 'tar', 'aarch64-linux-gnu-gcc', 'patch']
@@ -238,8 +242,13 @@ class KernelBuilder:
         if missing_tools:
             raise BuildError(f"Missing required tools: {', '.join(missing_tools)}")
 
-        if not self.config.config_file.exists():
-            raise BuildError(f"Config file not found: {self.config.config_file}")
+        if run_olddefconfig:
+            defconfig_file = self.config.build_dir / "configs" / "defconfig"
+            if not defconfig_file.exists():
+                raise BuildError(f"defconfig file not found: {defconfig_file}")
+        else:
+            if not self.config.config_file.exists():
+                raise BuildError(f"Config file not found: {self.config.config_file}")
 
         if not self.config.patches_dir.exists():
             raise BuildError(f"Patches directory not found: {self.config.patches_dir}")
@@ -332,12 +341,45 @@ class KernelBuilder:
                 f"{result.stderr}\n"
                 )
 
-    def build_kernel(self, skip_git_operations: bool = False):
+    def update_config_with_olddefconfig(self):
+        """Update kernel config using olddefconfig.
+
+        Copies defconfig to .config, runs olddefconfig to update defaults,
+        then saves the updated config back to the configs directory.
+        """
+        self.logger.info("Updating kernel config with olddefconfig...")
+
+        defconfig_path = self.config.build_dir / "configs" / "defconfig"
+        if not defconfig_path.exists():
+            raise BuildError(f"defconfig not found: {defconfig_path}")
+
+        # Copy defconfig to .config in linux directory
+        self.logger.info(f"Copying {defconfig_path} to .config...")
+        self.run_command(['cp', str(defconfig_path), str(self.config.linux_dir / '.config')])
+
+        # Run olddefconfig to update config with defaults
+        self.logger.info("Running olddefconfig to update config defaults...")
+        self.run_command([
+            'make',
+            f'ARCH={self.arch}',
+            f'CROSS_COMPILE={self.cross_compile}',
+            'olddefconfig'
+        ], cwd=self.config.linux_dir)
+
+        # Copy updated .config back to configs directory
+        self.logger.info(f"Saving updated config to {self.config.config_file}...")
+        self.config.config_file.parent.mkdir(parents=True, exist_ok=True)
+        self.run_command(['cp', str(self.config.linux_dir / '.config'), str(self.config.config_file)])
+
+        self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Config updated successfully")
+
+    def build_kernel(self, skip_git_operations: bool = False, run_olddefconfig: bool = False):
         """Build the Linux kernel.
-        
+
         Args:
             skip_git_operations: If True, skip git reset/checkout operations.
                                 Assumes kernel is already at the correct version.
+            run_olddefconfig: If True, update config using olddefconfig before building.
         """
         self.logger.info(f"Building kernel {self.config.version}...")
         start_time = datetime.now()
@@ -363,6 +405,10 @@ class KernelBuilder:
             # Delete branch if it exists
             self.run_command(['git', 'branch', '-D', branch_name], check=False)
             self.run_command(['git', 'checkout', '-b', branch_name, f'tags/v{self.config.version}'])
+
+        # Update config with olddefconfig if requested
+        if run_olddefconfig:
+            self.update_config_with_olddefconfig()
 
         # Apply patches
         patch_stats = self.apply_patches()
@@ -566,9 +612,10 @@ class KernelBuilder:
 
 def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] = None,
               jobs: Optional[int] = None, pkgrel: int = DEFAULT_PKGREL,
-              skip_git_operations: bool = False, dry_run: bool = False) -> int:
+              skip_git_operations: bool = False, dry_run: bool = False,
+              run_olddefconfig: bool = False) -> int:
     """Run the kernel build process.
-    
+
     Args:
         version: Kernel version to build
         build_dir: Build directory (default: ~/mnt-build)
@@ -576,7 +623,8 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         pkgrel: Package release number
         skip_git_operations: If True, skip git reset/checkout operations
         dry_run: If True, only check prerequisites, do not build
-        
+        run_olddefconfig: If True, update config using olddefconfig before building
+
     Returns:
         Exit code (0 for success, non-zero for failure)
     """
@@ -609,14 +657,14 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         start_time = datetime.now()
 
         # Check prerequisites
-        builder.check_prerequisites()
+        builder.check_prerequisites(run_olddefconfig=run_olddefconfig)
 
         if dry_run:
             logger.info("Dry run mode - exiting after prerequisites check")
             return 0
 
         # Build everything
-        builder.build_kernel(skip_git_operations=skip_git_operations)
+        builder.build_kernel(skip_git_operations=skip_git_operations, run_olddefconfig=run_olddefconfig)
         builder.build_lpc_module()
         builder.build_qcacld2_module()
         builder.create_tarball()
@@ -677,6 +725,13 @@ def main():
             help='Check prerequisites only, do not build'
             )
     parser.add_argument(
+            '--olddefconfig',
+            action='store_true',
+            help='Update kernel config using olddefconfig before building. '
+                 'Copies configs/defconfig to .config, runs olddefconfig, '
+                 'then saves the updated config back to configs/config-[VERSION]-mnt-reform-arm64'
+            )
+    parser.add_argument(
             '--version',
             action='version',
             help='Prints the version of the build script.',
@@ -691,7 +746,8 @@ def main():
             jobs=args.jobs,
             pkgrel=args.pkgrel,
             skip_git_operations=False,
-            dry_run=args.dry_run
+            dry_run=args.dry_run,
+            run_olddefconfig=args.olddefconfig
             )
 
 
