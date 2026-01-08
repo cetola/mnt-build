@@ -14,7 +14,7 @@ At launch, the Pocket Reform shiped with the NXP i.MX8M Plus SoC, a quad-core AR
 
 The team at MNT Research has done an amazing job documenting their open hardware platform, making this project possible. 🙌
 
-## Getting Started
+## Building and Installing
 
 You'll need some tooling:
 
@@ -29,21 +29,15 @@ cd mnt-build
 git submodule update --init --recursive
 ```
 
-The first time you build, your config will not be correct. I'm still working on a portable way of doing this in the script. For now, run this:
+The first time you build, the config you need will probably not match the config in the repo. So at a minuimum you'll want to build with the olddefconfig option:
 
 ```bash
-## From a release tag [KERN_VER]-[PKGREL]-mnt-pocket
-## e.g. Releases 6.17.9-2-mnt-pocket
-cd linux
-git checkout -b my-branch-name tags/v[KERN_VER]
-cp ../configs/defconfig .config
-make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
-cp .config ../configs/config-[KERN_VER]-mnt-reform-arm64
-cd ..
-./scripts/build.py
+./scripts/build.py --olddefconifg
 ```
 
-You'll end up with a tarball of the kernel for the tag you selected. You can install it manually or use the PKGBUILD in [Additional Tooling](#additional-tooling).
+See --help for more options.
+
+Once the build is complete, you'll end up with a tarball containing the kernel, config, and some firmware. You can install these manually or use the PKGBUILD in [Additional Tooling](#additional-tooling).
 
 If you want headers for building out of tree modules:
 ```bash
