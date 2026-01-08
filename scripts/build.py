@@ -341,23 +341,73 @@ class KernelBuilder:
                 f"{result.stderr}\n"
                 )
 
-    def update_config_with_olddefconfig(self):
+    def checkout_kernel_version(self):
+        self.logger.info("Resetting repository state...")
+        self.run_command(['git', 'reset', '--hard', 'HEAD'])
+        self.run_command(['git', 'clean', '-fd'])
+        self.run_command(['git', 'checkout', 'master'])
+        self.run_command(['git', 'tag', '-d', f'v{self.config.version}'], check=False)
+
+        self.logger.info("Fetching git tags...")
+        self.run_command(['git', 'fetch', '--tags'])
+
+        branch_name = f"pocket-reform-{self.config.version}"
+        self.logger.info(f"Checking out kernel version v{self.config.version}...")
+
+        self.run_command(['git', 'branch', '-D', branch_name], check=False)
+        self.run_command(['git', 'checkout', '-b', branch_name, f'tags/v{self.config.version}'])
+
+    def setup_custom_dts(self):
+        """Copy custom DTS file and update the Freescale Makefile.
+
+        Copies the MNT Pocket Reform DTS file to the kernel source tree
+        and adds the corresponding entry to the Makefile for DTB creation.
+        """
+        self.logger.info("Adding custom DTS file...")
+        custom_dts = self.config.build_dir / "reform-debian-packages/linux/imx8mp-mnt-pocket-reform.dts"
+        dts_dest = self.config.linux_dir / "arch/arm64/boot/dts/freescale/imx8mp-mnt-pocket-reform.dts"
+        if not custom_dts.exists():
+            raise BuildError(f"Custom DTS file not found: {custom_dts}")
+        self.run_command(["cp", str(custom_dts), str(dts_dest)])
+
+        self.logger.info("Modifying freescale dts makefile...")
+        makefile = self.config.linux_dir / "arch/arm64/boot/dts/freescale/Makefile"
+        # Check if the entry already exists to avoid duplicates
+        makefile_content = makefile.read_text() if makefile.exists() else ""
+        if "imx8mp-mnt-pocket-reform.dtb" not in makefile_content:
+            with open(makefile, "a") as f:
+                f.write("\ndtb-$(CONFIG_ARCH_MXC) += imx8mp-mnt-pocket-reform.dtb\n")
+
+    def update_config_with_olddefconfig(self, skip_git_operations: bool = False):
         """Update kernel config using olddefconfig.
 
-        Copies defconfig to .config, runs olddefconfig to update defaults,
-        then saves the updated config back to the configs directory.
+        Prepares the kernel to the same state as when it will be built,
+        then run olddefconfig.
+
         """
         self.logger.info("Updating kernel config with olddefconfig...")
+        self.logger.info("Preparing kernel to build state before running olddefconfig...")
+
+        os.chdir(self.config.linux_dir)
+
+        if not skip_git_operations:
+            self.checkout_kernel_version()
+
+        patch_stats = self.apply_patches()
+        if patch_stats.failed > 0:
+            self.logger.warning(
+                    f"{patch_stats.failed} patches failed to apply. "
+                    "Config update will continue, but may not be accurate."
+                    )
+
+        self.setup_custom_dts()
 
         defconfig_path = self.config.build_dir / "configs" / "defconfig"
         if not defconfig_path.exists():
             raise BuildError(f"defconfig not found: {defconfig_path}")
-
-        # Copy defconfig to .config in linux directory
         self.logger.info(f"Copying {defconfig_path} to .config...")
         self.run_command(['cp', str(defconfig_path), str(self.config.linux_dir / '.config')])
 
-        # Run olddefconfig to update config with defaults
         self.logger.info("Running olddefconfig to update config defaults...")
         self.run_command([
             'make',
@@ -366,7 +416,6 @@ class KernelBuilder:
             'olddefconfig'
         ], cwd=self.config.linux_dir)
 
-        # Copy updated .config back to configs directory
         self.logger.info(f"Saving updated config to {self.config.config_file}...")
         self.config.config_file.parent.mkdir(parents=True, exist_ok=True)
         self.run_command(['cp', str(self.config.linux_dir / '.config'), str(self.config.config_file)])
@@ -386,49 +435,24 @@ class KernelBuilder:
 
         os.chdir(self.config.linux_dir)
 
-        if not skip_git_operations:
-            # Reset repository
-            self.logger.info("Resetting repository state...")
-            self.run_command(['git', 'reset', '--hard', 'HEAD'])
-            self.run_command(['git', 'clean', '-fd'])
-            self.run_command(['git', 'checkout', 'master'])
-            self.run_command(['git', 'tag', '-d', f'v{self.config.version}'], check=False)
-
-            # Fetch tags
-            self.logger.info("Fetching git tags...")
-            self.run_command(['git', 'fetch', '--tags'])
-
-            # Checkout version
-            branch_name = f"pocket-reform-{self.config.version}"
-            self.logger.info(f"Checking out kernel version v{self.config.version}...")
-
-            # Delete branch if it exists
-            self.run_command(['git', 'branch', '-D', branch_name], check=False)
-            self.run_command(['git', 'checkout', '-b', branch_name, f'tags/v{self.config.version}'])
-
-        # Update config with olddefconfig if requested
+        # Update config with olddefconfig if requested (this prepares the kernel state)
         if run_olddefconfig:
-            self.update_config_with_olddefconfig()
+            self.update_config_with_olddefconfig(skip_git_operations=skip_git_operations)
+        else:
+            # If not running olddefconfig, we still need to prepare the kernel state
+            if not skip_git_operations:
+                self.checkout_kernel_version()
 
-        # Apply patches
-        patch_stats = self.apply_patches()
-        if patch_stats.failed > 0:
-            self.logger.warning(
-                    f"{patch_stats.failed} patches failed to apply. "
-                    "Build will continue, but kernel may not work correctly."
-                    )
+            # Apply patches
+            patch_stats = self.apply_patches()
+            if patch_stats.failed > 0:
+                self.logger.warning(
+                        f"{patch_stats.failed} patches failed to apply. "
+                        "Build will continue, but kernel may not work correctly."
+                        )
 
-        # Copy DTS
-        self.logger.info("Adding custom DTS file...")
-        custom_dts = self.config.build_dir / "reform-debian-packages/linux/imx8mp-mnt-pocket-reform.dts"
-        dts_dest = self.config.linux_dir / "arch/arm64/boot/dts/freescale/imx8mp-mnt-pocket-reform.dts"
-        self.run_command(["cp", str(custom_dts), str(dts_dest)])
-
-        # Update the Freescale Makefile for the DTB creation
-        self.logger.info("Modifying freescale dts makefile...")
-        makefile = self.config.linux_dir / "arch/arm64/boot/dts/freescale/Makefile"
-        with open(makefile, "a") as f:
-            f.write("\ndtb-$(CONFIG_ARCH_MXC) += imx8mp-mnt-pocket-reform.dtb\n")
+            # Copy DTS and update Makefile
+            self.setup_custom_dts()
 
         # Copy config
         self.logger.info("Copying kernel config...")
