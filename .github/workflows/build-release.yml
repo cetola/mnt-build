@@ -33,16 +33,10 @@ jobs:
       - name: Launch EC2 Spot Instance
         id: launch-instance
         run: |
-          INSTANCE_ID=$(aws ec2 run-instances \
-            --image-id ami-00f46ccd1cbfb363e \
-            --instance-type c6i.8xlarge \
-            --instance-market-options '{"MarketType":"spot","SpotOptions":{"SpotInstanceType":"one-time","MaxPrice":"0.70"}}' \
-            --key-name github-actions-runner \
-            --security-group-ids sg-09c18dc7c46327e69 \
-            --subnet-id subnet-fa96bbd2 \
-            --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":30,"VolumeType":"gp3"}}]' \
-            --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=github-runner}]' \
-            --user-data '#!/bin/bash
+          # Try launching instance, retrying with different availability zones if needed
+          AVAILABILITY_ZONES=("us-west-2a" "us-west-2b" "us-west-2c" "us-west-2d")
+          INSTANCE_ID=""
+          USER_DATA='#!/bin/bash
               # Change ubuntu user UID to 1001 to match GitHub Actions runner
               usermod -u 1001 ubuntu
               groupmod -g 1001 ubuntu
@@ -50,9 +44,64 @@ jobs:
               apt-get update
               apt-get install -y docker.io git
               systemctl start docker
-              usermod -aG docker ubuntu' \
+              usermod -aG docker ubuntu'
+          
+          # First, try without specifying subnet/AZ to let AWS choose
+          echo "Attempting to launch instance (AWS will choose availability zone)..."
+          OUTPUT=$(aws ec2 run-instances \
+            --image-id ami-00f46ccd1cbfb363e \
+            --instance-type c6i.8xlarge \
+            --instance-market-options '{"MarketType":"spot","SpotOptions":{"SpotInstanceType":"one-time","MaxPrice":"0.70"}}' \
+            --key-name github-actions-runner \
+            --security-group-ids sg-09c18dc7c46327e69 \
+            --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":30,"VolumeType":"gp3"}}]' \
+            --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=github-runner}]' \
+            --user-data "$USER_DATA" \
             --query 'Instances[0].InstanceId' \
-            --output text)
+            --output text 2>&1)
+          EXIT_CODE=$?
+          INSTANCE_ID="$OUTPUT"
+          
+          # Check if the command failed
+          if [ $EXIT_CODE -ne 0 ] || [[ "$INSTANCE_ID" == *"InsufficientInstanceCapacity"* ]] || [[ "$INSTANCE_ID" == *"error"* ]] || [[ "$INSTANCE_ID" == *"Error"* ]] || [[ -z "$INSTANCE_ID" ]]; then
+            # If that fails, try each availability zone explicitly
+            echo "First attempt failed, trying specific availability zones..."
+            INSTANCE_ID=""
+            for AZ in "${AVAILABILITY_ZONES[@]}"; do
+              echo "Trying availability zone: $AZ"
+              OUTPUT=$(aws ec2 run-instances \
+                --image-id ami-00f46ccd1cbfb363e \
+                --instance-type c6i.8xlarge \
+                --instance-market-options '{"MarketType":"spot","SpotOptions":{"SpotInstanceType":"one-time","MaxPrice":"0.70"}}' \
+                --key-name github-actions-runner \
+                --security-group-ids sg-09c18dc7c46327e69 \
+                --placement AvailabilityZone=$AZ \
+                --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":30,"VolumeType":"gp3"}}]' \
+                --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=github-runner}]' \
+                --user-data "$USER_DATA" \
+                --query 'Instances[0].InstanceId' \
+                --output text 2>&1)
+              EXIT_CODE=$?
+              INSTANCE_ID="$OUTPUT"
+              
+              if [ $EXIT_CODE -eq 0 ] && [[ ! "$INSTANCE_ID" == *"InsufficientInstanceCapacity"* ]] && [[ ! "$INSTANCE_ID" == *"error"* ]] && [[ ! "$INSTANCE_ID" == *"Error"* ]] && [[ ! -z "$INSTANCE_ID" ]]; then
+                echo "Successfully launched instance in $AZ: $INSTANCE_ID"
+                break
+              else
+                echo "Failed to launch in $AZ: $INSTANCE_ID"
+                INSTANCE_ID=""
+                continue
+              fi
+            done
+          else
+            echo "Successfully launched instance (AWS-selected zone): $INSTANCE_ID"
+          fi
+          
+          if [ -z "$INSTANCE_ID" ] || [[ "$INSTANCE_ID" == *"error"* ]] || [[ "$INSTANCE_ID" == *"Error"* ]] || [[ "$INSTANCE_ID" == *"InsufficientInstanceCapacity"* ]]; then
+            echo "ERROR: Failed to launch instance in any availability zone"
+            echo "Last attempt output: $INSTANCE_ID"
+            exit 1
+          fi
           
           echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
           echo "Launched instance: $INSTANCE_ID"
