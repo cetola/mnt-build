@@ -1,0 +1,37 @@
+From e142b3299f5cf105f41b40df86973fa50f9a0fa1 Mon Sep 17 00:00:00 2001
+From: "Lukas F. Hartmann" <lukas@mntre.com>
+Date: Wed, 7 Sep 2022 06:20:37 +0200
+Subject: [PATCH 1/5] nwl-dsi-fixup-mode-only-for-LCDIF-input-not-DCSS
+
+---
+ drivers/gpu/drm/bridge/nwl-dsi.c | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/gpu/drm/bridge/nwl-dsi.c b/drivers/gpu/drm/bridge/nwl-dsi.c
+index 4a5f5c4f5dcc..fa7ebaba15ca 100644
+--- a/drivers/gpu/drm/bridge/nwl-dsi.c
++++ b/drivers/gpu/drm/bridge/nwl-dsi.c
+@@ -822,10 +822,17 @@ static int nwl_dsi_bridge_atomic_check(struct drm_bridge *bridge,
+ 				       struct drm_connector_state *conn_state)
+ {
+ 	struct drm_display_mode *adjusted_mode = &crtc_state->adjusted_mode;
++	struct device_node *remote;
++	struct nwl_dsi *dsi = bridge_to_dsi(bridge);
+ 
+-	/* At least LCDIF + NWL needs active high sync */
+-	adjusted_mode->flags |= (DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC);
+-	adjusted_mode->flags &= ~(DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC);
++	remote = of_graph_get_remote_node(dsi->dev->of_node, 0,
++						NWL_DSI_ENDPOINT_LCDIF);
++
++	if (remote) {
++		/* At least LCDIF + NWL needs active high sync */
++		adjusted_mode->flags |= (DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC);
++		adjusted_mode->flags &= ~(DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC);
++	}
+ 
+ 	/*
+ 	 * Do a full modeset if crtc_state->active is changed to be true.
+-- 
+2.40.0
+

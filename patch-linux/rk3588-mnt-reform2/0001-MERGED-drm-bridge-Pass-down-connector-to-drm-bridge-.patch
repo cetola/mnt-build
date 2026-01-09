@@ -1,0 +1,44 @@
+From 4d4dbe6641c9feb593a305b749ad0c353d25131e Mon Sep 17 00:00:00 2001
+From: Andy Yan <andy.yan@rock-chips.com>
+Date: Thu, 3 Jul 2025 20:49:53 +0800
+Subject: [PATCH 001/142] [MERGED] drm/bridge: Pass down connector to drm
+ bridge detect hook
+
+In some application scenarios, we hope to get the corresponding
+connector when the bridge's detect hook is invoked.
+
+In most cases, we can get the connector by drm_atomic_get_connector_for_encoder
+if the encoder attached to the bridge is enabled, however there will
+still be some scenarios where the detect hook of the bridge is called
+but the corresponding encoder has not been enabled yet. For instance,
+this occurs when the device is hot plug in for the first time.
+
+Since the call to bridge's detect is initiated by the connector, passing
+down the corresponding connector directly will make things simpler.
+
+Signed-off-by: Andy Yan <andy.yan@rock-chips.com>
+Reviewed-by: Dmitry Baryshkov <dmitry.baryshkov@oss.qualcomm.com>
+Link: https://lore.kernel.org/r/20250703125027.311109-3-andyshrk@163.com
+[Backport for Rockchip DP controller]
+Signed-off-by: Sebastian Reichel <sre@kernel.org>
+---
+ drivers/gpu/drm/xlnx/zynqmp_dp.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/xlnx/zynqmp_dp.c b/drivers/gpu/drm/xlnx/zynqmp_dp.c
+index 34ddbf98e81de..e2b82b10c1207 100644
+--- a/drivers/gpu/drm/xlnx/zynqmp_dp.c
++++ b/drivers/gpu/drm/xlnx/zynqmp_dp.c
+@@ -1677,7 +1677,8 @@ static int zynqmp_dp_bridge_atomic_check(struct drm_bridge *bridge,
+ 	return 0;
+ }
+ 
+-static enum drm_connector_status __zynqmp_dp_bridge_detect(struct zynqmp_dp *dp)
++static enum drm_connector_status
++zynqmp_dp_bridge_detect(struct drm_bridge *bridge, struct drm_connector *connector)
+ {
+ 	struct zynqmp_dp_link_config *link_config = &dp->link_config;
+ 	u32 state, i;
+-- 
+2.47.3
+

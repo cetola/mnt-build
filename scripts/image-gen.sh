@@ -4,10 +4,10 @@ set -euo pipefail
 # ============================================================================
 # Configuration
 # ============================================================================
-readonly KVER="6.18.3"
+readonly KVER="6.18.4"
 readonly PKGREL="1"
 readonly KERNEL_VERSION="${KVER}-mnt-pocket"
-readonly IMAGE_SIZE_GB=5
+readonly IMAGE_SIZE_GB=120
 readonly BOOT_SIZE_MB=1024
 readonly PARTITION_WAIT_MAX_ATTEMPTS=20
 readonly PARTITION_WAIT_INTERVAL=0.2
@@ -69,7 +69,7 @@ check_root() {
 check_required_tools() {
   local missing_tools=()
   local tool_map=(
-    "dd:coreutils"
+    "truncate:coreutils"
     "parted:parted"
     "losetup:util-linux"
     "mkfs.ext4:e2fsprogs"
@@ -143,8 +143,8 @@ trap cleanup EXIT
 # ============================================================================
 
 create_disk_image() {
-  log "Creating disk image..."
-  dd if=/dev/zero of="$IMAGE" bs=1M count=$((IMAGE_SIZE_GB * 1024)) status=progress
+  log "Creating sparse disk image..."
+  truncate -s "${IMAGE_SIZE_GB}G" "$IMAGE"
 }
 
 partition_image() {

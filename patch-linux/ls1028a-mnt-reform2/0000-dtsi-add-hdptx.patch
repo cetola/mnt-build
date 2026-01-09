@@ -1,0 +1,37 @@
+From a38d90dab271fd9911cf338e2693fd608744d9f7
+From: Lukas F. Hartmann <lukas@mntre.com>
+Subject: dtsi-add-hdptx
+Date:   Tue Nov 12 03:00:14 2024 +0100
+
+--- a/arch/arm64/boot/dts/freescale/fsl-ls1028a.dtsi
++++ b/arch/arm64/boot/dts/freescale/fsl-ls1028a.dtsi
+@@ -871,8 +871,28 @@
+ 			arm,malidp-arqos-value = <0xd000d000>;
+ 
+ 			port {
+-				dpi0_out: endpoint {
++					dpi0_out: endpoint {
++					remote-endpoint = <&dp1_out>;
++				};
++			};
++		};
+ 
++		hdptx0: display@f200000 {
++			compatible = "cdn,ls1028a-dp";
++			reg = <0x0 0xf200000 0x0 0xfffff>;
++			interrupts = <0 221 IRQ_TYPE_LEVEL_HIGH>;
++			clocks = <&clockgen QORIQ_CLK_HWACCEL 2>, <&clockgen QORIQ_CLK_HWACCEL 2>,
++							 <&clockgen QORIQ_CLK_HWACCEL 2>, <&clockgen QORIQ_CLK_HWACCEL 2>,
++							 <&clockgen QORIQ_CLK_HWACCEL 2>, <&dpclk>;
++			clock-names = "clk_core", "pclk", "sclk",
++										"cclk", "clk_vif", "clk_pxl";
++			lane-mapping = <0x4e>;
++			edp_num_lanes = <0x2>;
++			firmware-name = "ls1028a-mhdpfw.bin";
++
++			port {
++				dp1_out: endpoint {
++					remote-endpoint = <&dpi0_out>;
+ 				};
+ 			};
+ 		};
