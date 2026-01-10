@@ -1,20 +1,22 @@
-<img src="https://github.com/user-attachments/assets/89621d81-83b3-4d57-bd69-2859dc4e0123" alt="mnt_pocket_arch" width="600">
-
 # Kernel Build for MNT Pocket Reform
 
-## Motivation
-
-I am writing software for the MNT Pocket Reform in support of some custom hardware I'm building. I wanted to learn about how the bootloader, firmware, initramfs, and OS worked on the laptop. Getting Arch Linux running on it seemed like a reasonable way to do this, at the time. 🤷
-
-## About the MNT Pocket Reform
+## :computer: About the MNT Pocket Reform
 
 The MNT Pocket Reform is a compact, portable laptop built on the principles of open hardware and user freedom.
 
-At launch, the Pocket Reform shiped with the NXP i.MX8M Plus SoC, a quad-core ARM Cortex-A53 processor paired with a Cortex-M7 real-time core. This is the only SoC supported now, but I plan to support the rk3588 module as well.
+At launch, the Pocket Reform shiped with the NXP i.MX8 M Plus SoC, a quad-core ARM Cortex-A53 processor paired with a Cortex-M7 real-time core.
 
-The team at MNT Research has done an amazing job documenting their open hardware platform, making this project possible. 🙌
+The team at [MNT Research](https://mntre.com/) has done an amazing job documenting their open hardware platform, making this project possible. 🙌
 
-## Building and Installing
+## :shipit: Downloading & Booting
+Releases will have both a kernel and Linux headers zip. The `image-gen.sh` script uses the kernel generated from a release to create a 120G sparse image & bmap file `mnt-pocket-[ver]-aarch64.img.zst[.bmap]`. See [the docs](https://github.com/yoctoproject/bmaptool) for more info on bmap-tool.
+
+```bash
+sudo bmaptool copy path/to/mnt-pocket-[ver]-aarch64.img.zst /dev/sdX
+```
+You'll boot into an Arch Linux ARM filesystem. Users include `root` and `alarm`. Passwords are the same as the username.
+
+## :construction_worker: Building and Installing
 
 You'll need some tooling:
 
@@ -24,12 +26,12 @@ required_tools = ['git', 'make', 'tar', 'aarch64-linux-gnu-gcc', 'patch']
 
 Then run:
 ```bash
-git clone https://github.com/cetola/mnt-build.git
-cd mnt-build
+git clone https://github.com/cetola/mnt-build.git ~/mnt-build
+cd ~/mnt-build
 git submodule update --init --recursive
 ```
 
-The first time you build, the config you need will probably not match the config in the repo. So at a minuimum you'll want to build with the olddefconfig option:
+The first time you build, the config you need will probably not match the config in the repo. So at a minimum you'll want to build with the olddefconfig option:
 
 ```bash
 ./scripts/build.py --olddefconifg
@@ -46,16 +48,20 @@ If you want headers for building out of tree modules:
 
 Again, you can install manually, or use the [Additional Tooling](#additional-tooling).
 
-## Additional Tooling
+## :hammer: Additional Tooling
 
-If you want to install this "the Arch way" you can use [this PKGBUILD project](https://github.com/cetola/linux-mnt-pocket).
+There are PKGBUILDs for both the [kernel](https://github.com/cetola/linux-mnt-pocket) and [kernel headers](https://github.com/cetola/linux-mnt-pocket-headers).
 
-Likewise for the kernel headers you can use [this PKGBUILD](https://github.com/cetola/linux-mnt-pocket-headers).
+## :pencil2: Notes
 
-## Notes
-
-This is very much a work in progress. Do not try to use this unless you are on a release tag. Even then, YMMV.
+This is very much a work in progress. Do not try to build unless you are on a release tag. Even then, YMMV.
 
 There is a container in the scripts directory if you happen to be building for Arch and care about toolchain skew.
 
-These scripts are an automation of a full guide that I posted on the [MNT Community Forum](https://community.mnt.re/t/guide-how-to-arch-linux-on-the-pocket-reform/3918). See there for more details. See the [Arch Linux Arm](https://archlinuxarm.org/) site to grab a filesystem.
+These scripts are an automation of a full guide that I posted on the [MNT Community Forum](https://community.mnt.re/t/guide-how-to-arch-linux-on-the-pocket-reform/3918). See there for more details. See the [Arch Linux Arm](https://archlinuxarm.org/) site to grab a filesystem and install manually.
+
+If you use one of the provided images, know I have only tested on the i.MX8 M Plus MNT Pocket Reform. That being said, the kernel is patched with all patches from reform-debian-packages -> linux -> patches[ver]. As such it should boot on any platform.
+
+## :rocket: Next Steps
+
+The kernel tarball and accompanying PKGBUILD will install the reform2_lpc and wlan (qcacld) out-of-tree kernel modules for the i.MX8M Plus. That is a rather small but necessary part of [reform-tools](https://source.mnt.re/reform/reform-tools). Porting the rest of these tools to Arch will make the experience much easier. Perhaps not the point of Arch, but hey, one has to have goals. :grinning:
