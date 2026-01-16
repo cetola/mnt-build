@@ -60,7 +60,7 @@ There is a container in the scripts directory if you happen to be building for A
 
 These scripts are an automation of a full guide that I posted on the [MNT Community Forum](https://community.mnt.re/t/guide-how-to-arch-linux-on-the-pocket-reform/3918). See there for more details. See the [Arch Linux Arm](https://archlinuxarm.org/) site to grab a filesystem and install manually.
 
-If you use one of the provided images, know I have only tested on the i.MX8 M Plus MNT Pocket Reform. That being said, the kernel is patched with all patches from reform-debian-packages -> linux -> patches[ver]. As such it should boot on any platform.
+If you use one of the provided images, know I have only tested on the i.MX8 M Plus MNT Pocket Reform. That being said, the kernel is patched with all patches from reform-debian-packages -> linux -> patches[ver]. As such it should boot on any MNT Reform platform. Be sure you have the correct device tree installed as the image and the PKGBUILD both install the i.MX8 M Plus dtb file.
 
 ## :rocket: Next Steps
 
