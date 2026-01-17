@@ -19,7 +19,7 @@ from typing import List, Optional, Tuple
 
 __version__ = "0.3.1"
 
-DEFAULT_KERNEL_VERSION = '6.18.5'
+DEFAULT_KERNEL_VERSION = '6.18.6'
 DEFAULT_PKGREL = 1
 
 

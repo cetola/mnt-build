@@ -4,7 +4,7 @@ set -euo pipefail
 # ============================================================================
 # Configuration
 # ============================================================================
-readonly KVER="6.18.5"
+readonly KVER="6.18.6"
 readonly PKGREL="1"
 readonly KERNEL_VERSION="${KVER}-mnt-pocket"
 readonly IMAGE_SIZE_GB=120
