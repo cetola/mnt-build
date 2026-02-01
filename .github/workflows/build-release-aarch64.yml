@@ -1,0 +1,258 @@
+name: Remote Build and Release Arm
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          # Verify the key format
+          head -1 ~/.ssh/id_rsa
+          tail -1 ~/.ssh/id_rsa
+
+      - name: Launch EC2 Spot Instance
+        id: launch-instance
+        run: |
+          # Try launching instance, retrying with different availability zones if needed
+          AVAILABILITY_ZONES=("us-west-2a" "us-west-2b" "us-west-2c" "us-west-2d")
+          INSTANCE_ID=""
+          USER_DATA='#!/bin/bash
+              # Change ubuntu user UID to 1001 to match GitHub Actions runner
+              usermod -u 1001 ubuntu
+              groupmod -g 1001 ubuntu
+              chown -R ubuntu:ubuntu /home/ubuntu
+              apt-get update
+              apt-get install -y \
+              git python3 python3-pip \
+              build-essential \
+              sudo \
+              ca-certificates \
+              wget \
+              curl \
+              rsync \
+              bc \
+              kmod \
+              cpio \
+              perl \
+              tar \
+              xz-utils \
+              dracut \
+              device-tree-compiler \
+              libelf-dev \
+              flex \
+              bison \
+              libssl-dev \
+              binutils-aarch64-linux-gnu \
+              gcc-aarch64-linux-gnu \
+              gdb-multiarch \
+              parted \
+              qemu-user-static \
+              qemu-system \
+              qemu-utils \
+              binfmt-support \
+              gdb \
+              strace \
+              lsof \
+              pciutils \
+              usbutils \
+              iproute2 \
+              net-tools \
+              man-db \
+              less \
+              which \
+              file \
+              tmux \
+              unzip \
+              zip
+              pip3 install --upgrade pip'
+
+          # Get the latest Ubuntu 24.04 ARM64 AMI
+          echo "Fetching latest Ubuntu 24.04 ARM64 AMI..."
+          ARM64_AMI=$(aws ssm get-parameter \
+            --name /aws/service/canonical/ubuntu/server/24.04/stable/current/arm64/hvm/ebs-gp3/ami-id \
+            --query 'Parameter.Value' \
+            --output text)
+          echo "Using AMI: $ARM64_AMI"
+          
+          # First, try without specifying subnet/AZ to let AWS choose
+          echo "Attempting to launch ARM64 instance (AWS will choose availability zone)..."
+          OUTPUT=$(aws ec2 run-instances \
+            --image-id "$ARM64_AMI" \
+            --instance-type c7g.8xlarge \
+            --instance-market-options '{"MarketType":"spot","SpotOptions":{"SpotInstanceType":"one-time","MaxPrice":"0.70"}}' \
+            --key-name github-actions-runner \
+            --security-group-ids sg-09c18dc7c46327e69 \
+            --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":30,"VolumeType":"gp3"}}]' \
+            --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=github-runner-arm64}]' \
+            --user-data "$USER_DATA" \
+            --query 'Instances[0].InstanceId' \
+            --output text 2>&1)
+          EXIT_CODE=$?
+          INSTANCE_ID="$OUTPUT"
+          
+          # Check if the command failed
+          if [ $EXIT_CODE -ne 0 ] || [[ "$INSTANCE_ID" == *"InsufficientInstanceCapacity"* ]] || [[ "$INSTANCE_ID" == *"error"* ]] || [[ "$INSTANCE_ID" == *"Error"* ]] || [[ -z "$INSTANCE_ID" ]]; then
+            # If that fails, try each availability zone explicitly
+            echo "First attempt failed, trying specific availability zones..."
+            INSTANCE_ID=""
+            for AZ in "${AVAILABILITY_ZONES[@]}"; do
+              echo "Trying availability zone: $AZ"
+              OUTPUT=$(aws ec2 run-instances \
+                --image-id "$ARM64_AMI" \
+                --instance-type c7g.8xlarge \
+                --instance-market-options '{"MarketType":"spot","SpotOptions":{"SpotInstanceType":"one-time","MaxPrice":"0.70"}}' \
+                --key-name github-actions-runner \
+                --security-group-ids sg-09c18dc7c46327e69 \
+                --placement AvailabilityZone=$AZ \
+                --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":30,"VolumeType":"gp3"}}]' \
+                --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=github-runner-arm64}]' \
+                --user-data "$USER_DATA" \
+                --query 'Instances[0].InstanceId' \
+                --output text 2>&1)
+              EXIT_CODE=$?
+              INSTANCE_ID="$OUTPUT"
+              
+              if [ $EXIT_CODE -eq 0 ] && [[ ! "$INSTANCE_ID" == *"InsufficientInstanceCapacity"* ]] && [[ ! "$INSTANCE_ID" == *"error"* ]] && [[ ! "$INSTANCE_ID" == *"Error"* ]] && [[ ! -z "$INSTANCE_ID" ]]; then
+                echo "Successfully launched instance in $AZ: $INSTANCE_ID"
+                break
+              else
+                echo "Failed to launch in $AZ: $INSTANCE_ID"
+                INSTANCE_ID=""
+                continue
+              fi
+            done
+          else
+            echo "Successfully launched instance (AWS-selected zone): $INSTANCE_ID"
+          fi
+          
+          if [ -z "$INSTANCE_ID" ] || [[ "$INSTANCE_ID" == *"error"* ]] || [[ "$INSTANCE_ID" == *"Error"* ]] || [[ "$INSTANCE_ID" == *"InsufficientInstanceCapacity"* ]]; then
+            echo "ERROR: Failed to launch instance in any availability zone"
+            echo "Last attempt output: $INSTANCE_ID"
+            exit 1
+          fi
+          
+          echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
+          echo "Launched instance: $INSTANCE_ID"
+          aws ec2 wait instance-running --instance-ids $INSTANCE_ID
+          PUBLIC_IP=$(aws ec2 describe-instances \
+            --instance-ids $INSTANCE_ID \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' \
+            --output text)
+          echo "public_ip=$PUBLIC_IP" >> $GITHUB_OUTPUT
+          echo "Instance running at: $PUBLIC_IP"
+          
+          # Wait for SSH to be ready
+          echo "Waiting for SSH to be ready..."
+          for i in {1..30}; do
+            if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i ~/.ssh/id_rsa ubuntu@$PUBLIC_IP echo "SSH Ready" 2>/dev/null; then
+              echo "SSH is ready!"
+              break
+            fi
+            echo "Waiting for SSH... attempt $i/30"
+            sleep 10
+          done
+
+      - name: Setup build on instance
+        run: |
+          ssh-keyscan -H ${{ steps.launch-instance.outputs.public_ip }} >> ~/.ssh/known_hosts
+          ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }} << 'EOF'
+            cd ~
+            git clone --depth 1 --no-checkout https://github.com/${{ github.repository }} mnt-build
+            cd mnt-build
+            git fetch --depth 1 origin ${{ github.sha }}
+            git checkout ${{ github.sha }}
+            git submodule update --init --recursive --depth 1
+          EOF
+
+      - name: Run build-auto.py on instance
+        id: run_build
+        continue-on-error: true
+        run: |
+          ssh ubuntu@${{ steps.launch-instance.outputs.public_ip }} << 'EOF'
+            cd ~/mnt-build/scripts
+            python3 build-auto.py
+          EOF
+
+      - name: Run headers-gen.py on instance
+        id: run_headers
+        continue-on-error: true
+        run: |
+          ssh ubuntu@${{ steps.launch-instance.outputs.public_ip }} << 'EOF'
+            cd ~/mnt-build/scripts
+            python3 headers-gen.py
+          EOF
+
+      - name: Collect logs
+        if: always()
+        run: |
+          mkdir -p build-logs
+          ssh ubuntu@${{ steps.launch-instance.outputs.public_ip }} << 'EOF'
+            find ~/mnt-build -maxdepth 1 -name "*.log" -type f -exec cp {} /tmp/ \; || true
+            find ~/mnt-build/scripts -name "*.log" -type f -exec cp {} /tmp/ \; || true
+          EOF
+          scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:/tmp/*.log build-logs/ 2>/dev/null || true
+          echo "Collected logs:"
+          ls -lh build-logs/
+
+      - name: Copy kernel artifacts back
+        if: ${{ steps.run_build.outcome == 'success' }}
+        run: |
+          mkdir -p release-artifacts
+          scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/kernel-*-mnt.tar.gz release-artifacts/ || true
+          ls -lh release-artifacts/
+
+      - name: Copy headers artifacts back
+        if: ${{ steps.run_headers.outcome == 'success' }}
+        run: |
+          mkdir -p release-artifacts
+          scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/scripts/headers-*-mnt.tar.gz release-artifacts/ || true
+          ls -lh release-artifacts/
+
+      - name: Terminate EC2 instance
+        if: always()
+        run: |
+          aws ec2 terminate-instances --instance-ids ${{ steps.launch-instance.outputs.instance_id }}
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: build-logs/*
+
+      - name: Upload artifacts
+        if: ${{ steps.run_build.outcome == 'success' && steps.run_headers.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: release-artifacts/*-mnt.tar.gz
+
+      - name: Create Release
+        if: >
+          startsWith(github.ref, 'refs/tags/') &&
+          steps.run_build.outcome == 'success' &&
+          steps.run_headers.outcome == 'success'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release-artifacts/*-mnt.tar.gz
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
