@@ -19,8 +19,33 @@ from typing import List, Optional, Tuple
 
 __version__ = "0.3.2"
 
-DEFAULT_KERNEL_VERSION = '6.18.6'
+DEFAULT_KERNEL_VERSION = '6.18.9'
 DEFAULT_PKGREL = 1
+
+
+# DTS/DTB configuration - single source of truth for all DTS files
+DTS_CONFIGS = [
+    {
+        "name": "imx8mp-mnt-pocket-reform.dts",
+        "vendor": "freescale",
+        "config": "CONFIG_ARCH_MXC"
+    },
+    {
+        "name": "meson-g12b-bananapi-cm4-mnt-pocket-reform.dts",
+        "vendor": "amlogic",
+        "config": "CONFIG_ARCH_MESON"
+    },
+    {
+        "name": "rk3588-mnt-pocket-reform.dts",
+        "vendor": "rockchip",
+        "config": "CONFIG_ARCH_ROCKCHIP"
+    },
+    {
+        "name": "rk3588-mnt-reform-next.dts",
+        "vendor": "rockchip",
+        "config": "CONFIG_ARCH_ROCKCHIP"
+    }
+]
 
 
 # ANSI color codes for terminal output
@@ -40,7 +65,7 @@ class BuildConfig:
     linux_dir: Path
     patches_dir: Path
     config_file: Path
-    dtb_file: Path
+    dtb_files: list[Path]
     output_tar: Path
     log_file: Path
     jobs: int
@@ -64,6 +89,12 @@ class BuildConfig:
         # Extract major.minor version (e.g., "6.17" from "6.17.8")
         version_parts = version.split('.')
         major_minor = f"{version_parts[0]}.{version_parts[1]}"
+        
+        # Generate DTB file paths from DTS_CONFIGS
+        dtb_files = [
+            linux_dir / f"arch/arm64/boot/dts/{dts_config['vendor']}/{dts_config['name'].replace('.dts', '.dtb')}"
+            for dts_config in DTS_CONFIGS
+        ]
 
         return cls(
                 version=version,
@@ -71,7 +102,7 @@ class BuildConfig:
                 linux_dir=linux_dir,
                 patches_dir=build_dir / "reform-debian-packages" / "linux" / f"patches{major_minor}",
                 config_file=build_dir / "configs" / f"config-{version}-mnt-reform-arm64",
-                dtb_file=linux_dir / "arch/arm64/boot/dts/freescale/imx8mp-mnt-pocket-reform.dtb",
+                dtb_files=dtb_files,
                 output_tar=linux_dir / f"kernel-{version}-{pkgrel}-mnt.tar.gz",
                 log_file=build_dir / f"build-{version}-{timestamp}.log",
                 jobs=jobs,
@@ -110,7 +141,7 @@ def setup_logging(log_file: Path) -> logging.Logger:
     file_handler = logging.FileHandler(log_file)
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(
-            logging.Formatter('%(levelname)s %(asctime)s - %(message)s', 
+            logging.Formatter('%(levelname)s %(asctime)s - %(message)s',
                               datefmt='%Y-%m-%d %H:%M:%S')
             )
 
@@ -220,7 +251,6 @@ class KernelBuilder:
         # Return a fake CompletedProcess-like object with stdout/stderr empty (we logged to file)
         cp = subprocess.CompletedProcess(cmd, ret, stdout=None, stderr=None)
         return cp
-
 
     def check_prerequisites(self, run_olddefconfig: bool = False):
         """Verify all required tools and files exist.
@@ -356,26 +386,47 @@ class KernelBuilder:
         self.run_command(['git', 'branch', '-D', branch_name], check=False)
         self.run_command(['git', 'checkout', '-b', branch_name, f'tags/v{self.config.version}'])
 
-    def setup_custom_dts(self):
-        """Copy custom DTS file and update the Freescale Makefile.
-
-        Copies the MNT Pocket Reform DTS file to the kernel source tree
-        and adds the corresponding entry to the Makefile for DTB creation.
+    def setup_custom_dts_files(self):
+        """Copy custom DTS files and update vendor Makefiles.
+        Copies DTS files to the kernel source tree and adds corresponding
+        entries to vendor-specific Makefiles for DTB creation.
         """
-        self.logger.info("Adding custom DTS file...")
-        custom_dts = self.config.build_dir / "reform-debian-packages/linux/imx8mp-mnt-pocket-reform.dts"
-        dts_dest = self.config.linux_dir / "arch/arm64/boot/dts/freescale/imx8mp-mnt-pocket-reform.dts"
-        if not custom_dts.exists():
-            raise BuildError(f"Custom DTS file not found: {custom_dts}")
-        self.run_command(["cp", str(custom_dts), str(dts_dest)])
+        self.logger.info(f"Adding {len(DTS_CONFIGS)} custom DTS files...")
 
-        self.logger.info("Modifying freescale dts makefile...")
-        makefile = self.config.linux_dir / "arch/arm64/boot/dts/freescale/Makefile"
-        # Check if the entry already exists to avoid duplicates
-        makefile_content = makefile.read_text() if makefile.exists() else ""
-        if "imx8mp-mnt-pocket-reform.dtb" not in makefile_content:
-            with open(makefile, "a") as f:
-                f.write("\ndtb-$(CONFIG_ARCH_MXC) += imx8mp-mnt-pocket-reform.dtb\n")
+        for dts_config in DTS_CONFIGS:
+            # Copy DTS file
+            custom_dts = self.config.build_dir / f"reform-debian-packages/linux/{dts_config['name']}"
+            dts_dest = self.config.linux_dir / f"arch/arm64/boot/dts/{dts_config['vendor']}/{dts_config['name']}"
+
+            if not custom_dts.exists():
+                raise BuildError(f"Custom DTS file not found: {custom_dts}")
+
+            self.run_command(["cp", str(custom_dts), str(dts_dest)])
+            self.logger.info(f"  Copied {dts_config['name']} to {dts_config['vendor']}/")
+
+        # Update Makefiles (group by vendor to avoid processing same file multiple times)
+        vendors_to_update = {}
+        for dts_config in DTS_CONFIGS:
+            vendor = dts_config['vendor']
+            if vendor not in vendors_to_update:
+                vendors_to_update[vendor] = []
+            dtb_name = dts_config['name'].replace('.dts', '.dtb')
+            vendors_to_update[vendor].append((dtb_name, dts_config['config']))
+
+        for vendor, dtb_entries in vendors_to_update.items():
+            self.logger.info(f"Modifying {vendor} dts Makefile...")
+            makefile = self.config.linux_dir / f"arch/arm64/boot/dts/{vendor}/Makefile"
+            makefile_content = makefile.read_text() if makefile.exists() else ""
+
+            entries_to_add = []
+            for dtb_name, config in dtb_entries:
+                if dtb_name not in makefile_content:
+                    entries_to_add.append(f"dtb-$({config}) += {dtb_name}\n")
+                    self.logger.info(f"  Adding {dtb_name} to {vendor} Makefile")
+
+            if entries_to_add:
+                with open(makefile, "a") as f:
+                    f.write("\n" + "".join(entries_to_add))
 
     def update_config_with_olddefconfig(self, skip_git_operations: bool = False):
         """Update kernel config using olddefconfig.
@@ -399,7 +450,7 @@ class KernelBuilder:
                     "Config update will continue, but may not be accurate."
                     )
 
-        self.setup_custom_dts()
+        self.setup_custom_dts_files()
 
         defconfig_path = self.config.build_dir / "configs" / "defconfig"
         if not defconfig_path.exists():
@@ -447,11 +498,11 @@ class KernelBuilder:
             if patch_stats.failed > 0:
                 self.logger.warning(
                         f"{patch_stats.failed} patches failed to apply. "
-                        "Build will continue, but kernel may not work correctly."
+                        "Build will continue, but may fail or produce unexpected results."
                         )
 
-            # Copy DTS and update Makefile
-            self.setup_custom_dts()
+            # Setup custom DTS
+            self.setup_custom_dts_files()
 
         # Copy config
         self.logger.info("Copying kernel config...")
@@ -469,40 +520,45 @@ class KernelBuilder:
         self.run_command(
                 [
                     'make',
+                    f'-j{self.config.jobs}',
                     f'ARCH={self.arch}',
                     f'CROSS_COMPILE={self.cross_compile}',
-                    f'-j{self.config.jobs}',
-                    'Image', 'modules', 'dtbs'
+                    'Image',
+                    'dtbs',
+                    'modules'
                     ],
                 cwd=self.config.linux_dir,
-                stream_output=True)
+                stream_output=True
+                )
+
+        # Install modules to temporary location
+        modules_dir = self.config.linux_dir / "modules"
+        self.logger.info(f"Installing modules to {modules_dir}...")
+        if modules_dir.exists():
+            shutil.rmtree(modules_dir)
+        self.run_command(
+                [
+                    'make',
+                    f'ARCH={self.arch}',
+                    f'CROSS_COMPILE={self.cross_compile}',
+                    f'INSTALL_MOD_PATH={modules_dir}',
+                    'modules_install'
+                    ],
+                stream_output=True,
+                cwd=self.config.linux_dir
+                )
 
         elapsed = (datetime.now() - start_time).total_seconds()
-        self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Kernel compiled in {elapsed:.0f} seconds")
-
-        # Install modules
-        self.logger.info("Installing modules...")
-        modules_path = self.config.linux_dir / "modules"
-        self.run_command([
-            'make',
-            f'ARCH={self.arch}',
-            f'CROSS_COMPILE={self.cross_compile}',
-            'modules_install',
-            f'INSTALL_MOD_PATH={modules_path}',
-            f'-j{self.config.jobs}'
-            ])
-
-        self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Kernel build complete")
+        self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Kernel built in {elapsed:.0f} seconds")
 
     def build_lpc_module(self):
-        """Build the LPC module."""
+        """Build the LPC kernel module."""
         self.logger.info("Building LPC module...")
         lpc_dir = self.config.build_dir / "reform-tools" / "lpc"
 
-        os.chdir(lpc_dir)
+        if not lpc_dir.exists():
+            raise BuildError(f"LPC module directory not found: {lpc_dir}")
 
-        # Build module
-        self.logger.info("Compiling LPC module...")
         self.run_command([
             'make',
             f'ARCH={self.arch}',
@@ -510,9 +566,10 @@ class KernelBuilder:
             f'-C{self.config.linux_dir}',
             f'M={lpc_dir}',
             f'-j{self.config.jobs}'
-            ])
+            ],
+        cwd=lpc_dir
+        )
 
-        # Verify output
         if not (lpc_dir / "reform2_lpc.ko").exists():
             raise BuildError("LPC module build failed - reform2_lpc.ko not found")
 
@@ -521,20 +578,17 @@ class KernelBuilder:
     def build_qcacld2_module(self):
         """Build the QCACLD2 WiFi module."""
         self.logger.info("Building QCACLD2 WiFi module...")
-        qcacld2_dir = self.config.build_dir / "qcacld2"
+        qca_dir = self.config.build_dir / "qcacld2"
 
-        os.chdir(qcacld2_dir)
+        if not qca_dir.exists():
+            raise BuildError(f"QCACLD2 module directory not found: {qca_dir}")
 
-        # Build module
-        self.logger.info("Compiling QCACLD2 module...")
         self.run_command(
-            ["bash", "./build.sh"],
-            cwd=Path(qcacld2_dir),
-            stream_output=False
-        )
+                ["bash", "./build.sh"],
+                cwd=qca_dir
+                )
 
-        # Verify output
-        if not (qcacld2_dir / "wlan.ko").exists():
+        if not (qca_dir / "wlan.ko").exists():
             raise BuildError("QCACLD2 module build failed - wlan.ko not found")
 
         self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} QCACLD2 module built")
@@ -552,13 +606,16 @@ class KernelBuilder:
 
         # Verify all required files exist
         required_files = {
-                'kernel': self.config.linux_dir / "arch/arm64/boot/Image",
-                'dtb': self.config.dtb_file,
-                'config': self.config.config_file,
-                'lpc_module': self.config.build_dir / "reform-tools/lpc/reform2_lpc.ko",
-                'wifi_module': self.config.build_dir / "qcacld2/wlan.ko",
-                'modules': self.config.linux_dir / "modules/lib/modules"
-                }
+            'kernel': self.config.linux_dir / "arch/arm64/boot/Image",
+            'config': self.config.config_file,
+            'lpc_module': self.config.build_dir / "reform-tools/lpc/reform2_lpc.ko",
+            'wifi_module': self.config.build_dir / "qcacld2/wlan.ko",
+            'modules': self.config.linux_dir / "modules/lib/modules"
+        }
+
+        # Add all DTB files to required files check
+        for i, dtb_path in enumerate(self.config.dtb_files):
+            required_files[f'dtb_{i}'] = dtb_path
 
         for name, path in required_files.items():
             if not path.exists():
@@ -576,11 +633,14 @@ class KernelBuilder:
                     arcname="arch/arm64/boot/Image"
                     )
 
-            # Add DTB
-            tar.add(
-                    self.config.dtb_file,
-                    arcname=f"imx8mp-mnt-pocket-reform-{self.config.version}.dtb"
-                    )
+            # Add all DTB files
+            for dtb_path in self.config.dtb_files:
+                dtb_filename = dtb_path.name.replace('.dtb', f'-{self.config.version}.dtb')
+                tar.add(
+                        dtb_path,
+                        arcname=dtb_filename
+                        )
+                self.logger.info(f"  Added DTB: {dtb_filename}")
 
             # Add LPC module
             tar.add(
@@ -594,7 +654,7 @@ class KernelBuilder:
                     arcname="wlan.ko"
                     )
 
-            # Add WiFi firmware 
+            # Add WiFi firmware
             tar.add(
                     self.config.build_dir / "qcacld2/debian-meta/usr",
                     arcname="usr"
@@ -623,7 +683,6 @@ class KernelBuilder:
         if dest_path.exists():
             dest_path.unlink()
         self.config.output_tar.rename(dest_path)
-
 
         # Report size
         size_mb = dest_path.stat().st_size / (1024 * 1024)
