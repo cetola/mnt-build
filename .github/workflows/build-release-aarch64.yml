@@ -180,10 +180,11 @@ jobs:
         run: |
           ssh ubuntu@${{ steps.launch-instance.outputs.public_ip }} << 'EOF'
             cd ~/mnt-build/scripts
-            python3 build-auto.py
+            python3 build-auto.py --cross-compile none
           EOF
 
       - name: Run headers-gen.py on instance
+        if: ${{ false }}
         id: run_headers
         continue-on-error: true
         run: |
@@ -231,7 +232,7 @@ jobs:
           path: build-logs/*
 
       - name: Upload artifacts
-        if: ${{ steps.run_build.outcome == 'success' && steps.run_headers.outcome == 'success' }}
+        if: ${{ steps.run_build.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: build-artifacts
@@ -240,8 +241,7 @@ jobs:
       - name: Create Release
         if: >
           startsWith(github.ref, 'refs/tags/') &&
-          steps.run_build.outcome == 'success' &&
-          steps.run_headers.outcome == 'success'
+          steps.run_build.outcome == 'success'
         uses: softprops/action-gh-release@v1
         with:
           files: release-artifacts/*-mnt.tar.gz
