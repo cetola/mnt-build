@@ -68,6 +68,7 @@ class BuildConfig:
     config_file: Path
     dtb_files: list[Path]
     output_tar: Path
+    output_headers_tar: Path
     log_file: Path
     jobs: int
     pkgrel: int
@@ -105,6 +106,7 @@ class BuildConfig:
                 config_file=build_dir / "configs" / f"config-{version}-mnt-reform-arm64",
                 dtb_files=dtb_files,
                 output_tar=linux_dir / f"kernel-{version}-{pkgrel}-mnt.tar.gz",
+                output_headers_tar=linux_dir / f"headers-{version}-{pkgrel}-mnt.tar.gz",
                 log_file=build_dir / f"build-{version}-{timestamp}.log",
                 jobs=jobs,
                 pkgrel=pkgrel
@@ -610,6 +612,94 @@ class KernelBuilder:
 
         self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} QCACLD2 module built")
 
+    def install_extmod_build_tree(self, dest_dir: Optional[Path] = None) -> Path:
+        """Install a kernel header tree suitable for out-of-tree module builds.
+
+        This wraps the upstream kernel helper scripts/package/install-extmod-build
+        and prepares the source tree first (prepare/modules_prepare).
+        """
+        self.logger.info("Installing external-module build tree...")
+
+        if dest_dir is None:
+            dest_dir = self.config.build_dir / "linux-headers-extmod"
+
+        install_script = self.config.linux_dir / "scripts" / "package" / "install-extmod-build"
+        if not install_script.exists():
+            raise BuildError(f"install-extmod-build script not found: {install_script}")
+
+        # Ensure generated headers/metadata are up to date before install.
+        prep_args = ['make', f'-j{self.config.jobs}', f'ARCH={self.arch}']
+        if self.cross_compile:
+            prep_args.append(f'CROSS_COMPILE={self.cross_compile}')
+
+        self.run_command([*prep_args, 'prepare'], cwd=self.config.linux_dir)
+        self.run_command([*prep_args, 'modules_prepare'], cwd=self.config.linux_dir)
+
+        if dest_dir.exists():
+            shutil.rmtree(dest_dir)
+        dest_dir.parent.mkdir(parents=True, exist_ok=True)
+
+        # Match kernel CC conventions: target compiler comes from CROSS_COMPILE,
+        # host tools are built by host compiler unless explicitly overridden.
+        cc = f'{self.cross_compile}gcc' if self.cross_compile else 'gcc'
+        hostcc = os.environ.get('HOSTCC', 'gcc')
+
+        self.run_command(
+                [
+                    'env',
+                    f'ARCH={self.arch}',
+                    f'SRCARCH={self.arch}',
+                    f'srctree={self.config.linux_dir}',
+                    'MAKE=make',
+                    f'CC={cc}',
+                    f'HOSTCC={hostcc}',
+                    str(install_script),
+                    str(dest_dir),
+                ],
+                cwd=self.config.linux_dir
+                )
+
+        required_paths = [
+            dest_dir / 'Makefile',
+            dest_dir / 'include',
+            dest_dir / 'scripts',
+            dest_dir / 'Module.symvers',
+        ]
+        missing = [p for p in required_paths if not p.exists()]
+        if missing:
+            missing_str = ', '.join(str(p) for p in missing)
+            raise BuildError(f"install-extmod-build output incomplete, missing: {missing_str}")
+
+        self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Installed extmod build tree: {dest_dir}")
+        return dest_dir
+
+    def create_headers_tarball(self, headers_dir: Optional[Path] = None):
+        """Create headers tarball from the extmod build tree."""
+        self.logger.info("Creating headers tarball...")
+
+        if headers_dir is None:
+            headers_dir = self.config.build_dir / "linux-headers-extmod"
+
+        if not headers_dir.exists():
+            raise BuildError(f"Headers directory not found: {headers_dir}")
+
+        if self.config.output_headers_tar.exists():
+            self.config.output_headers_tar.unlink()
+
+        with tarfile.open(self.config.output_headers_tar, 'w:gz') as tar:
+            tar.add(headers_dir, arcname=f"linux-{self.config.version}")
+
+        dest_path = self.config.build_dir / self.config.output_headers_tar.name
+        if dest_path.exists():
+            dest_path.unlink()
+        self.config.output_headers_tar.rename(dest_path)
+
+        size_mb = dest_path.stat().st_size / (1024 * 1024)
+        self.logger.info(
+                f"{Colors.GREEN}✓{Colors.RESET} Headers tarball created: "
+                f"{dest_path.name} ({size_mb:.1f} MB)"
+                )
+
     def create_tarball(self):
         """Create deployment tarball."""
         self.logger.info("Creating deployment tarball...")
@@ -713,7 +803,8 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
               jobs: Optional[int] = None, pkgrel: int = DEFAULT_PKGREL,
               skip_git_operations: bool = False, dry_run: bool = False,
               run_olddefconfig: bool = False,
-              cross_compile: str = DEFAULT_CROSS_COMPILE) -> int:
+              cross_compile: str = DEFAULT_CROSS_COMPILE,
+              with_headers: bool = False) -> int:
     """Run the kernel build process.
 
     Args:
@@ -725,6 +816,7 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         dry_run: If True, only check prerequisites, do not build
         run_olddefconfig: If True, update config using olddefconfig before building
         cross_compile: Compiler prefix for kernel build tools. Use empty string for native build.
+        with_headers: If True, also generate an external-module headers tree.
 
     Returns:
         Exit code (0 for success, non-zero for failure)
@@ -761,6 +853,7 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         logger.info(f"Log file: {config.log_file}")
         logger.info(f"Parallel jobs: {config.jobs}")
         logger.info(f"Cross compile prefix: {normalized_cross_compile if normalized_cross_compile else '(native/no prefix)'}")
+        logger.info(f"Generate extmod headers tree: {'yes' if with_headers else 'no'}")
         logger.info("=" * 60)
 
         start_time = datetime.now()
@@ -774,6 +867,9 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
 
         # Build everything
         builder.build_kernel(skip_git_operations=skip_git_operations, run_olddefconfig=run_olddefconfig)
+        if with_headers:
+            headers_dir = builder.install_extmod_build_tree()
+            builder.create_headers_tarball(headers_dir)
         builder.build_lpc_module()
         builder.build_qcacld2_module()
         builder.create_tarball()
@@ -783,6 +879,8 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         logger.info("=" * 60)
         logger.info(f"{Colors.GREEN}✓ Build completed successfully in {elapsed:.0f} seconds!{Colors.RESET}")
         logger.info(f"Output: {config.output_tar}")
+        if with_headers:
+            logger.info(f"Headers output: {config.build_dir / config.output_headers_tar.name}")
         logger.info(f"Log file: {config.log_file}")
         logger.info("=" * 60)
 
@@ -857,6 +955,12 @@ def main():
                  'Use "" or "none" for native build with no prefix.'
             )
     parser.add_argument(
+            '--with-headers',
+            action='store_true',
+            help='Also generate an external-module headers tree using '
+                 'scripts/package/install-extmod-build.'
+            )
+    parser.add_argument(
             '--version',
             action='version',
             help='Prints the version of the build script.',
@@ -873,7 +977,8 @@ def main():
             skip_git_operations=args.skip_git_ops,
             dry_run=args.dry_run,
             run_olddefconfig=args.olddefconfig,
-            cross_compile=args.cross_compile
+            cross_compile=args.cross_compile,
+            with_headers=args.with_headers
             )
 
 

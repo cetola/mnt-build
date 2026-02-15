@@ -151,16 +151,7 @@ jobs:
         run: |
           ssh ubuntu@${{ steps.launch-instance.outputs.public_ip }} << 'EOF'
             cd ~/mnt-build/scripts
-            ./run-container.sh "python3 build-auto.py"
-          EOF
-
-      - name: Run headers-gen.py on instance
-        id: run_headers
-        continue-on-error: true
-        run: |
-          ssh ubuntu@${{ steps.launch-instance.outputs.public_ip }} << 'EOF'
-            cd ~/mnt-build/scripts
-            ./run-container.sh "python3 headers-gen.py"
+            ./run-container.sh "python3 build-auto.py --with-headers"
           EOF
 
       - name: Collect logs
@@ -183,10 +174,10 @@ jobs:
           ls -lh release-artifacts/
 
       - name: Copy headers artifacts back
-        if: ${{ steps.run_headers.outcome == 'success' }}
+        if: ${{ steps.run_build.outcome == 'success' }}
         run: |
           mkdir -p release-artifacts
-          scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/scripts/headers-*-mnt.tar.gz release-artifacts/ || true
+          scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/headers-*-mnt.tar.gz release-artifacts/ || true
           ls -lh release-artifacts/
 
       - name: Terminate EC2 instance
@@ -202,7 +193,7 @@ jobs:
           path: build-logs/*
 
       - name: Upload artifacts
-        if: ${{ steps.run_build.outcome == 'success' && steps.run_headers.outcome == 'success' }}
+        if: ${{ steps.run_build.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: build-artifacts
@@ -211,8 +202,7 @@ jobs:
       - name: Create Release
         if: >
           startsWith(github.ref, 'refs/tags/') &&
-          steps.run_build.outcome == 'success' &&
-          steps.run_headers.outcome == 'success'
+          steps.run_build.outcome == 'success'
         uses: softprops/action-gh-release@v1
         with:
           files: release-artifacts/*-mnt.tar.gz
@@ -220,4 +210,3 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-

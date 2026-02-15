@@ -24,6 +24,11 @@ def main():
             help=f'CROSS_COMPILE prefix (default: env CROSS_COMPILE or {DEFAULT_CROSS_COMPILE}). '
                  'Use "" or "none" for native build with no prefix.'
             )
+    parser.add_argument(
+            '--with-headers',
+            action='store_true',
+            help='Also generate an external-module headers tree.'
+            )
     args = parser.parse_args()
 
     return run_build(
@@ -33,7 +38,8 @@ def main():
             pkgrel=DEFAULT_PKGREL,
             skip_git_operations=True,
             dry_run=False,
-            cross_compile=args.cross_compile
+            cross_compile=args.cross_compile,
+            with_headers=args.with_headers
             )
 
 

@@ -180,17 +180,7 @@ jobs:
         run: |
           ssh ubuntu@${{ steps.launch-instance.outputs.public_ip }} << 'EOF'
             cd ~/mnt-build/scripts
-            python3 build-auto.py --cross-compile none
-          EOF
-
-      - name: Run headers-gen.py on instance
-        if: ${{ false }}
-        id: run_headers
-        continue-on-error: true
-        run: |
-          ssh ubuntu@${{ steps.launch-instance.outputs.public_ip }} << 'EOF'
-            cd ~/mnt-build/scripts
-            python3 headers-gen.py
+            python3 build-auto.py --cross-compile none --with-headers
           EOF
 
       - name: Collect logs
@@ -213,10 +203,10 @@ jobs:
           ls -lh release-artifacts/
 
       - name: Copy headers artifacts back
-        if: ${{ steps.run_headers.outcome == 'success' }}
+        if: ${{ steps.run_build.outcome == 'success' }}
         run: |
           mkdir -p release-artifacts
-          scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/scripts/headers-*-mnt.tar.gz release-artifacts/ || true
+          scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/headers-*-mnt.tar.gz release-artifacts/ || true
           ls -lh release-artifacts/
 
       - name: Terminate EC2 instance
