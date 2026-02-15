@@ -59,14 +59,7 @@ jobs:
               flex \
               bison \
               libssl-dev \
-              binutils-aarch64-linux-gnu \
-              gcc-aarch64-linux-gnu \
-              gdb-multiarch \
               parted \
-              qemu-user-static \
-              qemu-system \
-              qemu-utils \
-              binfmt-support \
               gdb \
               strace \
               lsof \
