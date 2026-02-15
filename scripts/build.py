@@ -21,6 +21,7 @@ __version__ = "0.3.2"
 
 DEFAULT_KERNEL_VERSION = '6.18.9'
 DEFAULT_PKGREL = 1
+DEFAULT_CROSS_COMPILE = "aarch64-linux-gnu-"
 
 
 # DTS/DTB configuration - single source of truth for all DTS files
@@ -178,11 +179,11 @@ class PatchStats:
 class KernelBuilder:
     """Handles kernel and module building."""
 
-    def __init__(self, config: BuildConfig, logger: logging.Logger):
+    def __init__(self, config: BuildConfig, logger: logging.Logger, cross_compile: str = DEFAULT_CROSS_COMPILE):
         self.config = config
         self.logger = logger
         self.arch = "arm64"
-        self.cross_compile = "aarch64-linux-gnu-"
+        self.cross_compile = cross_compile
 
     def run_command(self, cmd: List[str], cwd: Optional[Path] = None,
                     check: bool = True, input_data: Optional[str] = None,
@@ -260,7 +261,8 @@ class KernelBuilder:
         """
         self.logger.info("Checking prerequisites...")
 
-        required_tools = ['git', 'make', 'tar', 'aarch64-linux-gnu-gcc', 'patch']
+        compiler = f'{self.cross_compile}gcc' if self.cross_compile else 'gcc'
+        required_tools = ['git', 'make', 'tar', compiler, 'patch']
         missing_tools = []
 
         for tool in required_tools:
@@ -695,7 +697,8 @@ class KernelBuilder:
 def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] = None,
               jobs: Optional[int] = None, pkgrel: int = DEFAULT_PKGREL,
               skip_git_operations: bool = False, dry_run: bool = False,
-              run_olddefconfig: bool = False) -> int:
+              run_olddefconfig: bool = False,
+              cross_compile: str = DEFAULT_CROSS_COMPILE) -> int:
     """Run the kernel build process.
 
     Args:
@@ -706,10 +709,18 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         skip_git_operations: If True, skip git reset/checkout operations
         dry_run: If True, only check prerequisites, do not build
         run_olddefconfig: If True, update config using olddefconfig before building
+        cross_compile: Compiler prefix for kernel build tools. Use empty string for native build.
 
     Returns:
         Exit code (0 for success, non-zero for failure)
     """
+    # Normalize special values that explicitly disable cross-compilation.
+    if cross_compile is None:
+        cross_compile = DEFAULT_CROSS_COMPILE
+    normalized_cross_compile = cross_compile.strip()
+    if normalized_cross_compile.lower() in {"none", "native", "off", "false"}:
+        normalized_cross_compile = ""
+
     # Create configuration
     config = BuildConfig.create(
             version=version,
@@ -723,7 +734,7 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
     logger = setup_logging(config.log_file)
 
     # Create builder
-    builder = KernelBuilder(config, logger)
+    builder = KernelBuilder(config, logger, cross_compile=normalized_cross_compile)
 
     try:
         logger.info("=" * 60)
@@ -734,6 +745,7 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         logger.info(f"Patches directory: {config.patches_dir}")
         logger.info(f"Log file: {config.log_file}")
         logger.info(f"Parallel jobs: {config.jobs}")
+        logger.info(f"Cross compile prefix: {normalized_cross_compile if normalized_cross_compile else '(native/no prefix)'}")
         logger.info("=" * 60)
 
         start_time = datetime.now()
@@ -824,6 +836,12 @@ def main():
                  'or create git commits/tags during the build process.'
             )
     parser.add_argument(
+            '--cross-compile',
+            default=DEFAULT_CROSS_COMPILE,
+            help=f'CROSS_COMPILE prefix (default: {DEFAULT_CROSS_COMPILE}). '
+                 'Use "" or "none" for native build with no prefix.'
+            )
+    parser.add_argument(
             '--version',
             action='version',
             help='Prints the version of the build script.',
@@ -839,7 +857,8 @@ def main():
             pkgrel=args.pkgrel,
             skip_git_operations=args.skip_git_ops,
             dry_run=args.dry_run,
-            run_olddefconfig=args.olddefconfig
+            run_olddefconfig=args.olddefconfig,
+            cross_compile=args.cross_compile
             )
 
 
