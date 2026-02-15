@@ -585,8 +585,23 @@ class KernelBuilder:
         if not qca_dir.exists():
             raise BuildError(f"QCACLD2 module directory not found: {qca_dir}")
 
+        # Recreate qcacld2/build.sh behavior here so this build path
+        # respects --cross-compile and native builds.
+        make_args = [
+            f"ARCH={self.arch}",
+            f"KERNEL_SRC={self.config.linux_dir}",
+            "CONFIG_CLD_HL_SDIO_CORE=y",
+            "CONFIG_FORCE_MLO_SUPPORT=y",
+        ]
+        if self.cross_compile:
+            make_args.append(f"CROSS_COMPILE={self.cross_compile}")
+
         self.run_command(
-                ["bash", "./build.sh"],
+                ["make", *make_args, "clean"],
+                cwd=qca_dir
+                )
+        self.run_command(
+                ["make", *make_args, f"-j{self.config.jobs}"],
                 cwd=qca_dir
                 )
 
