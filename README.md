@@ -39,14 +39,7 @@ The first time you build, the config you need will probably not match the config
 
 See --help for more options.
 
-Once the build is complete, you'll end up with a tarball containing the kernel, config, and some firmware. You can install these manually or use the PKGBUILD in [Additional Tooling](#additional-tooling).
-
-If you want headers for building out of tree modules:
-```bash
-./scripts/header-gen.py
-```
-
-Again, you can install manually, or use the [Additional Tooling](#additional-tooling).
+Once the build is complete, you'll end up with a tarball containing the kernel, config, and some firmware. If you want headers use the ```--with-headers``` flag. You can install all of this manually or use the PKGBUILDs in [Additional Tooling](#additional-tooling).
 
 ## :hammer: Additional Tooling
 
@@ -60,8 +53,10 @@ There is a container in the scripts directory if you happen to be building for A
 
 These scripts are an automation of a full guide that I posted on the [MNT Community Forum](https://community.mnt.re/t/guide-how-to-arch-linux-on-the-pocket-reform/3918). See there for more details. See the [Arch Linux Arm](https://archlinuxarm.org/) site to grab a filesystem and install manually.
 
-If you use one of the provided images, know I have only tested on the i.MX8 M Plus MNT Pocket Reform. That being said, the kernel is patched with all patches from reform-debian-packages -> linux -> patches[ver]. As such it should boot on any MNT Reform platform. Be sure you have the correct device tree installed as the image and the PKGBUILD both install the i.MX8 M Plus dtb file.
+If you use one of the provided images, know I have only tested on the Amlogic A311D MNT Pocket Reform. That being said, the kernel is patched with all patches from reform-debian-packages -> linux -> patches[ver]. As such it should boot on any MNT Reform platform. Be sure you have the correct device tree installed.
+
+The provided images will not install a DTB (for now), so you'll need to decide which you want and edit the sd card manually in ```/boot/extlinux/extlinux.conf```. If you use the PKGBUILD it will only install a limited number of DTB files, namely the ones I can test. If you want me to add more feel free to add an issue, or better yet, a PR.
 
 ## :rocket: Next Steps
 
-The kernel tarball and accompanying PKGBUILD will install the reform2_lpc and wlan (qcacld) out-of-tree kernel modules for the i.MX8M Plus. That is a rather small but necessary part of [reform-tools](https://source.mnt.re/reform/reform-tools). Porting the rest of these tools to Arch will make the experience much easier. Perhaps not the point of Arch, but hey, one has to have goals. :grinning:
+The kernel tarball and accompanying PKGBUILD will install the reform2_lpc and wlan (qcacld for the for the i.MX8M Plus) out-of-tree kernel modules. That is a rather small part of [reform-tools](https://source.mnt.re/reform/reform-tools). Porting the rest of these tools to Arch will make the experience much easier. Perhaps not the point of Arch, but hey, one has to have goals. :grinning:
