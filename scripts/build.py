@@ -192,7 +192,9 @@ class KernelBuilder:
                     stream_output: bool = False) -> subprocess.CompletedProcess:
         """Run a shell command. If stream_output is True, stream stdout/stderr live to logger and file."""
         cwd = cwd or Path.cwd()
-        self.logger.debug(f"Running: {' '.join(cmd)} (in {cwd})")
+        cmd_str = ' '.join(cmd)
+        self.logger.info(f"$ {cmd_str}")
+        self.logger.debug(f"Running in {cwd}")
 
         if not stream_output:
             try:
@@ -210,11 +212,11 @@ class KernelBuilder:
                     self.logger.debug(f"stderr: {result.stderr.strip()}")
                 return result
             except subprocess.CalledProcessError as e:
-                self.logger.error(f"Command failed: {' '.join(cmd)}")
+                self.logger.error(f"Command failed: {cmd_str}")
                 self.logger.error(f"Exit code: {e.returncode}")
                 self.logger.error(f"stdout: {e.stdout}")
                 self.logger.error(f"stderr: {e.stderr}")
-                raise BuildError(f"Command failed: {' '.join(cmd)}") from e
+                raise BuildError(f"Command failed: {cmd_str}") from e
 
         # stream_output == True: use Popen and stream lines to logger + file
         logfile_path = Path(self.config.log_file)
@@ -249,7 +251,7 @@ class KernelBuilder:
             ret = proc.returncode
 
         if ret != 0 and check:
-            raise BuildError(f"Command failed (exit {ret}): {' '.join(cmd)}")
+            raise BuildError(f"Command failed (exit {ret}): {cmd_str}")
 
         # Return a fake CompletedProcess-like object with stdout/stderr empty (we logged to file)
         cp = subprocess.CompletedProcess(cmd, ret, stdout=None, stderr=None)
@@ -632,8 +634,12 @@ class KernelBuilder:
         if self.cross_compile:
             prep_args.append(f'CROSS_COMPILE={self.cross_compile}')
 
-        self.run_command([*prep_args, 'prepare'], cwd=self.config.linux_dir)
-        self.run_command([*prep_args, 'modules_prepare'], cwd=self.config.linux_dir)
+        self.run_command([*prep_args, 'prepare'], 
+                         stream_output=True,
+                         cwd=self.config.linux_dir)
+        self.run_command([*prep_args, 'modules_prepare'],
+                         stream_output=True,
+                         cwd=self.config.linux_dir)
 
         if dest_dir.exists():
             shutil.rmtree(dest_dir)
@@ -656,6 +662,7 @@ class KernelBuilder:
                     str(install_script),
                     str(dest_dir),
                 ],
+                stream_output=True,
                 cwd=self.config.linux_dir
                 )
 
@@ -867,11 +874,11 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
 
         # Build everything
         builder.build_kernel(skip_git_operations=skip_git_operations, run_olddefconfig=run_olddefconfig)
+        builder.build_lpc_module()
+        builder.build_qcacld2_module()
         if with_headers:
             headers_dir = builder.install_extmod_build_tree()
             builder.create_headers_tarball(headers_dir)
-        builder.build_lpc_module()
-        builder.build_qcacld2_module()
         builder.create_tarball()
 
         # Summary
