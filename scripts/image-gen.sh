@@ -317,14 +317,16 @@ echo "Inside chroot - initializing pacman keyring..."
 pacman-key --init
 pacman-key --populate archlinuxarm
 
+PACMAN="pacman --disable-sandbox"
+
 echo "Updating package database..."
-pacman -Sy --noconfirm
+$PACMAN -Sy --noconfirm
 
 echo "Installing essential packages..."
-pacman -S --needed --noconfirm base base-devel dracut networkmanager
+$PACMAN -S --needed --noconfirm base base-devel dracut networkmanager
 
 echo "Removing conflicting linux-aarch64 package if present..."
-pacman -R --noconfirm linux-aarch64 || true
+$PACMAN -R --noconfirm linux-aarch64 || true
 
 echo "Building and installing linux-mnt-pocket kernel..."
 cd /tmp/linux-mnt-pocket
@@ -334,7 +336,7 @@ chown -R nobody:nobody /tmp/linux-mnt-pocket
 sudo -u nobody makepkg --noconfirm
 
 echo "Installing kernel package..."
-pacman -U --noconfirm linux-mnt-pocket-*.pkg.tar.xz
+$PACMAN -U --noconfirm linux-mnt-pocket-*.pkg.tar.xz
 
 echo "Kernel installed successfully!"
 ls -lh /boot/
