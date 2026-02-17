@@ -1,9 +1,13 @@
+# without these you will not be able to boot from NVMe
 add_drivers+=" nvme nvme_core nvme_keyring nvme_auth "
 
+# for debugging
 #add_drivers+=" pcie_dw_imx dw_pcie imx_pcie "
 
+# required if you want to encrypt your drive
 #add_dracutmodules+=" crypt lvm "
 
+# keeping these on until we have a stable build process
 no_hostonly="yes"
 dracut_debug="yes"
 dracut_verbose="yes"
