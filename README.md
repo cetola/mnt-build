@@ -1,4 +1,4 @@
-# Kernel Build for MNT Pocket Reform
+# Kernel Build for MNT Reform
 
 ## :computer: About the MNT Reform Platform
 
@@ -13,10 +13,10 @@ This repo attempts to build the linux kernel and associated required artifacts f
 As we need to test that it actually works, we use Arch Linux Arm as the the testing distro. That's also the filesytem we use to test the kernel modules, headers (DKMS), and the booting process (u-boot handoff).
 
 ## :shipit: Downloading & Booting
-Releases will have both a kernel and Linux headers zip. The `image-gen.sh` script uses the kernel generated from a release to create a 120G sparse image & bmap file `mnt-pocket-[ver]-aarch64.img.zst[.bmap]`. See [the docs](https://github.com/yoctoproject/bmaptool) for more info on bmap-tool.
+Releases will have both a kernel and Linux headers zip. The `image-gen.sh` script uses the kernel generated from a release to create a 120G sparse image & bmap file `mnt-reform-[ver]-aarch64.img.zst[.bmap]`. See [the docs](https://github.com/yoctoproject/bmaptool) for more info on bmap-tool.
 
 ```bash
-sudo bmaptool copy path/to/mnt-pocket-[ver]-aarch64.img.zst /dev/sdX
+sudo bmaptool copy path/to/mnt-reform-[ver]-aarch64.img.zst /dev/sdX
 ```
 You'll boot into an Arch Linux ARM filesystem. Users include `root` and `alarm`. Passwords are the same as the username.
 
@@ -47,7 +47,7 @@ Once the build is complete, you'll end up with a tarball containing the kernel, 
 
 ## :hammer: Additional Tooling
 
-There are PKGBUILDs for both the [kernel](https://github.com/cetola/linux-mnt-pocket) and [kernel headers](https://github.com/cetola/linux-mnt-pocket-headers).
+There are PKGBUILDs for both the [kernel](https://github.com/cetola/linux-mnt-reform) and [kernel headers](https://github.com/cetola/linux-mnt-reform-headers).
 
 ## :pencil2: Notes
 
