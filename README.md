@@ -1,12 +1,16 @@
 # Kernel Build for MNT Pocket Reform
 
-## :computer: About the MNT Pocket Reform
+## :computer: About the MNT Reform Platform
 
-The MNT Pocket Reform is a compact, portable laptop built on the principles of open hardware and user freedom.
+The MNT Reform platforms are a series of portable laptops built on the principles of open hardware and user freedom.
 
-At launch, the Pocket Reform shiped with the NXP i.MX8 M Plus SoC, a quad-core ARM Cortex-A53 processor paired with a Cortex-M7 real-time core.
+The team at [MNT Research](https://mntre.com/) has done an amazing job documenting their open hardware platform, making this project possible.
 
-The team at [MNT Research](https://mntre.com/) has done an amazing job documenting their open hardware platform, making this project possible. 🙌
+## :shrug: What is MNT Build?
+
+This repo attempts to build the linux kernel and associated required artifacts for the MNT Reform platforms. It focuses on a "distro-agnostic" approach, so that you can use the kernel in whatever distro you choose. It also focuses on extensibility, so that you can integrate the scripts into your workflow.
+
+As we need to test that it actually works, we use Arch Linux Arm as the the testing distro. That's also the filesytem we use to test the kernel modules, headers (DKMS), and the booting process (u-boot handoff).
 
 ## :shipit: Downloading & Booting
 Releases will have both a kernel and Linux headers zip. The `image-gen.sh` script uses the kernel generated from a release to create a 120G sparse image & bmap file `mnt-pocket-[ver]-aarch64.img.zst[.bmap]`. See [the docs](https://github.com/yoctoproject/bmaptool) for more info on bmap-tool.

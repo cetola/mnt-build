@@ -386,7 +386,7 @@ class KernelBuilder:
         self.logger.info("Fetching git tags...")
         self.run_command(['git', 'fetch', '--tags'])
 
-        branch_name = f"pocket-reform-{self.config.version}"
+        branch_name = f"mnt-reform-{self.config.version}"
         self.logger.info(f"Checking out kernel version v{self.config.version}...")
 
         self.run_command(['git', 'branch', '-D', branch_name], check=False)

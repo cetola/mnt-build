@@ -6,7 +6,7 @@ set -euo pipefail
 # ============================================================================
 readonly KVER="6.18.10"
 readonly PKGREL="1"
-readonly KERNEL_VERSION="${KVER}-mnt-pocket"
+readonly KERNEL_VERSION="${KVER}-mnt-reform"
 readonly IMAGE_SIZE_GB=120
 readonly BOOT_SIZE_MB=1024
 readonly PARTITION_WAIT_MAX_ATTEMPTS=20
@@ -18,9 +18,9 @@ readonly DOWNLOADS_DIR="$WORK_DIR/downloads"
 readonly MOUNT_DIR="$WORK_DIR/mnt"
 readonly BOOT_MNT="$MOUNT_DIR/boot"
 readonly ROOT_MNT="$MOUNT_DIR/root"
-readonly IMAGE="$(pwd)/mnt-pocket-${KVER}-aarch64.img"
+readonly IMAGE="$(pwd)/mnt-reform-${KVER}-aarch64.img"
 
-readonly POCKET_URL="https://github.com/cetola/linux-mnt-pocket/archive/refs/tags/${KVER}-${PKGREL}-mnt-pocket.tar.gz"
+readonly KERNEL_URL="https://github.com/cetola/linux-mnt-reform/archive/refs/tags/${KVER}-${PKGREL}-mnt-reform.tar.gz"
 readonly ARCH_URL="http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz"
 
 readonly TIMESTAMP=$(date +%Y%m%d-%H%M%S)
@@ -228,7 +228,7 @@ download_if_missing() {
 download_dependencies() {
   log "Downloading dependencies..."
   cd "$DOWNLOADS_DIR"
-  download_if_missing "$POCKET_URL" "pocket.tar.gz"
+  download_if_missing "$KERNEL_URL" "kernel.tar.gz"
   download_if_missing "$ARCH_URL" "archlinuxarm.tar.gz"
 }
 
@@ -241,10 +241,10 @@ extract_rootfs() {
   tar -xpf "$DOWNLOADS_DIR/archlinuxarm.tar.gz" -C "$ROOT_MNT"
 }
 
-extract_pocket_kernel() {
-  log "Extracting linux-mnt-pocket..."
-  mkdir -p "$WORK_DIR/pocket"
-  tar --no-same-owner -xpf "$DOWNLOADS_DIR/pocket.tar.gz" -C "$WORK_DIR/pocket"
+extract_kernel() {
+  log "Extracting linux-mnt-reform..."
+  mkdir -p "$WORK_DIR/kernel"
+  tar --no-same-owner -xpf "$DOWNLOADS_DIR/kernel.tar.gz" -C "$WORK_DIR/kernel"
 }
 
 create_fstab() {
@@ -276,7 +276,7 @@ setup_bootloader_config() {
   log "Setting up bootloader configuration..."
   mkdir -p "$ROOT_MNT/boot/extlinux"
   cp \
-    "$WORK_DIR/pocket/linux-mnt-pocket-${KVER}-${PKGREL}-mnt-pocket/extlinux.conf.example" \
+    "$WORK_DIR/kernel/linux-mnt-reform-${KVER}-${PKGREL}-mnt-reform/extlinux.conf.example" \
     "$ROOT_MNT/boot/extlinux/extlinux.conf"
   
   # Fix extlinux.conf to use LABEL=ROOT instead of /dev/nvme0n1p1
@@ -304,7 +304,7 @@ EOF
 
 copy_pkgbuild() {
   log "Copying PKGBUILD into chroot..."
-  cp -r "$WORK_DIR/pocket/linux-mnt-pocket-${KVER}-${PKGREL}-mnt-pocket" "$ROOT_MNT/tmp/linux-mnt-pocket"
+  cp -r "$WORK_DIR/kernel/linux-mnt-reform-${KVER}-${PKGREL}-mnt-reform" "$ROOT_MNT/tmp/linux-mnt-reform"
 }
 
 create_chroot_script() {
@@ -328,15 +328,15 @@ $PACMAN -S --needed --noconfirm base base-devel dracut networkmanager
 echo "Removing conflicting linux-aarch64 package if present..."
 $PACMAN -R --noconfirm linux-aarch64 || true
 
-echo "Building and installing linux-mnt-pocket kernel..."
-cd /tmp/linux-mnt-pocket
+echo "Building and installing linux-mnt-reform kernel..."
+cd /tmp/linux-mnt-reform
 
 # Run makepkg as nobody user (makepkg refuses to run as root)
-chown -R nobody:nobody /tmp/linux-mnt-pocket
+chown -R nobody:nobody /tmp/linux-mnt-reform
 sudo -u nobody makepkg --noconfirm
 
 echo "Installing kernel package..."
-$PACMAN -U --noconfirm linux-mnt-pocket-*.pkg.tar.xz
+$PACMAN -U --noconfirm linux-mnt-reform-*.pkg.tar.xz
 
 echo "Kernel installed successfully!"
 ls -lh /boot/
@@ -352,7 +352,7 @@ run_chroot_installation() {
 
 cleanup_chroot_environment() {
   log "Cleaning up chroot environment..."
-  rm -rf "$ROOT_MNT/tmp/linux-mnt-pocket"
+  rm -rf "$ROOT_MNT/tmp/linux-mnt-reform"
   rm -f "$ROOT_MNT/tmp/install_kernel.sh"
   rm -f "$ROOT_MNT/usr/bin/qemu-aarch64-static"
 }
@@ -454,7 +454,7 @@ main() {
   # Download and extract
   download_dependencies
   extract_rootfs
-  extract_pocket_kernel
+  extract_kernel
   
   # Filesystem configuration
   create_fstab

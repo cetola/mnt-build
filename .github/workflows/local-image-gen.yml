@@ -55,7 +55,7 @@ jobs:
 
           mkdir -p dist
 
-          IMG="$(ls -1 mnt-pocket-*-aarch64.img | head -n 1)"
+          IMG="$(ls -1 mnt-reform-*-aarch64.img | head -n 1)"
           BMAP="${IMG}.bmap"
 
           # Compress in place and remove raw .img
@@ -92,7 +92,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: mnt-pocket-image
+          name: mnt-reform-image
           path: dist/*
           if-no-files-found: error
 
