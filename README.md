@@ -1,10 +1,10 @@
 # Kernel Build for MNT Reform
 
-## :computer: About the MNT Reform Platform
+## :computer: About the MNT Reform Platforms
 
 The MNT Reform platforms are a series of portable laptops built on the principles of open hardware and user freedom.
 
-The team at [MNT Research](https://mntre.com/) has done an amazing job documenting their open hardware platform, making this project possible.
+The team at [MNT Research](https://mntre.com/) has done an amazing job documenting their open hardware platforms, making this project possible.
 
 ## :shrug: What is MNT Build?
 
