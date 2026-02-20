@@ -19,7 +19,7 @@ from typing import List, Optional, Tuple
 
 __version__ = "0.4.1"
 
-DEFAULT_KERNEL_VERSION = '6.18.10'
+DEFAULT_KERNEL_VERSION = '6.18.12'
 DEFAULT_PKGREL = 1
 DEFAULT_CROSS_COMPILE = "aarch64-linux-gnu-"
 
