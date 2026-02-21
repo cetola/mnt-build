@@ -47,7 +47,7 @@ Once the build is complete, you'll end up with a tarball containing the kernel, 
 
 ## :hammer: Additional Tooling
 
-There are PKGBUILDs for both the [kernel](https://github.com/cetola/linux-mnt-reform) and [kernel headers](https://github.com/cetola/linux-mnt-reform-headers).
+There are PKGBUILDs for both the [kernel](https://github.com/cetola/linux-mnt-reform) and [kernel headers](https://github.com/cetola/linux-mnt-reform-headers). There's also a an attempt to install [reform-tools](https://source.mnt.re/reform/reform-tools) called [mnt-reform-tools](https://github.com/cetola/mnt-reform-tools). That one still has a ways to go.
 
 ## :pencil2: Notes
 
@@ -60,7 +60,3 @@ These scripts are an automation of a full guide that I posted on the [MNT Commun
 If you use one of the provided images, know I have only tested on the Amlogic A311D MNT Pocket Reform. That being said, the kernel is patched with all patches from reform-debian-packages -> linux -> patches[ver]. As such it should boot on any MNT Reform platform. Be sure you have the correct device tree installed.
 
 The provided images will not install a DTB (for now), so you'll need to decide which you want and edit the sd card manually in ```/boot/extlinux/extlinux.conf```. If you use the PKGBUILD it will only install a limited number of DTB files, namely the ones I can test. If you want me to add more feel free to add an issue, or better yet, a PR.
-
-## :rocket: Next Steps
-
-The kernel tarball and accompanying PKGBUILD will install the reform2_lpc and wlan (qcacld for the for the i.MX8M Plus) out-of-tree kernel modules. That is a rather small part of [reform-tools](https://source.mnt.re/reform/reform-tools). Porting the rest of these tools to Arch will make the experience much easier. Perhaps not the point of Arch, but hey, one has to have goals. :grinning:
