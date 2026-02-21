@@ -19,7 +19,7 @@ from typing import List, Optional, Tuple
 
 __version__ = "0.5.0"
 
-DEFAULT_KERNEL_VERSION = '6.18.12'
+DEFAULT_KERNEL_VERSION = '6.18.13'
 DEFAULT_PKGREL = 1
 DEFAULT_CROSS_COMPILE = "aarch64-linux-gnu-"
 
@@ -718,25 +718,45 @@ class KernelBuilder:
         module_specs = [
             (
                 "LPC module",
-                self.config.build_dir / "reform-tools/lpc/reform2_lpc.ko",
                 self.config.output_lpc_module_tar,
+                [
+                    (
+                        self.config.build_dir / "reform-tools/lpc/reform2_lpc.ko",
+                        "reform2_lpc.ko",
+                    ),
+                ],
             ),
             (
                 "WiFi module",
-                self.config.build_dir / "qcacld2/wlan.ko",
                 self.config.output_wifi_module_tar,
+                [
+                    (
+                        self.config.build_dir / "qcacld2/wlan.ko",
+                        "wlan.ko",
+                    ),
+                    (
+                        self.config.build_dir / "qcacld2/debian-meta/usr",
+                        "usr",
+                    ),
+                    (
+                        self.config.build_dir / "qcacld2/debian-meta/etc/modprobe.d/reform-qcacld2.conf",
+                        "etc/modprobe.d/reform-qcacld2.conf",
+                    ),
+                ],
             ),
         ]
 
-        for module_name, source_path, output_path in module_specs:
-            if not source_path.exists():
-                raise BuildError(f"Required file missing ({module_name}): {source_path}")
+        for module_name, output_path, tar_members in module_specs:
+            for source_path, _ in tar_members:
+                if not source_path.exists():
+                    raise BuildError(f"Required file missing ({module_name}): {source_path}")
 
             if output_path.exists():
                 output_path.unlink()
 
             with tarfile.open(output_path, 'w:gz') as tar:
-                tar.add(source_path, arcname=source_path.name)
+                for source_path, arcname in tar_members:
+                    tar.add(source_path, arcname=arcname)
 
             dest_path = self.config.build_dir / output_path.name
             if dest_path.exists():
@@ -764,8 +784,6 @@ class KernelBuilder:
         required_files = {
             'kernel': self.config.linux_dir / "arch/arm64/boot/Image",
             'config': self.config.config_file,
-            'wifi_firmware': self.config.build_dir / "qcacld2/debian-meta/usr",
-            'wifi_blacklist': self.config.build_dir / "qcacld2/debian-meta/etc/modprobe.d/reform-qcacld2.conf",
             'modules': self.config.linux_dir / "modules/lib/modules"
         }
 
@@ -797,18 +815,6 @@ class KernelBuilder:
                         arcname=dtb_filename
                         )
                 self.logger.info(f"  Added DTB: {dtb_filename}")
-
-            # Add WiFi firmware
-            tar.add(
-                    self.config.build_dir / "qcacld2/debian-meta/usr",
-                    arcname="usr"
-                    )
-
-            # Add atheros blacklist
-            tar.add(
-                    self.config.build_dir / "qcacld2/debian-meta/etc/modprobe.d/reform-qcacld2.conf",
-                    arcname="etc/modprobe.d/reform-qcacld2.conf"
-                    )
 
             # Add modules directory
             tar.add(
