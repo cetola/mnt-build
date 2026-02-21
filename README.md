@@ -49,11 +49,11 @@ Once the build is complete, you'll get a kernel tarball containing the kernel, c
 
 | Package (upstream) | PKGBUILD | Description |
 | --- | --- | --- |
-| [Linux kernel stable](https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/) | [linux-mnt-reform](https://github.com/cetola/linux-mnt-reform) | PKGBUILD for the MNT Reform patched Linux kernel. |
-| [Linux kernel stable](https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/) | [linux-mnt-reform-headers](https://github.com/cetola/linux-mnt-reform-headers) | PKGBUILD for matching headers used to build external kernel modules. |
-| [reform-tools](https://source.mnt.re/reform/reform-tools) | [mnt-reform-tools](https://github.com/cetola/mnt-reform-tools) | PKGBUILD for MNT Reform userland tools and scripts. |
-| [Qualcomm QCACLD2 WiFi driver](https://source.mnt.re/reform/qcacld2) | [mnt-reform-qcacld2](https://github.com/cetola/mnt-reform-qcacld2) | PKGBUILD for the out-of-tree WiFi module used on i.MX8M Plus SoMs. |
-| [reform2_lpc kernel module](https://source.mnt.re/reform/reform-tools) | [mnt-reform-lpc](https://github.com/cetola/mnt-reform-lpc) | PKGBUILD for the LPC system controller driver module used across Reform platforms. |
+| [Linux stable kernel](https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/) | [linux-mnt-reform](https://github.com/cetola/linux-mnt-reform) | MNT Reform patched Linux kernel. |
+| [Kernel headers](https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/) | [linux-mnt-reform-headers](https://github.com/cetola/linux-mnt-reform-headers) | Matching headers used to build external kernel modules. |
+| [reform-tools](https://source.mnt.re/reform/reform-tools) | [mnt-reform-tools](https://github.com/cetola/mnt-reform-tools) | Reform userland tools and scripts. |
+| [QCOM WiFi module](https://source.mnt.re/reform/qcacld2) | [mnt-reform-qcacld2](https://github.com/cetola/mnt-reform-qcacld2) | Out-of-tree WiFi module used on i.MX8M Plus SoMs. |
+| [MNT LPC module](https://source.mnt.re/reform/reform-tools) | [mnt-reform-lpc](https://github.com/cetola/mnt-reform-lpc) | LPC system controller driver module used across Reform platforms. |
 
 ## :pencil2: Notes
 
