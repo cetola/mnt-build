@@ -8,7 +8,7 @@ The team at [MNT Research](https://mntre.com/) has done an amazing job documenti
 
 ## :shrug: What is MNT Build?
 
-This repo attempts to build the linux kernel and associated required artifacts for the MNT Reform platforms. It focuses on a "distro-agnostic" approach, so that you can use the kernel in whatever distro you choose. It also focuses on extensibility, so that you can integrate the scripts into your workflow.
+This repo attempts to build the Linux kernel and associated required artifacts for the MNT Reform platforms. It focuses on a "distro-agnostic" approach, so that you can use the kernel in whatever distro you choose. It also focuses on extensibility, so that you can integrate the scripts into your workflow.
 
 As we need to test that it actually works, we use Arch Linux Arm as the the testing distro. That's also the filesytem we use to test the kernel modules, headers (DKMS), and the booting process (u-boot handoff).
 
@@ -47,7 +47,7 @@ Once the build is complete, you'll get a kernel tarball containing the kernel, c
 
 ## :hammer: Additional Tooling
 
-There are PKGBUILDs for both the [kernel](https://github.com/cetola/linux-mnt-reform) and [kernel headers](https://github.com/cetola/linux-mnt-reform-headers). There's also a an attempt to install [reform-tools](https://source.mnt.re/reform/reform-tools) called [mnt-reform-tools](https://github.com/cetola/mnt-reform-tools). That one still has a ways to go.
+There are PKGBUILDs for both the [kernel](https://github.com/cetola/linux-mnt-reform) and [kernel headers](https://github.com/cetola/linux-mnt-reform-headers). There's also a an attempt to install [reform-tools](https://source.mnt.re/reform/reform-tools) called [mnt-reform-tools](https://github.com/cetola/mnt-reform-tools). PRs welcome there. Likewise there are PKGBUILDs for [Qualcomm's WiFi](https://github.com/cetola/mnt-reform-qcacld2) used in the i.MX8M Plus SoM and for the [Reform LPC driver](https://github.com/cetola/mnt-reform-lpc) which I believe is required on all platforms.
 
 ## :pencil2: Notes
 
