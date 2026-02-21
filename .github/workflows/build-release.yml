@@ -180,6 +180,14 @@ jobs:
           scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/headers-*-mnt.tar.gz release-artifacts/ || true
           ls -lh release-artifacts/
 
+      - name: Copy module artifacts back
+        if: ${{ steps.run_build.outcome == 'success' }}
+        run: |
+          mkdir -p release-artifacts
+          scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/reform2_lpc-*-mnt.tar.gz release-artifacts/ || true
+          scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/wlan-*-mnt.tar.gz release-artifacts/ || true
+          ls -lh release-artifacts/
+
       - name: Terminate EC2 instance
         if: always()
         run: |

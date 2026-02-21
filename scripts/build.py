@@ -69,6 +69,8 @@ class BuildConfig:
     dtb_files: list[Path]
     output_tar: Path
     output_headers_tar: Path
+    output_lpc_module_tar: Path
+    output_wifi_module_tar: Path
     log_file: Path
     jobs: int
     pkgrel: int
@@ -107,6 +109,8 @@ class BuildConfig:
                 dtb_files=dtb_files,
                 output_tar=linux_dir / f"kernel-{version}-{pkgrel}-mnt.tar.gz",
                 output_headers_tar=linux_dir / f"headers-{version}-{pkgrel}-mnt.tar.gz",
+                output_lpc_module_tar=linux_dir / f"reform2_lpc-{version}-{pkgrel}-mnt.tar.gz",
+                output_wifi_module_tar=linux_dir / f"wlan-{version}-{pkgrel}-mnt.tar.gz",
                 log_file=build_dir / f"build-{version}-{timestamp}.log",
                 jobs=jobs,
                 pkgrel=pkgrel
@@ -707,6 +711,44 @@ class KernelBuilder:
                 f"{dest_path.name} ({size_mb:.1f} MB)"
                 )
 
+    def create_module_tarballs(self):
+        """Create separate tarballs for out-of-tree modules."""
+        self.logger.info("Creating module tarballs...")
+
+        module_specs = [
+            (
+                "LPC module",
+                self.config.build_dir / "reform-tools/lpc/reform2_lpc.ko",
+                self.config.output_lpc_module_tar,
+            ),
+            (
+                "WiFi module",
+                self.config.build_dir / "qcacld2/wlan.ko",
+                self.config.output_wifi_module_tar,
+            ),
+        ]
+
+        for module_name, source_path, output_path in module_specs:
+            if not source_path.exists():
+                raise BuildError(f"Required file missing ({module_name}): {source_path}")
+
+            if output_path.exists():
+                output_path.unlink()
+
+            with tarfile.open(output_path, 'w:gz') as tar:
+                tar.add(source_path, arcname=source_path.name)
+
+            dest_path = self.config.build_dir / output_path.name
+            if dest_path.exists():
+                dest_path.unlink()
+            output_path.rename(dest_path)
+
+            size_mb = dest_path.stat().st_size / (1024 * 1024)
+            self.logger.info(
+                    f"{Colors.GREEN}✓{Colors.RESET} {module_name} tarball created: "
+                    f"{dest_path.name} ({size_mb:.1f} MB)"
+                    )
+
     def create_tarball(self):
         """Create deployment tarball."""
         self.logger.info("Creating deployment tarball...")
@@ -722,8 +764,8 @@ class KernelBuilder:
         required_files = {
             'kernel': self.config.linux_dir / "arch/arm64/boot/Image",
             'config': self.config.config_file,
-            'lpc_module': self.config.build_dir / "reform-tools/lpc/reform2_lpc.ko",
-            'wifi_module': self.config.build_dir / "qcacld2/wlan.ko",
+            'wifi_firmware': self.config.build_dir / "qcacld2/debian-meta/usr",
+            'wifi_blacklist': self.config.build_dir / "qcacld2/debian-meta/etc/modprobe.d/reform-qcacld2.conf",
             'modules': self.config.linux_dir / "modules/lib/modules"
         }
 
@@ -755,18 +797,6 @@ class KernelBuilder:
                         arcname=dtb_filename
                         )
                 self.logger.info(f"  Added DTB: {dtb_filename}")
-
-            # Add LPC module
-            tar.add(
-                    self.config.build_dir / "reform-tools/lpc/reform2_lpc.ko",
-                    arcname="reform2_lpc.ko"
-                    )
-
-            # Add WiFi module
-            tar.add(
-                    self.config.build_dir / "qcacld2/wlan.ko",
-                    arcname="wlan.ko"
-                    )
 
             # Add WiFi firmware
             tar.add(
@@ -876,6 +906,7 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         builder.build_kernel(skip_git_operations=skip_git_operations, run_olddefconfig=run_olddefconfig)
         builder.build_lpc_module()
         builder.build_qcacld2_module()
+        builder.create_module_tarballs()
         if with_headers:
             headers_dir = builder.install_extmod_build_tree()
             builder.create_headers_tarball(headers_dir)
@@ -886,6 +917,8 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         logger.info("=" * 60)
         logger.info(f"{Colors.GREEN}✓ Build completed successfully in {elapsed:.0f} seconds!{Colors.RESET}")
         logger.info(f"Output: {config.output_tar}")
+        logger.info(f"LPC module output: {config.build_dir / config.output_lpc_module_tar.name}")
+        logger.info(f"WiFi module output: {config.build_dir / config.output_wifi_module_tar.name}")
         if with_headers:
             logger.info(f"Headers output: {config.build_dir / config.output_headers_tar.name}")
         logger.info(f"Log file: {config.log_file}")

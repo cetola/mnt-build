@@ -43,7 +43,7 @@ The first time you build, the config you need will probably not match the config
 
 See --help for more options.
 
-Once the build is complete, you'll end up with a tarball containing the kernel, config, and some firmware. If you want headers use the ```--with-headers``` flag. You can install all of this manually or use the PKGBUILDs in [Additional Tooling](#additional-tooling).
+Once the build is complete, you'll get a kernel tarball containing the kernel, config, and firmware, plus separate module tarballs for `reform2_lpc` and `wlan` (one `.tar.gz` per module). If you want headers use the ```--with-headers``` flag. You can install all of this manually or use the PKGBUILDs in [Additional Tooling](#additional-tooling).
 
 ## :hammer: Additional Tooling
 

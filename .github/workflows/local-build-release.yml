@@ -51,16 +51,20 @@ jobs:
           name: build-logs
           path: release-artifacts/logs
 
-      - name: Find and collect tarballs
+      - name: Find and collect build artifacts
         id: collect_artifacts
         if: ${{ steps.run_build.outcome == 'success' }}
         run: |
           HEADERS_TARBALL=$(find . -name "headers-*-mnt.tar.gz" -type f)
           KERNEL_TARBALL=$(find . -name "kernel-*-mnt.tar.gz" -type f)
+          LPC_MODULE=$(find . -name "reform2_lpc-*-mnt.tar.gz" -type f)
+          WIFI_MODULE=$(find . -name "wlan-*-mnt.tar.gz" -type f)
 
-          echo "Found tarballs:"
+          echo "Found build artifacts:"
           echo "Headers: $HEADERS_TARBALL"
           echo "Kernel: $KERNEL_TARBALL"
+          echo "LPC module: $LPC_MODULE"
+          echo "WiFi module: $WIFI_MODULE"
 
           mkdir -p release-artifacts
 
@@ -70,6 +74,14 @@ jobs:
 
           if [ -n "$KERNEL_TARBALL" ]; then
             cp "$KERNEL_TARBALL" release-artifacts/
+          fi
+
+          if [ -n "$LPC_MODULE" ]; then
+            cp "$LPC_MODULE" release-artifacts/
+          fi
+
+          if [ -n "$WIFI_MODULE" ]; then
+            cp "$WIFI_MODULE" release-artifacts/
           fi
 
           echo "Artifacts directory contents:"
