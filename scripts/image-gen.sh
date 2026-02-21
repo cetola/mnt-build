@@ -21,6 +21,8 @@ readonly ROOT_MNT="$MOUNT_DIR/root"
 readonly IMAGE="$(pwd)/mnt-reform-${KVER}-aarch64.img"
 
 readonly KERNEL_URL="https://github.com/cetola/linux-mnt-reform/archive/refs/tags/${KVER}-${PKGREL}-mnt-reform.tar.gz"
+readonly QCACLD_URL="https://github.com/cetola/mnt-reform-qcacld2/archive/refs/tags/${KVER}-${PKGREL}-mnt-reform.tar.gz"
+readonly LPC_URL="https://github.com/cetola/mnt-reform-lpc/archive/refs/tags/${KVER}-${PKGREL}-mnt-reform.tar.gz"
 readonly ARCH_URL="http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz"
 
 readonly TIMESTAMP=$(date +%Y%m%d-%H%M%S)
@@ -229,6 +231,8 @@ download_dependencies() {
   log "Downloading dependencies..."
   cd "$DOWNLOADS_DIR"
   download_if_missing "$KERNEL_URL" "kernel.tar.gz"
+  download_if_missing "$QCACLD_URL" "qcacld.tar.gz"
+  download_if_missing "$LPC_URL" "lpc.tar.gz"
   download_if_missing "$ARCH_URL" "archlinuxarm.tar.gz"
 }
 
@@ -245,6 +249,18 @@ extract_kernel() {
   log "Extracting linux-mnt-reform..."
   mkdir -p "$WORK_DIR/kernel"
   tar --no-same-owner -xpf "$DOWNLOADS_DIR/kernel.tar.gz" -C "$WORK_DIR/kernel"
+}
+
+extract_qcacld() {
+  log "Extracting mnt-reform-qcacld2..."
+  mkdir -p "$WORK_DIR/qcacld"
+  tar --no-same-owner -xpf "$DOWNLOADS_DIR/qcacld.tar.gz" -C "$WORK_DIR/qcacld"
+}
+
+extract_lpc() {
+  log "Extracting mnt-reform-lpc..."
+  mkdir -p "$WORK_DIR/lpc"
+  tar --no-same-owner -xpf "$DOWNLOADS_DIR/lpc.tar.gz" -C "$WORK_DIR/lpc"
 }
 
 create_fstab() {
@@ -303,8 +319,10 @@ EOF
 }
 
 copy_pkgbuild() {
-  log "Copying PKGBUILD into chroot..."
+  log "Copying PKGBUILDs into chroot..."
   cp -r "$WORK_DIR/kernel/linux-mnt-reform-${KVER}-${PKGREL}-mnt-reform" "$ROOT_MNT/tmp/linux-mnt-reform"
+  cp -r "$WORK_DIR/qcacld/mnt-reform-qcacld2-${KVER}-${PKGREL}-mnt-reform" "$ROOT_MNT/tmp/mnt-reform-qcacld2"
+  cp -r "$WORK_DIR/lpc/mnt-reform-lpc-${KVER}-${PKGREL}-mnt-reform" "$ROOT_MNT/tmp/mnt-reform-lpc"
 }
 
 create_chroot_script() {
@@ -312,6 +330,7 @@ create_chroot_script() {
   cat > "$ROOT_MNT/tmp/install_kernel.sh" << 'CHROOT_SCRIPT'
 #!/bin/bash
 set -euo pipefail
+shopt -s nullglob
 
 echo "Inside chroot - initializing pacman keyring..."
 pacman-key --init
@@ -328,17 +347,37 @@ $PACMAN -S --needed --noconfirm base base-devel dracut networkmanager
 echo "Removing conflicting linux-aarch64 package if present..."
 $PACMAN -R --noconfirm linux-aarch64 || true
 
+build_and_install_pkgbuild() {
+  local pkgdir="$1"
+  local pkgglob="$2"
+
+  echo "Building package from $pkgdir..."
+  chown -R nobody:nobody "$pkgdir"
+  (
+    cd "$pkgdir"
+    sudo -u nobody makepkg --noconfirm
+  )
+
+  local built_packages=("$pkgdir"/$pkgglob)
+  if [[ ${#built_packages[@]} -eq 0 ]]; then
+    echo "No packages found matching '$pkgglob' in $pkgdir" >&2
+    exit 1
+  fi
+
+  echo "Installing package(s) from $pkgdir..."
+  $PACMAN -U --noconfirm "${built_packages[@]}"
+}
+
 echo "Building and installing linux-mnt-reform kernel..."
-cd /tmp/linux-mnt-reform
+build_and_install_pkgbuild "/tmp/linux-mnt-reform" "linux-mnt-reform-*.pkg.tar.*"
 
-# Run makepkg as nobody user (makepkg refuses to run as root)
-chown -R nobody:nobody /tmp/linux-mnt-reform
-sudo -u nobody makepkg --noconfirm
+echo "Building and installing mnt-reform-qcacld2..."
+build_and_install_pkgbuild "/tmp/mnt-reform-qcacld2" "*qcacld*.pkg.tar.*"
 
-echo "Installing kernel package..."
-$PACMAN -U --noconfirm linux-mnt-reform-*.pkg.tar.xz
+echo "Building and installing mnt-reform-lpc..."
+build_and_install_pkgbuild "/tmp/mnt-reform-lpc" "*lpc*.pkg.tar.*"
 
-echo "Kernel installed successfully!"
+echo "Kernel, qcacld2, and lpc packages installed successfully!"
 ls -lh /boot/
 CHROOT_SCRIPT
   
@@ -353,6 +392,8 @@ run_chroot_installation() {
 cleanup_chroot_environment() {
   log "Cleaning up chroot environment..."
   rm -rf "$ROOT_MNT/tmp/linux-mnt-reform"
+  rm -rf "$ROOT_MNT/tmp/mnt-reform-qcacld2"
+  rm -rf "$ROOT_MNT/tmp/mnt-reform-lpc"
   rm -f "$ROOT_MNT/tmp/install_kernel.sh"
   rm -f "$ROOT_MNT/usr/bin/qemu-aarch64-static"
 }
@@ -410,7 +451,7 @@ print_summary() {
   echo "Contents:"
   echo "  - Boot partition with kernel, DTB, and initramfs"
   echo "  - Root filesystem with Arch Linux ARM and kernel modules"
-  echo "  - Kernel installed via pacman from PKGBUILD"
+  echo "  - Kernel, qcacld2, and lpc installed via pacman from PKGBUILDs"
   echo
   echo "To write to SD card:"
   if command -v bmaptool >/dev/null 2>&1; then
@@ -455,6 +496,8 @@ main() {
   download_dependencies
   extract_rootfs
   extract_kernel
+  extract_qcacld
+  extract_lpc
   
   # Filesystem configuration
   create_fstab
