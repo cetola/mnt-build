@@ -78,6 +78,7 @@ check_required_tools() {
     "curl:curl"
     "tar:tar"
     "chroot:arch-install-scripts"
+    "cpio:cpio"
   )
 
   log "Checking for required tools..."
@@ -342,7 +343,7 @@ echo "Updating package database..."
 $PACMAN -Sy --noconfirm
 
 echo "Installing essential packages..."
-$PACMAN -S --needed --noconfirm base base-devel dracut networkmanager
+$PACMAN -S --needed --noconfirm base base-devel dracut networkmanager cpio
 
 echo "Removing conflicting linux-aarch64 package if present..."
 $PACMAN -R --noconfirm linux-aarch64 || true
