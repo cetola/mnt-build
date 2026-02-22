@@ -51,9 +51,11 @@ Once the build is complete, you'll get a kernel tarball containing the kernel, c
 | --- | --- | --- |
 | [Linux stable kernel](https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/) | [linux-mnt-reform](https://github.com/cetola/linux-mnt-reform) | MNT Reform patched Linux kernel. |
 | [Kernel headers](https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/) | [linux-mnt-reform-headers](https://github.com/cetola/linux-mnt-reform-headers) | Matching headers used to build external kernel modules. |
-| [reform-tools](https://source.mnt.re/reform/reform-tools) | [mnt-reform-tools](https://github.com/cetola/mnt-reform-tools) | Reform userland tools and scripts. |
+| [reform-tools](https://source.mnt.re/reform/reform-tools) | [mnt-reform-tools](https://aur.archlinux.org/packages/reform-tools)<sup>1</sup> | Reform userland tools and scripts. |
 | [QCOM WiFi module](https://source.mnt.re/reform/qcacld2) | [mnt-reform-qcacld2](https://github.com/cetola/mnt-reform-qcacld2) | Out-of-tree WiFi module used on i.MX8M Plus SoMs. |
 | [MNT LPC module](https://source.mnt.re/reform/reform-tools) | [mnt-reform-lpc](https://github.com/cetola/mnt-reform-lpc) | LPC system controller driver module used across Reform platforms. |
+
+1 [GitHub repo, historical](https://github.com/cetola/mnt-reform-tools)
 
 ## :pencil2: Notes
 
