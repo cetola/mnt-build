@@ -8,6 +8,6 @@ add_drivers+=" nvme nvme_core nvme_keyring nvme_auth "
 #add_dracutmodules+=" crypt lvm "
 
 # keeping these on until we have a stable build process
-no_hostonly="yes"
+hostonly="no"
 dracut_debug="yes"
 dracut_verbose="yes"
