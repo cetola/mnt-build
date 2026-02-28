@@ -16,7 +16,7 @@ from config import BuildConfig, DEFAULT_CROSS_COMPILE, DEFAULT_KERNEL_VERSION, D
 from errors import BuildError
 from logging_setup import Colors, setup_logging
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 
 def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] = None,
