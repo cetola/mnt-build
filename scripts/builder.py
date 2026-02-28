@@ -99,25 +99,12 @@ class KernelBuilder:
     # ------------------------------------------------------------------
 
     def check_prerequisites(self, run_olddefconfig: bool = False):
-        """Verify all required tools and files exist.
-
-        Args:
-            run_olddefconfig: If True, check for defconfig instead of the
-                              final versioned config file.
-        """
+        """Verify all required tools and files exist."""
         self.logger.info("Checking prerequisites...")
 
-        compiler = f'{self.cross_compile}gcc' if self.cross_compile else 'gcc'
-        required_tools = ['git', 'make', 'tar', compiler, 'patch']
-        missing_tools = []
-
-        for tool in required_tools:
-            result = self.run_command(['which', tool], check=False)
-            if result.returncode != 0:
-                missing_tools.append(tool)
-
-        if missing_tools:
-            raise BuildError(f"Missing required tools: {', '.join(missing_tools)}")
+        # Verify the kernel tree looks valid before invoking make
+        if not (self.config.linux_dir / "Makefile").exists():
+            raise BuildError(f"Kernel source not found at: {self.config.linux_dir}")
 
         if run_olddefconfig:
             defconfig_file = self.config.build_dir / "configs" / "defconfig"
@@ -130,7 +117,21 @@ class KernelBuilder:
         if not self.config.patches_dir.exists():
             raise BuildError(f"Patches directory not found: {self.config.patches_dir}")
 
-        self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Prerequisites check passed")
+        self.logger.info("Verifying build toolchain via 'make kernelversion'...")
+        make_cmd = ['make', f'ARCH={self.arch}']
+        if self.cross_compile:
+            make_cmd.append(f'CROSS_COMPILE={self.cross_compile}')
+        make_cmd.append('kernelversion')
+
+        result = self.run_command(make_cmd, cwd=self.config.linux_dir, check=False)
+        if result.returncode != 0:
+            raise BuildError(
+                "Toolchain check failed ('make kernelversion' did not succeed). "
+                "Ensure build tools are installed and CROSS_COMPILE is set correctly."
+            )
+
+        self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Toolchain check passed "
+                         f"(kernel version: {result.stdout.strip()})")
 
     # ------------------------------------------------------------------
     # Patching

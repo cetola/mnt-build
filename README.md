@@ -28,11 +28,7 @@ You'll boot into an Arch Linux ARM filesystem. Users include `root` and `alarm`.
 
 ## :construction_worker: Building and Installing
 
-You'll need some tooling:
-
-```python
-required_tools = ['git', 'make', 'tar', 'aarch64-linux-gnu-gcc', 'patch']
-```
+You'll need some tooling. See the [kernel requirements](https://www.kernel.org/doc/html/latest/process/changes.html).
 
 Then run:
 ```bash
