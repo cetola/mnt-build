@@ -6,6 +6,8 @@ set -euo pipefail
 # ============================================================================
 readonly KVER="6.18.16"
 readonly PKGREL="1"
+readonly QCACLD_VER="20251018.277339b9-1"
+readonly LPC_VER="1.85-1"
 readonly KERNEL_VERSION="${KVER}-mnt-reform"
 readonly IMAGE_SIZE_GB=120
 readonly BOOT_SIZE_MB=1024
@@ -21,8 +23,8 @@ readonly ROOT_MNT="$MOUNT_DIR/root"
 readonly IMAGE="$(pwd)/mnt-reform-${KVER}-aarch64.img"
 
 readonly KERNEL_URL="https://github.com/cetola/linux-mnt-reform/archive/refs/tags/${KVER}-${PKGREL}-mnt-reform.tar.gz"
-readonly QCACLD_URL="https://github.com/cetola/mnt-reform-qcacld2/archive/refs/tags/${KVER}-${PKGREL}-mnt-reform.tar.gz"
-readonly LPC_URL="https://github.com/cetola/mnt-reform-lpc/archive/refs/tags/${KVER}-${PKGREL}-mnt-reform.tar.gz"
+readonly QCACLD_URL="https://github.com/cetola/mnt-reform-qcacld2/archive/refs/tags/${QCACLD_VER}.tar.gz"
+readonly LPC_URL="https://github.com/cetola/mnt-reform-lpc/archive/refs/tags/${LPC_VER}.tar.gz"
 readonly ARCH_URL="http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz"
 
 readonly TIMESTAMP=$(date +%Y%m%d-%H%M%S)
@@ -322,8 +324,8 @@ EOF
 copy_pkgbuild() {
   log "Copying PKGBUILDs into chroot..."
   cp -r "$WORK_DIR/kernel/linux-mnt-reform-${KVER}-${PKGREL}-mnt-reform" "$ROOT_MNT/tmp/linux-mnt-reform"
-  cp -r "$WORK_DIR/qcacld/mnt-reform-qcacld2-${KVER}-${PKGREL}-mnt-reform" "$ROOT_MNT/tmp/mnt-reform-qcacld2"
-  cp -r "$WORK_DIR/lpc/mnt-reform-lpc-${KVER}-${PKGREL}-mnt-reform" "$ROOT_MNT/tmp/mnt-reform-lpc"
+  cp -r "$WORK_DIR/qcacld/mnt-reform-qcacld2-${QCACLD_VER}" "$ROOT_MNT/tmp/mnt-reform-qcacld2"
+  cp -r "$WORK_DIR/lpc/mnt-reform-lpc-${LPC_VER}" "$ROOT_MNT/tmp/mnt-reform-lpc"
 }
 
 create_chroot_script() {
@@ -343,7 +345,7 @@ echo "Updating package database..."
 $PACMAN -Sy --noconfirm
 
 echo "Installing essential packages..."
-$PACMAN -S --needed --noconfirm base base-devel dracut networkmanager cpio
+$PACMAN -S --needed --noconfirm base base-devel dracut networkmanager cpio git dkms
 
 echo "Removing conflicting linux-aarch64 package if present..."
 $PACMAN -R --noconfirm linux-aarch64 || true
