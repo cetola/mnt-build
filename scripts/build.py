@@ -73,7 +73,8 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         builder.check_prerequisites(run_olddefconfig=run_olddefconfig)
 
         if dry_run:
-            logger.info("Dry run mode - exiting after prerequisites check")
+            builder.apply_patches()
+            logger.info("Dry run mode - exiting after prerequisites check and apply patches")
             return 0
 
         builder.build_kernel(skip_git_operations=skip_git_operations, run_olddefconfig=run_olddefconfig)
