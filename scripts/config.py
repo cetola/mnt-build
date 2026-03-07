@@ -8,6 +8,7 @@ from typing import Optional
 DEFAULT_KERNEL_VERSION = '6.18.16'
 DEFAULT_PKGREL = 1
 DEFAULT_CROSS_COMPILE = "aarch64-linux-gnu-"
+DEFAULT_KERNEL_ONLY = False
 
 DTS_CONFIGS = [
     {

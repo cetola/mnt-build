@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from config import BuildConfig, DEFAULT_CROSS_COMPILE, DTS_CONFIGS
+from config import BuildConfig, DEFAULT_CROSS_COMPILE, DEFAULT_KERNEL_ONLY, DTS_CONFIGS
 from errors import BuildError, PatchStats
 from logging_setup import Colors
 
@@ -371,35 +371,45 @@ class KernelBuilder:
         self.run_command(['git', 'tag', '-a', f'v{self.config.version}', '-m', f'MNT Pocket Arch {self.config.version}'])
 
         # Compile
-        self.logger.info(f"Compiling kernel with {self.config.jobs} jobs (this may take a while)...")
+        if DEFAULT_KERNEL_ONLY:
+            self.logger.info(
+                f"Compiling kernel image only with {self.config.jobs} jobs "
+                "(DEFAULT_KERNEL_ONLY=True, skipping dtbs and modules)..."
+            )
+            make_targets = ['Image']
+        else:
+            self.logger.info(f"Compiling kernel with {self.config.jobs} jobs (this may take a while)...")
+            make_targets = ['Image', 'dtbs', 'modules']
+
         self.run_command(
             [
                 'make',
                 f'-j{self.config.jobs}',
                 f'ARCH={self.arch}',
                 f'CROSS_COMPILE={self.cross_compile}',
-                'Image', 'dtbs', 'modules'
+                *make_targets,
             ],
             cwd=self.config.linux_dir,
             stream_output=True
         )
 
-        # Install modules to a temporary location
-        modules_dir = self.config.linux_dir / "modules"
-        self.logger.info(f"Installing modules to {modules_dir}...")
-        if modules_dir.exists():
-            shutil.rmtree(modules_dir)
-        self.run_command(
-            [
-                'make',
-                f'ARCH={self.arch}',
-                f'CROSS_COMPILE={self.cross_compile}',
-                f'INSTALL_MOD_PATH={modules_dir}',
-                'modules_install'
-            ],
-            stream_output=True,
-            cwd=self.config.linux_dir
-        )
+        # Install modules to a temporary location if not "kernel only"
+        if not DEFAULT_KERNEL_ONLY:
+            modules_dir = self.config.linux_dir / "modules"
+            self.logger.info(f"Installing modules to {modules_dir}...")
+            if modules_dir.exists():
+                shutil.rmtree(modules_dir)
+            self.run_command(
+                [
+                    'make',
+                    f'ARCH={self.arch}',
+                    f'CROSS_COMPILE={self.cross_compile}',
+                    f'INSTALL_MOD_PATH={modules_dir}',
+                    'modules_install'
+                ],
+                stream_output=True,
+                cwd=self.config.linux_dir
+            )
 
         elapsed = (datetime.now() - start_time).total_seconds()
         self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Kernel built in {elapsed:.0f} seconds")

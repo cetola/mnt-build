@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 from builder import KernelBuilder
-from config import BuildConfig, DEFAULT_CROSS_COMPILE, DEFAULT_KERNEL_VERSION, DEFAULT_PKGREL
+from config import BuildConfig, DEFAULT_CROSS_COMPILE, DEFAULT_KERNEL_ONLY, DEFAULT_KERNEL_VERSION, DEFAULT_PKGREL
 from errors import BuildError
 from logging_setup import Colors, setup_logging
 
@@ -66,6 +66,7 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         logger.info(f"Parallel jobs: {config.jobs}")
         logger.info(f"Cross compile prefix: {normalized_cross_compile if normalized_cross_compile else '(native/no prefix)'}")
         logger.info(f"Generate extmod headers tree: {'yes' if with_headers else 'no'}")
+        logger.info(f"Kernel only mode: {'yes (skipping modules and tarball)' if DEFAULT_KERNEL_ONLY else 'no'}")
         logger.info("=" * 60)
 
         start_time = datetime.now()
@@ -78,20 +79,25 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
             return 0
 
         builder.build_kernel(skip_git_operations=skip_git_operations, run_olddefconfig=run_olddefconfig)
-        builder.build_lpc_module()
-        builder.build_qcacld2_module()
-        builder.create_module_tarballs()
         if with_headers:
             headers_dir = builder.install_extmod_build_tree()
             builder.create_headers_tarball(headers_dir)
-        builder.create_tarball()
+
+        if DEFAULT_KERNEL_ONLY:
+            logger.info("Kernel only mode - skipping module builds and tarball creation")
+        else:
+            builder.build_lpc_module()
+            builder.build_qcacld2_module()
+            builder.create_module_tarballs()
+            builder.create_tarball()
 
         elapsed = (datetime.now() - start_time).total_seconds()
         logger.info("=" * 60)
         logger.info(f"{Colors.GREEN}✓ Build completed successfully in {elapsed:.0f} seconds!{Colors.RESET}")
-        logger.info(f"Output: {config.output_tar}")
-        logger.info(f"LPC module output: {config.build_dir / config.output_lpc_module_tar.name}")
-        logger.info(f"WiFi module output: {config.build_dir / config.output_wifi_module_tar.name}")
+        if not DEFAULT_KERNEL_ONLY:
+            logger.info(f"Output: {config.output_tar}")
+            logger.info(f"LPC module output: {config.build_dir / config.output_lpc_module_tar.name}")
+            logger.info(f"WiFi module output: {config.build_dir / config.output_wifi_module_tar.name}")
         if with_headers:
             logger.info(f"Headers output: {config.build_dir / config.output_headers_tar.name}")
         logger.info(f"Log file: {config.log_file}")
