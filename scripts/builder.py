@@ -29,15 +29,18 @@ class KernelBuilder:
 
     def run_command(self, cmd: List[str], cwd: Optional[Path] = None,
                     check: bool = True, input_data: Optional[str] = None,
-                    stream_output: bool = False) -> subprocess.CompletedProcess:
+                    stream_output: bool = False,
+                    log_cmd: bool = True) -> subprocess.CompletedProcess:
         """Run a shell command.
 
         If stream_output is True, stdout/stderr are streamed live to the logger
         and the log file rather than being captured.
+        If log_cmd is False, the command string is logged at DEBUG level instead
+        of INFO (useful for high-frequency calls like patch dry-runs).
         """
         cwd = cwd or Path.cwd()
         cmd_str = ' '.join(cmd)
-        self.logger.info(f"$ {cmd_str}")
+        (self.logger.info if log_cmd else self.logger.debug)(f"$ {cmd_str}")
         self.logger.debug(f"Running in {cwd}")
 
         if not stream_output:
@@ -140,19 +143,71 @@ class KernelBuilder:
     # ------------------------------------------------------------------
 
     def apply_patches(self) -> PatchStats:
-        """Apply kernel patches from the patches directory."""
-        self.logger.info("Applying MNT kernel patches...")
+        """Apply kernel patches from patches_dir, then xtra_patches_dir if present."""
+        stats = PatchStats()
 
-        patch_files = sorted(self.config.patches_dir.rglob("*.patch"))
+        self.logger.info("Applying MNT kernel patches...")
+        failed_log_path = self.config.linux_dir / "failed.log"
+        self._apply_patch_set(
+            self.config.patches_dir,
+            failed_log_path,
+            label="",
+            on_success=stats.add_success,
+            on_failure=stats.add_failure,
+        )
+
+        xtra_dir = getattr(self.config, 'xtra_patches_dir', None)
+        if xtra_dir is not None and xtra_dir.exists():
+            self.logger.info("")
+            self.logger.info("Applying extra kernel patches...")
+            xtra_failed_log_path = self.config.linux_dir / "failed_xtra.log"
+            self._apply_patch_set(
+                xtra_dir,
+                xtra_failed_log_path,
+                label="extra",
+                on_success=stats.add_xtra_success,
+                on_failure=stats.add_xtra_failure,
+            )
+
+        self.logger.info("")
+        self.logger.info("Patch application complete!")
+        if stats.has_xtra:
+            self.logger.info(f"Succeeded: {stats.success}, Succeeded Extra: {stats.xtra_success}")
+            self.logger.info(f"Failed:    {stats.failed}, Failed Extra: {stats.xtra_failed}")
+            self.logger.info(f"Total:     {stats.total}, Extra Total: {stats.xtra_total}")
+        else:
+            self.logger.info(f"Succeeded: {stats.success}")
+            self.logger.info(f"Failed:    {stats.failed}")
+            self.logger.info(f"Total:     {stats.total}")
+
+        return stats
+
+    def _apply_patch_set(
+        self,
+        patches_dir: Path,
+        failed_log_path: Path,
+        label: str,
+        on_success,
+        on_failure,
+    ) -> None:
+        """Apply all *.patch files from patches_dir, recording results via callbacks.
+
+        Args:
+            patches_dir:      Directory to search recursively for .patch files.
+            failed_log_path:  File to write failure details to (cleared before use).
+            label:            Human-readable qualifier for log messages (e.g. "extra").
+                              Pass an empty string for the primary patch set.
+            on_success:       Callable invoked (no args) for each successful patch.
+            on_failure:       Callable invoked (patch_name) for each failed patch.
+        """
+        qualifier = f" ({label})" if label else ""
+        patch_files = sorted(patches_dir.rglob("*.patch"))
 
         if not patch_files:
-            self.logger.warning(f"No patches found in {self.config.patches_dir}")
-            return PatchStats()
+            self.logger.warning(f"No patches found in {patches_dir}")
+            return
 
-        self.logger.info(f"Found {len(patch_files)} patches to apply")
-
-        stats = PatchStats()
-        failed_log_path = self.config.linux_dir / "failed.log"
+        self.logger.info(f"Found {len(patch_files)}{qualifier} patches to apply")
 
         if failed_log_path.exists():
             failed_log_path.unlink()
@@ -161,17 +216,17 @@ class KernelBuilder:
 
         for patch_file in patch_files:
             patch_name = patch_file.name
-            self.logger.debug(f"Processing patch: {patch_name}")
+            self.logger.debug(f"Processing{qualifier} patch: {patch_name}")
 
             with open(patch_file, 'r') as f:
                 patch_content = f.read()
 
-            # Dry-run first
             dry_run_result = self.run_command(
                 ['patch', '-p1', '--dry-run'],
                 cwd=self.config.linux_dir,
                 input_data=patch_content,
-                check=False
+                check=False,
+                log_cmd=False
             )
 
             if dry_run_result.returncode == 0:
@@ -179,35 +234,25 @@ class KernelBuilder:
                     ['patch', '-p1'],
                     cwd=self.config.linux_dir,
                     input_data=patch_content,
-                    check=False
+                    check=False,
+                    log_cmd=False
                 )
-
                 if apply_result.returncode == 0:
-                    self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Applied: {patch_name}")
-                    stats.add_success()
+                    self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Applied{qualifier}: {patch_name}")
+                    on_success()
                 else:
-                    self.logger.warning(f"{Colors.RED}✗{Colors.RESET} Failed to apply: {patch_name}")
-                    stats.add_failure(patch_name)
+                    self.logger.warning(f"{Colors.RED}✗{Colors.RESET} Failed to apply{qualifier}: {patch_name}")
+                    on_failure(patch_name)
                     failed_log_entries.append(self._format_failed_patch(patch_name, apply_result))
             else:
-                self.logger.warning(f"{Colors.RED}✗{Colors.RESET} Failed (dry-run): {patch_name}")
-                stats.add_failure(patch_name)
+                self.logger.warning(f"{Colors.RED}✗{Colors.RESET} Failed{qualifier} (dry-run): {patch_name}")
+                on_failure(patch_name)
                 failed_log_entries.append(self._format_failed_patch(patch_name, dry_run_result))
 
         if failed_log_entries:
             with open(failed_log_path, 'w') as f:
                 f.write('\n'.join(failed_log_entries))
-
-        self.logger.info("")
-        self.logger.info("Patch application complete!")
-        self.logger.info(f"Succeeded: {stats.success}")
-        self.logger.info(f"Failed:    {stats.failed}")
-        self.logger.info(f"Total:     {stats.total}")
-
-        if stats.failed > 0:
-            self.logger.warning(f"Failed patches logged to: {failed_log_path}")
-
-        return stats
+            self.logger.warning(f"Failed{qualifier} patches logged to: {failed_log_path}")
 
     def _format_failed_patch(self, patch_name: str, result: subprocess.CompletedProcess) -> str:
         """Format a failed patch entry for the log file."""

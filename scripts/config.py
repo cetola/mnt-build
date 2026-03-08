@@ -40,6 +40,7 @@ class BuildConfig:
     build_dir: Path
     linux_dir: Path
     patches_dir: Path
+    xtra_patches_dir: Path
     config_file: Path
     dtb_files: list[Path]
     output_tar: Path
@@ -81,6 +82,7 @@ class BuildConfig:
             build_dir=build_dir,
             linux_dir=linux_dir,
             patches_dir=build_dir / "reform-debian-packages" / "linux" / f"patches{major_minor}",
+            xtra_patches_dir=build_dir / "patches",
             config_file=build_dir / "configs" / f"config-{version}-mnt-reform-arm64",
             dtb_files=dtb_files,
             output_tar=linux_dir / f"kernel-{version}-{pkgrel}-mnt.tar.gz",
