@@ -152,7 +152,7 @@ def main():
     parser.add_argument(
         '--dry-run',
         action='store_true',
-        help='Check prerequisites only, do not build'
+        help='Check prerequisites and apply patches, do not build'
     )
     parser.add_argument(
         '--olddefconfig',
