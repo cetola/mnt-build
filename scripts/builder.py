@@ -579,6 +579,18 @@ class KernelBuilder:
     # Tarball creation
     # ------------------------------------------------------------------
 
+    def _finalize_tarball(self, output_path: Path, label: str) -> Path:
+        dest_path = self.config.build_dir / output_path.name
+        if dest_path.exists():
+            dest_path.unlink()
+        output_path.rename(dest_path)
+        size_mb = dest_path.stat().st_size / (1024 * 1024)
+        self.logger.info(
+            f"{Colors.GREEN}✓{Colors.RESET} {label} tarball created: "
+            f"{dest_path.name} ({size_mb:.1f} MB)"
+        )
+        return dest_path
+
     def create_headers_tarball(self, headers_dir: Optional[Path] = None):
         """Create a headers tarball from the extmod build tree."""
         self.logger.info("Creating headers tarball...")
@@ -595,16 +607,7 @@ class KernelBuilder:
         with tarfile.open(self.config.output_headers_tar, 'w:gz') as tar:
             tar.add(headers_dir, arcname=f"linux-{self.config.version}")
 
-        dest_path = self.config.build_dir / self.config.output_headers_tar.name
-        if dest_path.exists():
-            dest_path.unlink()
-        self.config.output_headers_tar.rename(dest_path)
-
-        size_mb = dest_path.stat().st_size / (1024 * 1024)
-        self.logger.info(
-            f"{Colors.GREEN}✓{Colors.RESET} Headers tarball created: "
-            f"{dest_path.name} ({size_mb:.1f} MB)"
-        )
+        self._finalize_tarball(self.config.output_headers_tar, "Headers")
 
     def create_module_tarballs(self):
         """Create separate tarballs for out-of-tree modules."""
@@ -653,16 +656,7 @@ class KernelBuilder:
                 for source_path, arcname in tar_members:
                     tar.add(source_path, arcname=arcname)
 
-            dest_path = self.config.build_dir / output_path.name
-            if dest_path.exists():
-                dest_path.unlink()
-            output_path.rename(dest_path)
-
-            size_mb = dest_path.stat().st_size / (1024 * 1024)
-            self.logger.info(
-                f"{Colors.GREEN}✓{Colors.RESET} {module_name} tarball created: "
-                f"{dest_path.name} ({size_mb:.1f} MB)"
-            )
+            self._finalize_tarball(output_path, module_name)
 
     def create_tarball(self):
         """Create the main deployment tarball (kernel image + DTBs + modules + config)."""
@@ -712,13 +706,4 @@ class KernelBuilder:
                 arcname=f"config-{self.config.version}-mnt-reform-arm64"
             )
 
-        dest_path = self.config.build_dir / self.config.output_tar.name
-        if dest_path.exists():
-            dest_path.unlink()
-        self.config.output_tar.rename(dest_path)
-
-        size_mb = dest_path.stat().st_size / (1024 * 1024)
-        self.logger.info(
-            f"{Colors.GREEN}✓{Colors.RESET} Tarball created: "
-            f"{self.config.output_tar.name} ({size_mb:.1f} MB)"
-        )
+        self._finalize_tarball(self.config.output_tar, "Deployment")
