@@ -15,11 +15,13 @@ from logging_setup import Colors
 
 class KernelBuilder:
     def __init__(self, config: BuildConfig, logger: logging.Logger,
-                 cross_compile: str = DEFAULT_CROSS_COMPILE):
+                 cross_compile: str = DEFAULT_CROSS_COMPILE,
+                 kernel_only: bool = DEFAULT_KERNEL_ONLY):
         self.config = config
         self.logger = logger
         self.arch = "arm64"
         self.cross_compile = cross_compile
+        self.kernel_only = kernel_only
 
     # ------------------------------------------------------------------
     # Command execution
@@ -371,10 +373,10 @@ class KernelBuilder:
         self.run_command(['git', 'tag', '-a', f'v{self.config.version}', '-m', f'MNT Pocket Arch {self.config.version}'])
 
         # Compile
-        if DEFAULT_KERNEL_ONLY:
+        if self.kernel_only:
             self.logger.info(
                 f"Compiling kernel image only with {self.config.jobs} jobs "
-                "(DEFAULT_KERNEL_ONLY=True, skipping dtbs and modules)..."
+                "(kernel_only=True, skipping dtbs and modules)..."
             )
             make_targets = ['Image']
         else:
@@ -394,7 +396,7 @@ class KernelBuilder:
         )
 
         # Install modules to a temporary location if not "kernel only"
-        if not DEFAULT_KERNEL_ONLY:
+        if not self.kernel_only:
             modules_dir = self.config.linux_dir / "modules"
             self.logger.info(f"Installing modules to {modules_dir}...")
             if modules_dir.exists():

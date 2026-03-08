@@ -24,7 +24,8 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
               skip_git_operations: bool = False, dry_run: bool = False,
               run_olddefconfig: bool = False,
               cross_compile: str = DEFAULT_CROSS_COMPILE,
-              with_headers: bool = False) -> int:
+              with_headers: bool = False,
+              kernel_only: bool = DEFAULT_KERNEL_ONLY) -> int:
     """Run the kernel build process.
 
     Args:
@@ -37,6 +38,7 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         run_olddefconfig: If True, update config using olddefconfig before building
         cross_compile: Compiler prefix for kernel build tools. Use empty string for native build.
         with_headers: If True, also generate an external-module headers tree.
+        kernel_only: Whether to build only the kernel, defaulting to DEFAULT_KERNEL_ONLY.
 
     Returns:
         Exit code (0 for success, non-zero for failure)
@@ -50,10 +52,11 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
 
     config = BuildConfig.create(version=version, build_dir=build_dir, jobs=jobs, pkgrel=pkgrel)
 
+
     config.build_dir.mkdir(parents=True, exist_ok=True)
     logger = setup_logging(config.log_file)
 
-    builder = KernelBuilder(config, logger, cross_compile=normalized_cross_compile)
+    builder = KernelBuilder(config, logger, cross_compile=normalized_cross_compile, kernel_only=kernel_only)
 
     try:
         logger.info("=" * 60)
@@ -66,7 +69,7 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         logger.info(f"Parallel jobs: {config.jobs}")
         logger.info(f"Cross compile prefix: {normalized_cross_compile if normalized_cross_compile else '(native/no prefix)'}")
         logger.info(f"Generate extmod headers tree: {'yes' if with_headers else 'no'}")
-        logger.info(f"Kernel only mode: {'yes (skipping modules and tarball)' if DEFAULT_KERNEL_ONLY else 'no'}")
+        logger.info(f"Kernel only mode: {'yes (skipping modules and tarball)' if kernel_only else 'no'}")
         logger.info("=" * 60)
 
         start_time = datetime.now()
@@ -83,7 +86,7 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
             headers_dir = builder.install_extmod_build_tree()
             builder.create_headers_tarball(headers_dir)
 
-        if DEFAULT_KERNEL_ONLY:
+        if kernel_only:
             logger.info("Kernel only mode - skipping module builds and tarball creation")
         else:
             builder.build_lpc_module()
@@ -94,7 +97,7 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         elapsed = (datetime.now() - start_time).total_seconds()
         logger.info("=" * 60)
         logger.info(f"{Colors.GREEN}✓ Build completed successfully in {elapsed:.0f} seconds!{Colors.RESET}")
-        if not DEFAULT_KERNEL_ONLY:
+        if not kernel_only:
             logger.info(f"Output: {config.output_tar}")
             logger.info(f"LPC module output: {config.build_dir / config.output_lpc_module_tar.name}")
             logger.info(f"WiFi module output: {config.build_dir / config.output_wifi_module_tar.name}")
@@ -115,6 +118,7 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
     except Exception as e:
         logger.exception(f"Unexpected error: {e}")
         return 1
+
 
 
 def main():
@@ -180,6 +184,15 @@ def main():
              'scripts/package/install-extmod-build.'
     )
     parser.add_argument(
+        '--kernel-only',
+        action='store_true',
+        default=DEFAULT_KERNEL_ONLY,
+        help='Build only the kernel. Skips dtb, modules, and out-of-tree '
+             'modules. Handy for testing a newly patched kernel without '
+             'rebuilding all the other artifacts. No tarball artifacts '
+             'are produced.'
+    )
+    parser.add_argument(
         '--version',
         action='version',
         help='Prints the version of the build script.',
@@ -197,7 +210,8 @@ def main():
         dry_run=args.dry_run,
         run_olddefconfig=args.olddefconfig,
         cross_compile=args.cross_compile,
-        with_headers=args.with_headers
+        with_headers=args.with_headers,
+        kernel_only=args.kernel_only
     )
 
 
