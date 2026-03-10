@@ -342,18 +342,6 @@ class KernelBuilder:
 
         os.chdir(self.config.linux_dir)
 
-        if not skip_git_operations:
-            self.checkout_kernel_version()
-
-        patch_stats = self.apply_patches()
-        if patch_stats.failed > 0:
-            self.logger.warning(
-                f"{patch_stats.failed} patches failed to apply. "
-                "Config update will continue, but may not be accurate."
-            )
-
-        self.setup_custom_dts_files()
-
         defconfig_path = self.config.build_dir / "configs" / "defconfig"
         if not defconfig_path.exists():
             raise BuildError(f"defconfig not found: {defconfig_path}")
@@ -390,27 +378,26 @@ class KernelBuilder:
         start_time = datetime.now()
 
         os.chdir(self.config.linux_dir)
+        if not skip_git_operations:
+            self.checkout_kernel_version()
+
+        patch_stats = self.apply_patches()
+        if patch_stats.failed > 0:
+            self.logger.warning(
+                f"{patch_stats.failed} patches failed to apply. "
+                "Build will continue, but may fail or produce unexpected results."
+            )
+
+        self.setup_custom_dts_files()
 
         if run_olddefconfig:
             self.update_config_with_olddefconfig(skip_git_operations=skip_git_operations)
         else:
-            if not skip_git_operations:
-                self.checkout_kernel_version()
+            self.logger.info("Copying kernel config...")
+            self.run_command(['cp', str(self.config.config_file), '.config'])
 
-            patch_stats = self.apply_patches()
-            if patch_stats.failed > 0:
-                self.logger.warning(
-                    f"{patch_stats.failed} patches failed to apply. "
-                    "Build will continue, but may fail or produce unexpected results."
-                )
-
-            self.setup_custom_dts_files()
-
-        # Copy config
-        self.logger.info("Copying kernel config...")
-        self.run_command(['cp', str(self.config.config_file), '.config'])
-
-        # Commit changes and tag
+        # Commit changes and tag, this is to avoid -dirty in our kernel name
+        # Ideally we'd build the kernel outside a git repo, but for now, this
         self.logger.info("Create git tag and commit.")
         self.run_command(['git', 'add', '--all'])
         self.run_command(['git', 'commit', '-s', '-m', f'MNT Pocket Arch {self.config.version}'])
