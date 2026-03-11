@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 """
-MNT Pocket Reform Kernel Auto-Build Script
+MNT Reform Kernel Auto-Build Script
 Compiles kernel, out-of-tree modules, and creates deployment tarball.
 Assumes an automated build, with reduced args / options from build.py.
 Assumes we checked out the correct SHA of the kernel for building.

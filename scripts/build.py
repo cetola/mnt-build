@@ -124,7 +124,7 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description='Build MNT Pocket Reform kernel and modules.',
+        description='Build MNT Reform kernel and modules.',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument(

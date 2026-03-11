@@ -400,9 +400,9 @@ class KernelBuilder:
         # Ideally we'd build the kernel outside a git repo, but for now, this
         self.logger.info("Create git tag and commit.")
         self.run_command(['git', 'add', '--all'])
-        self.run_command(['git', 'commit', '-s', '-m', f'MNT Pocket Arch {self.config.version}'])
+        self.run_command(['git', 'commit', '-s', '-m', f'MNT Reform Linux v{self.config.version}'])
         self.run_command(['git', 'tag', '-d', f'v{self.config.version}'], check=False)
-        self.run_command(['git', 'tag', '-a', f'v{self.config.version}', '-m', f'MNT Pocket Arch {self.config.version}'])
+        self.run_command(['git', 'tag', '-a', f'v{self.config.version}', '-m', f'MNT Reform Linux v{self.config.version}'])
 
         # Compile
         if self.kernel_only:
