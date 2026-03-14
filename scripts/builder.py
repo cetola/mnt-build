@@ -520,44 +520,63 @@ class KernelBuilder:
         if not install_script.exists():
             raise BuildError(f"install-extmod-build script not found: {install_script}")
 
-        prep_args = ['make', f'-j{self.config.jobs}', *self._make_kernel_vars()]
+        config_path = self.config.linux_dir / ".config"
+        if not config_path.exists():
+            raise BuildError(f"Kernel config not found: {config_path}")
 
-        self.run_command([*prep_args, 'prepare'], stream_output=True, cwd=self.config.linux_dir)
-        self.run_command([*prep_args, 'modules_prepare'], stream_output=True, cwd=self.config.linux_dir)
-
-        if dest_dir.exists():
-            shutil.rmtree(dest_dir)
-        dest_dir.parent.mkdir(parents=True, exist_ok=True)
+        original_config = config_path.read_bytes()
 
         cc = f'{self.cross_compile}gcc' if self.cross_compile else 'gcc'
         hostcc = os.environ.get('HOSTCC', 'gcc')
+        try:
+            self.run_command(
+                ['make', f'-j{self.config.jobs}', *self._make_kernel_vars(), 'prepare'],
+                stream_output=True,
+                cwd=self.config.linux_dir
+            )
+            self.run_command(
+                ['make', f'-j{self.config.jobs}', *self._make_kernel_vars(), 'modules_prepare'],
+                stream_output=True,
+                cwd=self.config.linux_dir
+            )
 
-        self.run_command(
-            [
-                'env',
-                f'ARCH={self.arch}',
-                f'SRCARCH={self.arch}',
-                f'srctree={self.config.linux_dir}',
-                'MAKE=make',
-                f'CC={cc}',
-                f'HOSTCC={hostcc}',
-                str(install_script),
-                str(dest_dir),
-            ],
-            stream_output=True,
-            cwd=self.config.linux_dir
-        )
+            if dest_dir.exists():
+                shutil.rmtree(dest_dir)
+            dest_dir.parent.mkdir(parents=True, exist_ok=True)
 
-        required_paths = [
-            dest_dir / 'Makefile',
-            dest_dir / 'include',
-            dest_dir / 'scripts',
-            dest_dir / 'Module.symvers',
-        ]
-        missing = [p for p in required_paths if not p.exists()]
-        if missing:
-            missing_str = ', '.join(str(p) for p in missing)
-            raise BuildError(f"install-extmod-build output incomplete, missing: {missing_str}")
+            make_cmd = ['make', *self._make_kernel_vars()]
+
+            self.run_command(
+                [
+                    'env',
+                    f'ARCH={self.arch}',
+                    f'SRCARCH={self.arch}',
+                    f'srctree={self.config.linux_dir}',
+                    f"MAKE={' '.join(make_cmd)}",
+                    f'CC={cc}',
+                    f'HOSTCC={hostcc}',
+                    str(install_script),
+                    str(dest_dir),
+                ],
+                stream_output=True,
+                cwd=self.config.linux_dir
+            )
+
+            required_paths = [
+                dest_dir / 'Makefile',
+                dest_dir / 'include',
+                dest_dir / 'scripts',
+                dest_dir / 'Module.symvers',
+            ]
+            missing = [p for p in required_paths if not p.exists()]
+            if missing:
+                missing_str = ', '.join(str(p) for p in missing)
+                raise BuildError(f"install-extmod-build output incomplete, missing: {missing_str}")
+        finally:
+            current_config = config_path.read_bytes()
+            if current_config != original_config:
+                config_path.write_bytes(original_config)
+                self.logger.warning("Header preparation modified .config; restored original build config.")
 
         self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Installed extmod build tree: {dest_dir}")
         return dest_dir
