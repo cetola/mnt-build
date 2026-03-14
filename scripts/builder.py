@@ -544,17 +544,21 @@ class KernelBuilder:
                 shutil.rmtree(dest_dir)
             dest_dir.parent.mkdir(parents=True, exist_ok=True)
 
-            make_cmd = ['make', *self._make_kernel_vars()]
+            env_cmd = [
+                'env',
+                f'ARCH={self.arch}',
+                f'SRCARCH={self.arch}',
+                f'srctree={self.config.linux_dir}',
+                'MAKE=make',
+                f'CC={cc}',
+                f'HOSTCC={hostcc}',
+            ]
+            if self.cross_compile:
+                env_cmd.append(f'CROSS_COMPILE={self.cross_compile}')
 
             self.run_command(
                 [
-                    'env',
-                    f'ARCH={self.arch}',
-                    f'SRCARCH={self.arch}',
-                    f'srctree={self.config.linux_dir}',
-                    f"MAKE={' '.join(make_cmd)}",
-                    f'CC={cc}',
-                    f'HOSTCC={hostcc}',
+                    *env_cmd,
                     str(install_script),
                     str(dest_dir),
                 ],
