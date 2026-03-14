@@ -22,6 +22,7 @@ class KernelBuilder:
         self.arch = "arm64"
         self.cross_compile = cross_compile
         self.kernel_only = kernel_only
+        self.patch_dirs_used: List[Path] = []
 
     # ------------------------------------------------------------------
     # Command execution
@@ -206,6 +207,9 @@ class KernelBuilder:
         if not patch_files:
             self.logger.warning(f"No patches found in {patches_dir}")
             return
+
+        if patches_dir not in self.patch_dirs_used:
+            self.patch_dirs_used.append(patches_dir)
 
         self.logger.info(f"Found {len(patch_files)}{qualifier} patches to apply")
 
@@ -692,5 +696,10 @@ class KernelBuilder:
                 self.config.config_file,
                 arcname=f"config-{self.config.version}-mnt-reform-arm64"
             )
+
+            for patch_dir in self.patch_dirs_used:
+                patches_arcname = f"patches/{patch_dir.name}"
+                tar.add(patch_dir, arcname=patches_arcname)
+                self.logger.info(f"  Added patch directory: {patches_arcname}")
 
         self._finalize_tarball(self.config.output_tar, "Deployment")
