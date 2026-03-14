@@ -8,5 +8,5 @@ container*.log
 image-gen*.log
 __pycache__/
 *.pyc
-linux-headers-extmod
+headers-extmod
 image-gen
