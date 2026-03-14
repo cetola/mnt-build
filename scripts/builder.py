@@ -20,9 +20,16 @@ class KernelBuilder:
         self.config = config
         self.logger = logger
         self.arch = "arm64"
-        self.cross_compile = cross_compile
+        self.cross_compile = cross_compile.strip() if cross_compile else ""
         self.kernel_only = kernel_only
         self.patch_dirs_used: List[Path] = []
+
+    def _make_kernel_vars(self) -> List[str]:
+        """Return kernel make variable assignments with optional toolchain prefix."""
+        args = [f"ARCH={self.arch}"]
+        if self.cross_compile:
+            args.append(f"CROSS_COMPILE={self.cross_compile}")
+        return args
 
     # ------------------------------------------------------------------
     # Command execution
@@ -124,10 +131,7 @@ class KernelBuilder:
             raise BuildError(f"Patches directory not found: {self.config.patches_dir}")
 
         self.logger.info("Verifying build toolchain via 'make kernelversion'...")
-        make_cmd = ['make', f'ARCH={self.arch}']
-        if self.cross_compile:
-            make_cmd.append(f'CROSS_COMPILE={self.cross_compile}')
-        make_cmd.append('kernelversion')
+        make_cmd = ['make', *self._make_kernel_vars(), 'kernelversion']
 
         result = self.run_command(make_cmd, cwd=self.config.linux_dir, check=False)
         if result.returncode != 0:
@@ -355,8 +359,7 @@ class KernelBuilder:
         self.logger.info("Running olddefconfig to update config defaults...")
         self.run_command([
             'make',
-            f'ARCH={self.arch}',
-            f'CROSS_COMPILE={self.cross_compile}',
+            *self._make_kernel_vars(),
             'olddefconfig'
         ], cwd=self.config.linux_dir)
 
@@ -423,8 +426,7 @@ class KernelBuilder:
             [
                 'make',
                 f'-j{self.config.jobs}',
-                f'ARCH={self.arch}',
-                f'CROSS_COMPILE={self.cross_compile}',
+                *self._make_kernel_vars(),
                 *make_targets,
             ],
             cwd=self.config.linux_dir,
@@ -440,8 +442,7 @@ class KernelBuilder:
             self.run_command(
                 [
                     'make',
-                    f'ARCH={self.arch}',
-                    f'CROSS_COMPILE={self.cross_compile}',
+                    *self._make_kernel_vars(),
                     f'INSTALL_MOD_PATH={modules_dir}',
                     'modules_install'
                 ],
@@ -466,8 +467,7 @@ class KernelBuilder:
 
         self.run_command([
             'make',
-            f'ARCH={self.arch}',
-            f'CROSS_COMPILE={self.cross_compile}',
+            *self._make_kernel_vars(),
             f'-C{self.config.linux_dir}',
             f'M={lpc_dir}',
             f'-j{self.config.jobs}'
@@ -487,13 +487,11 @@ class KernelBuilder:
             raise BuildError(f"QCACLD2 module directory not found: {qca_dir}")
 
         make_args = [
-            f"ARCH={self.arch}",
+            *self._make_kernel_vars(),
             f"KERNEL_SRC={self.config.linux_dir}",
             "CONFIG_CLD_HL_SDIO_CORE=y",
             "CONFIG_FORCE_MLO_SUPPORT=y",
         ]
-        if self.cross_compile:
-            make_args.append(f"CROSS_COMPILE={self.cross_compile}")
 
         self.run_command(["make", *make_args, "clean"], cwd=qca_dir)
         self.run_command(["make", *make_args, f"-j{self.config.jobs}"], cwd=qca_dir)
@@ -522,9 +520,7 @@ class KernelBuilder:
         if not install_script.exists():
             raise BuildError(f"install-extmod-build script not found: {install_script}")
 
-        prep_args = ['make', f'-j{self.config.jobs}', f'ARCH={self.arch}']
-        if self.cross_compile:
-            prep_args.append(f'CROSS_COMPILE={self.cross_compile}')
+        prep_args = ['make', f'-j{self.config.jobs}', *self._make_kernel_vars()]
 
         self.run_command([*prep_args, 'prepare'], stream_output=True, cwd=self.config.linux_dir)
         self.run_command([*prep_args, 'modules_prepare'], stream_output=True, cwd=self.config.linux_dir)
