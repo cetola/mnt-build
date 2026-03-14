@@ -514,7 +514,7 @@ class KernelBuilder:
         self.logger.info("Installing external-module build tree...")
 
         if dest_dir is None:
-            dest_dir = self.config.build_dir / "linux-headers-extmod"
+            dest_dir = self.config.build_dir / "headers-extmod"
 
         install_script = self.config.linux_dir / "scripts" / "package" / "install-extmod-build"
         if not install_script.exists():
@@ -602,7 +602,7 @@ class KernelBuilder:
         self.logger.info("Creating headers tarball...")
 
         if headers_dir is None:
-            headers_dir = self.config.build_dir / "linux-headers-extmod"
+            headers_dir = self.config.build_dir / "headers-extmod"
 
         if not headers_dir.exists():
             raise BuildError(f"Headers directory not found: {headers_dir}")
