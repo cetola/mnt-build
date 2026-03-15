@@ -82,7 +82,7 @@ class BuildConfig:
             build_dir=build_dir,
             linux_dir=linux_dir,
             patches_dir=build_dir / "reform-debian-packages" / "linux" / f"patches{major_minor}",
-            xtra_patches_dir=build_dir / "patches",
+            xtra_patches_dir=build_dir / "xtra-patches",
             config_file=build_dir / "configs" / f"config-{version}-mnt-reform-arm64",
             dtb_files=dtb_files,
             output_tar=linux_dir / f"kernel-{version}-{pkgrel}-mnt.tar.gz",
