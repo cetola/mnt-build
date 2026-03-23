@@ -22,6 +22,9 @@ fi
 FSBL_LOGFILE=""
 BOOTLOADER_ARTIFACT_PATH=""
 FSBL_SHOW_HELP=0
+FSBL_DIFF=0
+FSBL_TRACE="${FSBL_TRACE:-0}"
+FSBL_TRACE_ENABLED=0
 
 # Internal state
 FSBL_LOG_REDIRECTED=0
@@ -50,7 +53,7 @@ fsbl_die() {
 fsbl_usage() {
   cat <<'USAGE'
 Usage:
-  build-fsbl.sh --sysimage <name> [--mode prebuilt|source] [--ref <ref>] [--sha <sha>] [--repo <url>] [--downloads-dir <path>] [--work-dir <path>] [--build-cmd <cmd>] [--artifact-path <path>] [--artifact-glob <glob>] [--cross-compile <prefix>] [--defconfig <name>]
+  build-fsbl.sh --sysimage <name> [--mode prebuilt|source] [--ref <ref>] [--sha <sha>] [--repo <url>] [--downloads-dir <path>] [--work-dir <path>] [--build-cmd <cmd>] [--artifact-path <path>] [--artifact-glob <glob>] [--cross-compile <prefix>] [--defconfig <name>] [--diff] [--trace]
 
 Options:
   --sysimage <name>        Target sysimage (required for standalone mode)
@@ -65,6 +68,8 @@ Options:
   --artifact-glob <glob>   Artifact glob inside source checkout (source mode)
   --cross-compile <prefix> CROSS_COMPILE prefix for default make flow (default: aarch64-linux-gnu-)
   --defconfig <name>       Defconfig for default make flow (source mode)
+  --diff                   In source mode (standalone), compare built artifact with matching prebuilt artifact
+  --trace                  Enable shell command tracing (xtrace)
   --help                   Show this help text
 USAGE
 }
@@ -133,11 +138,21 @@ fsbl_restore_logging() {
 }
 
 fsbl_enable_command_trace() {
-  set -x
+  case "${FSBL_TRACE}" in
+    1|true|TRUE|yes|YES|on|ON)
+      FSBL_TRACE_ENABLED=1
+      set -x
+      ;;
+    *)
+      FSBL_TRACE_ENABLED=0
+      ;;
+  esac
 }
 
 fsbl_disable_command_trace() {
-  set +x
+  if [[ "$FSBL_TRACE_ENABLED" -eq 1 ]]; then
+    set +x
+  fi
 }
 
 fsbl_require_tools() {
@@ -237,15 +252,22 @@ fsbl_emit_next_step_commands() {
   seek_blocks=$((BOOTLOADER_OFFSET / 512))
   skip_blocks=$((FLASHBIN_OFFSET / 512))
 
-  fsbl_log "Next step: flash bootloader artifact to target media"
-  fsbl_log "Artifact: ${artifact}"
-  fsbl_log "Offsets: BOOTLOADER_OFFSET=${BOOTLOADER_OFFSET} FLASHBIN_OFFSET=${FLASHBIN_OFFSET}"
   echo
-  echo "Suggested commands:"
-  echo "  SD card:"
-  echo "    sudo dd if='${artifact}' of=/dev/<sd-device> conv=notrunc bs=512 seek=${seek_blocks} skip=${skip_blocks}"
-  echo "  eMMC:"
-  echo "    sudo dd if='${artifact}' of=/dev/<emmc-device> conv=notrunc bs=512 seek=${seek_blocks} skip=${skip_blocks}"
+  echo "=========================================="
+  echo "FSBL Flash Commands"
+  echo "=========================================="
+  echo
+  echo "Artifact:           ${artifact}"
+  echo "BOOTLOADER_OFFSET:  ${BOOTLOADER_OFFSET}"
+  echo "FLASHBIN_OFFSET:    ${FLASHBIN_OFFSET}"
+  echo "seek blocks:        ${seek_blocks}"
+  echo "skip blocks:        ${skip_blocks}"
+  echo
+  echo "SD card:"
+  echo "  sudo dd if='${artifact}' of=/dev/<sd-device> conv=notrunc bs=512 seek=${seek_blocks} skip=${skip_blocks}"
+  echo
+  echo "eMMC:"
+  echo "  sudo dd if='${artifact}' of=/dev/<emmc-device> conv=notrunc bs=512 seek=${seek_blocks} skip=${skip_blocks}"
   echo
 }
 
@@ -277,8 +299,14 @@ fsbl_download_prebuilt() {
   fi
 
   fsbl_log "Downloading prebuilt bootloader artifact..."
-  curl -fL --retry 3 --retry-delay 2 -o "$tmp_path" "$bootloader_url"
-  mv "$tmp_path" "$output_path"
+  curl -fL --retry 3 --retry-delay 2 -o "$tmp_path" "$bootloader_url" || {
+    fsbl_die "Failed to download bootloader artifact from $bootloader_url"
+    return 1
+  }
+  mv "$tmp_path" "$output_path" || {
+    fsbl_die "Failed to move downloaded artifact into place: $output_path"
+    return 1
+  }
   BOOTLOADER_ARTIFACT_PATH="$output_path"
 }
 
@@ -290,16 +318,31 @@ fsbl_checkout_source_repo() {
 
   if [[ -d "$FSBL_SOURCE_REPO_DIR/.git" ]]; then
     fsbl_log "Reusing source checkout: $FSBL_SOURCE_REPO_DIR"
-    git -C "$FSBL_SOURCE_REPO_DIR" remote set-url origin "$FSBL_REPO_URL"
-    git -C "$FSBL_SOURCE_REPO_DIR" fetch --tags origin
+    git -C "$FSBL_SOURCE_REPO_DIR" remote set-url origin "$FSBL_REPO_URL" || {
+      fsbl_die "Failed to set source repo origin URL"
+      return 1
+    }
+    git -C "$FSBL_SOURCE_REPO_DIR" fetch --tags origin || {
+      fsbl_die "Failed to fetch source repo tags from $FSBL_REPO_URL"
+      return 1
+    }
   else
     fsbl_log "Cloning source repo: $FSBL_REPO_URL"
-    git clone "$FSBL_REPO_URL" "$FSBL_SOURCE_REPO_DIR"
-    git -C "$FSBL_SOURCE_REPO_DIR" fetch --tags origin
+    git clone "$FSBL_REPO_URL" "$FSBL_SOURCE_REPO_DIR" || {
+      fsbl_die "Failed to clone source repo: $FSBL_REPO_URL"
+      return 1
+    }
+    git -C "$FSBL_SOURCE_REPO_DIR" fetch --tags origin || {
+      fsbl_die "Failed to fetch source repo tags from $FSBL_REPO_URL"
+      return 1
+    }
   fi
 
   fsbl_log "Checking out ref: $FSBL_RESOLVED_REF"
-  git -C "$FSBL_SOURCE_REPO_DIR" checkout --detach "$FSBL_RESOLVED_REF"
+  git -C "$FSBL_SOURCE_REPO_DIR" checkout --detach "$FSBL_RESOLVED_REF" || {
+    fsbl_die "Failed to checkout source ref: $FSBL_RESOLVED_REF"
+    return 1
+  }
 }
 
 fsbl_run_default_build() {
@@ -315,15 +358,30 @@ fsbl_run_default_build() {
 }
 
 fsbl_run_source_build() {
+  local makeflags_jobs=""
+
+  # Force parallel make unless caller already supplied MAKEFLAGS.
+  if [[ -n "${MAKEFLAGS:-}" ]]; then
+    makeflags_jobs="$MAKEFLAGS"
+  else
+    makeflags_jobs="-j$(nproc)"
+  fi
+  fsbl_log "Using MAKEFLAGS=${makeflags_jobs}"
+
   if [[ -n "$UBOOT_BUILD_CMD" ]]; then
     fsbl_log "Running custom build command"
-    (cd "$FSBL_SOURCE_REPO_DIR" && bash -lc "$UBOOT_BUILD_CMD")
+    (cd "$FSBL_SOURCE_REPO_DIR" && MAKEFLAGS="$makeflags_jobs" bash -lc "$UBOOT_BUILD_CMD")
     return 0
   fi
 
+  if ! command -v "${UBOOT_CROSS_COMPILE}gcc" >/dev/null 2>&1; then
+    fsbl_die "Missing required cross compiler: ${UBOOT_CROSS_COMPILE}gcc"
+    return 1
+  fi
+
   if [[ -x "$FSBL_SOURCE_REPO_DIR/build.sh" ]]; then
-    fsbl_log "Running project build script: build.sh"
-    (cd "$FSBL_SOURCE_REPO_DIR" && ./build.sh)
+    fsbl_log "Running project build script with bash: build.sh"
+    (cd "$FSBL_SOURCE_REPO_DIR" && MAKEFLAGS="$makeflags_jobs" bash ./build.sh)
     return 0
   fi
 
@@ -402,14 +460,93 @@ fsbl_handle_source_build() {
   local output_path="$DOWNLOADS_DIR/$BOOTLOADER_FILENAME"
 
   fsbl_set_default_repo_url
-  fsbl_checkout_source_repo
-  fsbl_run_source_build
+  fsbl_checkout_source_repo || return 1
+  fsbl_run_source_build || return 1
 
-  source_artifact="$(fsbl_resolve_source_artifact)"
+  source_artifact="$(fsbl_resolve_source_artifact)" || return 1
+  [[ -n "$source_artifact" && -f "$source_artifact" ]] || {
+    fsbl_die "Resolved source artifact is missing: $source_artifact"
+    return 1
+  }
   fsbl_log "Resolved built artifact: $source_artifact"
 
-  install -D -m 0644 "$source_artifact" "$output_path"
+  install -D -m 0644 "$source_artifact" "$output_path" || {
+    fsbl_die "Failed to install built artifact to $output_path"
+    return 1
+  }
   BOOTLOADER_ARTIFACT_PATH="$output_path"
+}
+
+fsbl_compare_source_vs_prebuilt() {
+  local built_artifact="$1"
+  local prebuilt_url=""
+  local prebuilt_artifact=""
+  local built_size built_sha1 built_sha256
+  local prebuilt_size prebuilt_sha1 prebuilt_sha256
+  local first_diff_line first_diff_byte first_diff_start
+
+  fsbl_require_tools curl sha1sum sha256sum stat awk cmp od head
+
+  prebuilt_url="https://source.mnt.re/reform/${BOOTLOADER_PROJECT}/-/jobs/artifacts/${BOOTLOADER_TAG}/raw/${BOOTLOADER_FILENAME}?job=build"
+  prebuilt_artifact="${DOWNLOADS_DIR}/${BOOTLOADER_FILENAME}.prebuilt-${BOOTLOADER_TAG}"
+
+  fsbl_log "Diff mode: downloading reference prebuilt artifact..."
+  curl -fL --retry 3 --retry-delay 2 -o "$prebuilt_artifact" "$prebuilt_url" || {
+    fsbl_log_warn "Unable to download prebuilt reference artifact for diff: $prebuilt_url"
+    return 0
+  }
+
+  built_size="$(stat -c%s "$built_artifact")"
+  built_sha1="$(sha1sum "$built_artifact" | awk '{print $1}')"
+  built_sha256="$(sha256sum "$built_artifact" | awk '{print $1}')"
+
+  prebuilt_size="$(stat -c%s "$prebuilt_artifact")"
+  prebuilt_sha1="$(sha1sum "$prebuilt_artifact" | awk '{print $1}')"
+  prebuilt_sha256="$(sha256sum "$prebuilt_artifact" | awk '{print $1}')"
+
+  echo
+  echo "=========================================="
+  echo "FSBL Diff Report"
+  echo "=========================================="
+  echo
+  echo "Built artifact:     $built_artifact"
+  echo "Prebuilt artifact:  $prebuilt_artifact"
+  echo
+  echo "Built size:         $built_size"
+  echo "Prebuilt size:      $prebuilt_size"
+  echo "Built SHA1:         $built_sha1"
+  echo "Prebuilt SHA1:      $prebuilt_sha1"
+  echo "Built SHA256:       $built_sha256"
+  echo "Prebuilt SHA256:    $prebuilt_sha256"
+  echo
+
+  if cmp -s "$built_artifact" "$prebuilt_artifact"; then
+    echo "Binary compare:     exact match"
+    return 0
+  fi
+
+  echo "Binary compare:     differ"
+
+  first_diff_line="$(cmp -l "$built_artifact" "$prebuilt_artifact" 2>/dev/null | head -n 1 || true)"
+  if [[ -n "$first_diff_line" ]]; then
+    first_diff_byte="$(awk '{print $1}' <<< "$first_diff_line")"
+    first_diff_start=0
+    if (( first_diff_byte > 16 )); then
+      first_diff_start=$((first_diff_byte - 16))
+    fi
+
+    echo "First differing byte (1-based): $first_diff_byte"
+    echo
+    echo "Built bytes near first difference (offset=${first_diff_start}, len=64):"
+    od -An -tx1 -v -j "$first_diff_start" -N 64 "$built_artifact" || true
+    echo
+    echo "Prebuilt bytes near first difference (offset=${first_diff_start}, len=64):"
+    od -An -tx1 -v -j "$first_diff_start" -N 64 "$prebuilt_artifact" || true
+    echo
+  fi
+
+  echo "First 20 cmp -l lines (byte, built-octal, prebuilt-octal):"
+  cmp -l "$built_artifact" "$prebuilt_artifact" 2>/dev/null | head -n 20 || true
 }
 
 # Public function for source-from-image-gen usage.
@@ -421,37 +558,50 @@ get_fsbl_artifact() {
   fsbl_init_logging
   fsbl_enable_command_trace
 
-  {
-    fsbl_validate_mode
-    fsbl_validate_required_context
-    fsbl_resolve_ref
+  fsbl_validate_mode || rc=$?
+  if [[ "$rc" -eq 0 ]]; then
+    fsbl_validate_required_context || rc=$?
+  fi
+  if [[ "$rc" -eq 0 ]]; then
+    fsbl_resolve_ref || rc=$?
+  fi
 
+  if [[ "$rc" -eq 0 ]]; then
     fsbl_log "Resolved bootloader reference (${FSBL_REF_KIND}): ${FSBL_RESOLVED_REF}"
 
     if [[ "${SD_BOOT:-false}" != "true" ]]; then
       fsbl_log "SD_BOOT=false for ${SYSIMAGE}; skipping bootloader artifact resolution."
       should_skip=1
     fi
+  fi
 
-    if [[ "$should_skip" -eq 0 ]]; then
-      case "${BOOTLOADER_SOURCE_MODE}" in
-        prebuilt)
-          fsbl_handle_prebuilt
-          ;;
-        source)
-          fsbl_handle_source_build
-          ;;
-      esac
+  if [[ "$rc" -eq 0 && "$should_skip" -eq 0 ]]; then
+    case "${BOOTLOADER_SOURCE_MODE}" in
+      prebuilt)
+        fsbl_handle_prebuilt || rc=$?
+        ;;
+      source)
+        fsbl_handle_source_build || rc=$?
+        ;;
+    esac
+  fi
 
-      [[ -n "${BOOTLOADER_ARTIFACT_PATH:-}" ]] || fsbl_die "BOOTLOADER_ARTIFACT_PATH was not set by handler."
-      [[ -f "${BOOTLOADER_ARTIFACT_PATH}" ]] || fsbl_die "Bootloader artifact does not exist: ${BOOTLOADER_ARTIFACT_PATH}"
+  if [[ "$rc" -eq 0 && "$should_skip" -eq 0 ]]; then
+    [[ -n "${BOOTLOADER_ARTIFACT_PATH:-}" ]] || fsbl_die "BOOTLOADER_ARTIFACT_PATH was not set by handler." || rc=$?
+  fi
+  if [[ "$rc" -eq 0 && "$should_skip" -eq 0 ]]; then
+    [[ -f "${BOOTLOADER_ARTIFACT_PATH}" ]] || fsbl_die "Bootloader artifact does not exist: ${BOOTLOADER_ARTIFACT_PATH}" || rc=$?
+  fi
+  if [[ "$rc" -eq 0 && "$should_skip" -eq 0 ]]; then
+    fsbl_emit_artifact_metadata "$BOOTLOADER_ARTIFACT_PATH" || rc=$?
+  fi
+  if [[ "$rc" -eq 0 && "$should_skip" -eq 0 ]]; then
+    fsbl_emit_next_step_commands "$BOOTLOADER_ARTIFACT_PATH" || rc=$?
+  fi
 
-      fsbl_emit_artifact_metadata "$BOOTLOADER_ARTIFACT_PATH"
-      fsbl_emit_next_step_commands "$BOOTLOADER_ARTIFACT_PATH"
-    fi
-
+  if [[ "$rc" -eq 0 ]]; then
     fsbl_log "Completed at: $(date)"
-  } || rc=$?
+  fi
 
   fsbl_disable_command_trace || true
   fsbl_restore_logging || true
@@ -557,6 +707,14 @@ fsbl_parse_args() {
         UBOOT_DEFCONFIG="$2"
         shift 2
         ;;
+      --diff)
+        FSBL_DIFF=1
+        shift
+        ;;
+      --trace)
+        FSBL_TRACE=1
+        shift
+        ;;
       -h | --help)
         fsbl_usage
         FSBL_SHOW_HELP=1
@@ -604,6 +762,14 @@ fsbl_main() {
 
   fsbl_load_sysimage_config_if_needed
   get_fsbl_artifact
+
+  if [[ "$FSBL_DIFF" -eq 1 ]]; then
+    if [[ "$BOOTLOADER_SOURCE_MODE" != "source" ]]; then
+      fsbl_log_warn "--diff is ignored unless --mode source is selected."
+    else
+      fsbl_compare_source_vs_prebuilt "$BOOTLOADER_ARTIFACT_PATH"
+    fi
+  fi
 
   fsbl_log "Artifact path: ${BOOTLOADER_ARTIFACT_PATH:-unset}"
   fsbl_log "Log file: ${FSBL_LOGFILE}"

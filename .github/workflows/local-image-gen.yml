@@ -11,6 +11,18 @@ on:
           - pocket-reform-system-a311d
           - reform-next-system-rk3588
           - pocket-reform-system-rk3588
+      bootloader_mode:
+        description: Bootloader artifact source mode
+        required: true
+        default: prebuilt
+        type: choice
+        options:
+          - prebuilt
+          - source
+      uboot_sha:
+        description: Optional U-Boot commit SHA (used in source mode)
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -69,6 +81,8 @@ jobs:
             curl \
             tar \
             cpio \
+            gcc-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu \
             qemu-user-static \
             binfmt-support \
             bmap-tools \
@@ -105,11 +119,47 @@ jobs:
           echo "Resolved sysimage: $SYSIMAGE"
           echo "Resolved machine config: $CONF"
 
+      - name: Print selected workflow inputs
+        run: |
+          set -euo pipefail
+          SYSIMAGE="$(printf '%s' "${{ github.event.inputs.sysimage }}" | tr -d '\r\n')"
+          BOOTLOADER_MODE="$(printf '%s' "${{ github.event.inputs.bootloader_mode }}" | tr -d '\r\n')"
+          UBOOT_SHA="$(printf '%s' "${{ github.event.inputs.uboot_sha }}" | tr -d '\r\n')"
+
+          echo "Selected inputs:"
+          echo "  sysimage=$SYSIMAGE"
+          echo "  bootloader_mode=$BOOTLOADER_MODE"
+          if [[ -n "$UBOOT_SHA" ]]; then
+            echo "  uboot_sha=$UBOOT_SHA"
+          else
+            echo "  uboot_sha=<empty>"
+          fi
+
+          {
+            echo "### Selected Workflow Inputs"
+            echo ""
+            echo "- sysimage: \`$SYSIMAGE\`"
+            echo "- bootloader_mode: \`$BOOTLOADER_MODE\`"
+            if [[ -n "$UBOOT_SHA" ]]; then
+              echo "- uboot_sha: \`$UBOOT_SHA\`"
+            else
+              echo "- uboot_sha: *(empty)*"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Run image-gen.sh on runner (as root)
         run: |
           set -euo pipefail
           chmod +x ./scripts/image-gen.sh
-          sudo ./scripts/image-gen.sh --sysimage "${{ github.event.inputs.sysimage }}"
+          BOOTLOADER_SOURCE_MODE="$(printf '%s' "${{ github.event.inputs.bootloader_mode }}" | tr -d '\r\n')"
+          UBOOT_SHA="$(printf '%s' "${{ github.event.inputs.uboot_sha }}" | tr -d '\r\n')"
+          echo "Using BOOTLOADER_SOURCE_MODE=${BOOTLOADER_SOURCE_MODE}"
+          if [[ -n "${UBOOT_SHA}" ]]; then
+            echo "Using UBOOT_SHA=${UBOOT_SHA}"
+          fi
+          export BOOTLOADER_SOURCE_MODE UBOOT_SHA
+          sudo --preserve-env=BOOTLOADER_SOURCE_MODE,UBOOT_SHA \
+            ./scripts/image-gen.sh --sysimage "${{ github.event.inputs.sysimage }}"
 
       - name: Package outputs (zstd, bmap, logs, sha256)
         run: |
@@ -142,6 +192,10 @@ jobs:
           {
             echo "Build date (UTC): $(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "Sysimage: ${{ github.event.inputs.sysimage }}"
+            echo "Bootloader mode: ${{ github.event.inputs.bootloader_mode }}"
+            if [[ -n "${{ github.event.inputs.uboot_sha }}" ]]; then
+              echo "U-Boot SHA: ${{ github.event.inputs.uboot_sha }}"
+            fi
             echo
             echo "Files:"
             ls -lh
