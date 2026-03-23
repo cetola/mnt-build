@@ -116,6 +116,7 @@ parse_args() {
 }
 
 source "$SCRIPT_DIR/sysimage-config.sh"
+source "$SCRIPT_DIR/build-fsbl.sh"
 
 # ============================================================================
 # Validation Functions
@@ -288,25 +289,6 @@ download_if_missing() {
   fi
 }
 
-download_bootloader() {
-  local bootloader_url="https://source.mnt.re/reform/${BOOTLOADER_PROJECT}/-/jobs/artifacts/${BOOTLOADER_TAG}/raw/${BOOTLOADER_FILENAME}?job=build"
-  local bootloader_path="$DOWNLOADS_DIR/$BOOTLOADER_FILENAME"
-  local actual_sha1=""
-
-  if [[ -f "$bootloader_path" ]]; then
-    actual_sha1="$(sha1sum "$bootloader_path" | awk '{print $1}')"
-    if [[ "$actual_sha1" == "$BOOTLOADER_SHA1" ]]; then
-      log "Using cached bootloader $BOOTLOADER_FILENAME"
-      return
-    fi
-    log "Cached bootloader checksum mismatch, re-downloading $BOOTLOADER_FILENAME..."
-    rm -f "$bootloader_path"
-  fi
-
-  log "Downloading $BOOTLOADER_FILENAME..."
-  curl -L -o "$bootloader_path" "$bootloader_url"
-}
-
 download_dependencies() {
   log "Downloading dependencies..."
   cd "$DOWNLOADS_DIR"
@@ -316,15 +298,21 @@ download_dependencies() {
   download_if_missing "$ARCH_URL" "archlinuxarm.tar.gz"
 
   if [[ "$SD_BOOT" == "true" ]]; then
-    download_bootloader
+    log "Resolving bootloader artifact via build-fsbl.sh..."
+    get_fsbl_artifact
   fi
 }
 
 verify_bootloader_checksum() {
   [[ "$SD_BOOT" != "true" ]] && return 0
 
+  if [[ "${BOOTLOADER_SOURCE_MODE:-prebuilt}" == "source" ]]; then
+    log "Skipping static checksum verification for source-built bootloader artifact."
+    return 0
+  fi
+
   log "Verifying bootloader checksum..."
-  local bootloader_path="$DOWNLOADS_DIR/$BOOTLOADER_FILENAME"
+  local bootloader_path="${BOOTLOADER_ARTIFACT_PATH:-$DOWNLOADS_DIR/$BOOTLOADER_FILENAME}"
   local actual_sha1
   actual_sha1="$(sha1sum "$bootloader_path" | awk '{print $1}')"
   if [[ "$actual_sha1" != "$BOOTLOADER_SHA1" ]]; then
@@ -338,7 +326,7 @@ install_bootloader_to_image() {
     return
   fi
 
-  local bootloader_path="$DOWNLOADS_DIR/$BOOTLOADER_FILENAME"
+  local bootloader_path="${BOOTLOADER_ARTIFACT_PATH:-$DOWNLOADS_DIR/$BOOTLOADER_FILENAME}"
   local bootloader_size
   local first_partition_start=""
   local required_space
@@ -475,7 +463,15 @@ echo "Updating package database..."
 $PACMAN -Sy --noconfirm
 
 echo "Installing essential packages..."
-$PACMAN -S --needed --noconfirm base base-devel dracut networkmanager cpio git dkms sudo
+$PACMAN -S --needed --noconfirm \
+  base base-devel dracut networkmanager cpio git dkms sudo
+
+echo "Configuring makepkg sync-deps permissions..."
+cat > /etc/sudoers.d/10-makepkg-pacman <<'EOF'
+nobody ALL=(root) NOPASSWD: /usr/bin/pacman
+EOF
+chmod 440 /etc/sudoers.d/10-makepkg-pacman
+export PACMAN_AUTH='sudo -n'
 
 echo "Removing conflicting linux-aarch64 package if present..."
 $PACMAN -R --noconfirm linux-aarch64 || true
@@ -488,7 +484,7 @@ build_and_install_pkgbuild() {
   chown -R nobody:nobody "$pkgdir"
   (
     cd "$pkgdir"
-    sudo -u nobody makepkg --noconfirm
+    sudo -u nobody makepkg -s --noconfirm
   )
 
   local built_packages=("$pkgdir"/$pkgglob)
@@ -520,7 +516,7 @@ build_and_install_aur_package() {
   sudo -u nobody git clone --depth 1 "$aur_repo" "$aur_dir"
   (
     cd "$aur_dir"
-    sudo -u nobody makepkg --noconfirm
+    sudo -u nobody makepkg -s --noconfirm
   )
 
   local built_packages=("$aur_dir"/${pkgname}-*.pkg.tar.*)
@@ -533,6 +529,9 @@ build_and_install_aur_package() {
 }
 
 build_and_install_aur_package "reform-tools"
+
+rm -f /etc/sudoers.d/10-makepkg-pacman
+unset PACMAN_AUTH
 
 echo "Kernel, qcacld2, lpc, and reform-tools packages installed successfully!"
 ls -lh /boot/
