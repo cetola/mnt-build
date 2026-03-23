@@ -2,6 +2,15 @@ name: Local Image Gen
 
 on:
   workflow_dispatch:
+    inputs:
+      sysimage:
+        description: Target sysimage to build
+        required: true
+        type: choice
+        options:
+          - pocket-reform-system-a311d
+          - reform-next-system-rk3588
+          - pocket-reform-system-rk3588
 
 permissions:
   contents: read
@@ -13,6 +22,34 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      - name: Checkout required submodule (reform-tools only)
+        run: |
+          set -euo pipefail
+          git submodule sync -- reform-tools
+          git -c protocol.version=2 submodule update --init --depth 1 reform-tools
+
+      - name: Verify checkout and submodules
+        run: |
+          set -euo pipefail
+          echo "== Checkout debug =="
+          echo "pwd: $(pwd)"
+          echo "head: $(git rev-parse --short HEAD)"
+          echo "submodule status:"
+          git submodule status || true
+
+          if [[ ! -d ./reform-tools/machines ]]; then
+            echo "ERROR: ./reform-tools/machines missing after checkout." >&2
+            echo "Repo root listing:" >&2
+            ls -la >&2
+            exit 1
+          fi
+
+          echo "reform-tools/machines listing:"
+          ls -la ./reform-tools/machines
 
       # Registers binfmt handlers on the runner so aarch64 binaries can run via qemu
       - name: Set up QEMU (binfmt)
@@ -31,6 +68,7 @@ jobs:
             e2fsprogs \
             curl \
             tar \
+            cpio \
             qemu-user-static \
             binfmt-support \
             bmap-tools \
@@ -43,11 +81,35 @@ jobs:
           mkfs.ext4 -V || true
           qemu-aarch64-static --version || true
 
+      - name: Preflight sysimage config resolution
+        run: |
+          set -euo pipefail
+          SYSIMAGE="$(printf '%s' "${{ github.event.inputs.sysimage }}" | tr -d '\r\n')"
+          MACHINES_DIR="./reform-tools/machines"
+
+          if [[ ! -d "$MACHINES_DIR" ]]; then
+            echo "ERROR: machines directory does not exist: $MACHINES_DIR" >&2
+            echo "Top-level repo entries:" >&2
+            ls -1 >&2
+            exit 1
+          fi
+
+          CONF="$(grep -R -l --include='*.conf' --fixed-strings "SYSIMAGE=\"$SYSIMAGE\"" "$MACHINES_DIR" | head -n1 || true)"
+          if [[ -z "$CONF" ]]; then
+            echo "No machine config found for $SYSIMAGE under $MACHINES_DIR" >&2
+            echo "Available SYSIMAGE values:" >&2
+            grep -R -h --include='*.conf' '^SYSIMAGE=' "$MACHINES_DIR" | sed -E 's/^SYSIMAGE=\"(.*)\"$/\1/' | sort -u >&2
+            exit 1
+          fi
+
+          echo "Resolved sysimage: $SYSIMAGE"
+          echo "Resolved machine config: $CONF"
+
       - name: Run image-gen.sh on runner (as root)
         run: |
           set -euo pipefail
           chmod +x ./scripts/image-gen.sh
-          sudo ./scripts/image-gen.sh
+          sudo ./scripts/image-gen.sh --sysimage "${{ github.event.inputs.sysimage }}"
 
       - name: Package outputs (zstd, bmap, logs, sha256)
         run: |
@@ -79,6 +141,7 @@ jobs:
 
           {
             echo "Build date (UTC): $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "Sysimage: ${{ github.event.inputs.sysimage }}"
             echo
             echo "Files:"
             ls -lh
@@ -92,7 +155,6 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: mnt-reform-image
+          name: mnt-reform-image-${{ github.event.inputs.sysimage }}
           path: dist/*
           if-no-files-found: error
-

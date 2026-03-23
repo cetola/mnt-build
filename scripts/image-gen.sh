@@ -11,6 +11,7 @@ readonly LPC_VER="1.85-1"
 readonly KERNEL_VERSION="${KVER}-mnt-reform"
 readonly IMAGE_SIZE_GB=120
 readonly BOOT_SIZE_MB=1024
+readonly MAX_BOOTLOADER_MB=16
 readonly PARTITION_WAIT_MAX_ATTEMPTS=20
 readonly PARTITION_WAIT_INTERVAL=0.2
 
@@ -34,6 +35,15 @@ readonly LOGFILE="$(pwd)/image-gen-${KVER}-${TIMESTAMP}.log"
 LOOPDEV=""
 BOOT_PART=""
 ROOT_PART=""
+SYSIMAGE=""
+DTBPATH=""
+BOOTLOADER_SHA1=""
+BOOTLOADER_PROJECT=""
+BOOTLOADER_TAG=""
+BOOTLOADER_OFFSET=0
+FLASHBIN_OFFSET=0
+SD_BOOT=false
+BOOTLOADER_FILENAME=""
 
 # ============================================================================
 # Utility Functions
@@ -45,6 +55,10 @@ log() {
 
 log_error() {
   echo "ERROR: $*" >&2
+}
+
+log_warn() {
+  echo "WARNING: $*" >&2
 }
 
 log_section() {
@@ -59,6 +73,49 @@ die() {
   log_error "$@"
   exit 1
 }
+
+usage() {
+  cat <<'EOF'
+Usage:
+  image-gen.sh --sysimage <name>
+
+Options:
+  --sysimage <name>   Target platform sysimage. Supported values:
+                      - pocket-reform-system-a311d
+                      - reform-next-system-rk3588
+                      - pocket-reform-system-rk3588
+  -h, --help          Show this help.
+EOF
+}
+
+parse_args() {
+  local sysimage_set=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --sysimage)
+        [[ $# -lt 2 ]] && die "--sysimage requires an argument"
+        SYSIMAGE="$2"
+        sysimage_set=true
+        shift 2
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        die "Unknown argument: $1"
+        ;;
+    esac
+  done
+
+  if [[ "$sysimage_set" != "true" ]]; then
+    usage
+    die "--sysimage is required"
+  fi
+}
+
+source "$SCRIPT_DIR/sysimage-config.sh"
 
 # ============================================================================
 # Validation Functions
@@ -154,10 +211,11 @@ create_disk_image() {
 
 partition_image() {
   log "Partitioning image..."
+  local boot_end_mb=$((MAX_BOOTLOADER_MB + BOOT_SIZE_MB))
   parted --script "$IMAGE" \
     mklabel msdos \
-    mkpart primary ext4 1MiB "$((BOOT_SIZE_MB + 1))"MiB \
-    mkpart primary ext4 "$((BOOT_SIZE_MB + 1))"MiB 100%
+    mkpart primary ext4 "${MAX_BOOTLOADER_MB}"MiB "${boot_end_mb}"MiB \
+    mkpart primary ext4 "${boot_end_mb}"MiB 100%
 }
 
 setup_loop_device() {
@@ -230,6 +288,25 @@ download_if_missing() {
   fi
 }
 
+download_bootloader() {
+  local bootloader_url="https://source.mnt.re/reform/${BOOTLOADER_PROJECT}/-/jobs/artifacts/${BOOTLOADER_TAG}/raw/${BOOTLOADER_FILENAME}?job=build"
+  local bootloader_path="$DOWNLOADS_DIR/$BOOTLOADER_FILENAME"
+  local actual_sha1=""
+
+  if [[ -f "$bootloader_path" ]]; then
+    actual_sha1="$(sha1sum "$bootloader_path" | awk '{print $1}')"
+    if [[ "$actual_sha1" == "$BOOTLOADER_SHA1" ]]; then
+      log "Using cached bootloader $BOOTLOADER_FILENAME"
+      return
+    fi
+    log "Cached bootloader checksum mismatch, re-downloading $BOOTLOADER_FILENAME..."
+    rm -f "$bootloader_path"
+  fi
+
+  log "Downloading $BOOTLOADER_FILENAME..."
+  curl -L -o "$bootloader_path" "$bootloader_url"
+}
+
 download_dependencies() {
   log "Downloading dependencies..."
   cd "$DOWNLOADS_DIR"
@@ -237,6 +314,59 @@ download_dependencies() {
   download_if_missing "$QCACLD_URL" "qcacld.tar.gz"
   download_if_missing "$LPC_URL" "lpc.tar.gz"
   download_if_missing "$ARCH_URL" "archlinuxarm.tar.gz"
+
+  if [[ "$SD_BOOT" == "true" ]]; then
+    download_bootloader
+  fi
+}
+
+verify_bootloader_checksum() {
+  [[ "$SD_BOOT" != "true" ]] && return 0
+
+  log "Verifying bootloader checksum..."
+  local bootloader_path="$DOWNLOADS_DIR/$BOOTLOADER_FILENAME"
+  local actual_sha1
+  actual_sha1="$(sha1sum "$bootloader_path" | awk '{print $1}')"
+  if [[ "$actual_sha1" != "$BOOTLOADER_SHA1" ]]; then
+    die "Bootloader checksum mismatch for $BOOTLOADER_FILENAME (expected $BOOTLOADER_SHA1, got $actual_sha1)"
+  fi
+}
+
+install_bootloader_to_image() {
+  if [[ "$SD_BOOT" != "true" ]]; then
+    log "Skipping bootloader raw write for $SYSIMAGE (SD_BOOT=false)."
+    return
+  fi
+
+  local bootloader_path="$DOWNLOADS_DIR/$BOOTLOADER_FILENAME"
+  local bootloader_size
+  local first_partition_start=""
+  local required_space
+
+  bootloader_size="$(stat -c%s "$bootloader_path")"
+  required_space=$((BOOTLOADER_OFFSET - FLASHBIN_OFFSET + bootloader_size))
+
+  first_partition_start="$(parted --script --machine "$IMAGE" unit B print \
+    | awk -F: '$1 ~ /^[0-9]+$/ { gsub(/B/, "", $2); print $2; exit }')"
+  if [[ -z "$first_partition_start" ]]; then
+    die "Unable to determine first partition start from partition table."
+  fi
+
+  if (( BOOTLOADER_OFFSET < 512 )); then
+    die "Refusing to write bootloader into first 512 bytes (BOOTLOADER_OFFSET=$BOOTLOADER_OFFSET)."
+  fi
+
+  if (( required_space > first_partition_start )); then
+    die "Bootloader would overlap first partition (needs ${required_space} bytes, first partition starts at ${first_partition_start})."
+  fi
+
+  if (( BOOTLOADER_OFFSET % 512 != 0 || FLASHBIN_OFFSET % 512 != 0 )); then
+    die "BOOTLOADER_OFFSET and FLASHBIN_OFFSET must be multiples of 512."
+  fi
+
+  log "Writing bootloader to image (offset=$BOOTLOADER_OFFSET, skip=$FLASHBIN_OFFSET)..."
+  dd if="$bootloader_path" of="$IMAGE" conv=notrunc bs=512 \
+    seek="$((BOOTLOADER_OFFSET / 512))" skip="$((FLASHBIN_OFFSET / 512))"
 }
 
 # ============================================================================
@@ -450,6 +580,7 @@ print_summary() {
   fi
   echo
   echo "Log file saved to: $LOGFILE"
+  echo "Target sysimage: $SYSIMAGE"
   echo
   echo "Contents:"
   echo "  - Boot partition with kernel, DTB, and initramfs"
@@ -473,11 +604,15 @@ print_summary() {
 # ============================================================================
 
 main() {
+  parse_args "$@"
+  configure_sysimage
+
   # Setup logging
   exec > >(tee -a "$LOGFILE") 2>&1
   
   log "Logging to: $LOGFILE"
   log "Started at: $(date)"
+  log "Selected sysimage: $SYSIMAGE"
   echo
   
   # Validation
@@ -497,6 +632,8 @@ main() {
   
   # Download and extract
   download_dependencies
+  verify_bootloader_checksum
+  install_bootloader_to_image
   extract_rootfs
   extract_kernel
   extract_qcacld
