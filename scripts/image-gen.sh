@@ -475,7 +475,7 @@ echo "Updating package database..."
 $PACMAN -Sy --noconfirm
 
 echo "Installing essential packages..."
-$PACMAN -S --needed --noconfirm base base-devel dracut networkmanager cpio git dkms
+$PACMAN -S --needed --noconfirm base base-devel dracut networkmanager cpio git dkms sudo
 
 echo "Removing conflicting linux-aarch64 package if present..."
 $PACMAN -R --noconfirm linux-aarch64 || true
@@ -510,7 +510,31 @@ build_and_install_pkgbuild "/tmp/mnt-reform-qcacld2" "*qcacld*.pkg.tar.*"
 echo "Building and installing mnt-reform-lpc..."
 build_and_install_pkgbuild "/tmp/mnt-reform-lpc" "*lpc*.pkg.tar.*"
 
-echo "Kernel, qcacld2, and lpc packages installed successfully!"
+build_and_install_aur_package() {
+  local pkgname="$1"
+  local aur_repo="https://aur.archlinux.org/${pkgname}.git"
+  local aur_dir="/tmp/${pkgname}-aur"
+
+  echo "Building and installing AUR package: ${pkgname}..."
+  rm -rf "$aur_dir"
+  sudo -u nobody git clone --depth 1 "$aur_repo" "$aur_dir"
+  (
+    cd "$aur_dir"
+    sudo -u nobody makepkg --noconfirm
+  )
+
+  local built_packages=("$aur_dir"/${pkgname}-*.pkg.tar.*)
+  if [[ ${#built_packages[@]} -eq 0 ]]; then
+    echo "No packages found matching '${pkgname}-*.pkg.tar.*' in $aur_dir" >&2
+    exit 1
+  fi
+
+  $PACMAN -U --noconfirm "${built_packages[@]}"
+}
+
+build_and_install_aur_package "reform-tools"
+
+echo "Kernel, qcacld2, lpc, and reform-tools packages installed successfully!"
 ls -lh /boot/
 CHROOT_SCRIPT
   
@@ -527,6 +551,7 @@ cleanup_chroot_environment() {
   rm -rf "$ROOT_MNT/tmp/linux-mnt-reform"
   rm -rf "$ROOT_MNT/tmp/mnt-reform-qcacld2"
   rm -rf "$ROOT_MNT/tmp/mnt-reform-lpc"
+  rm -rf "$ROOT_MNT/tmp/reform-tools-aur"
   rm -f "$ROOT_MNT/tmp/install_kernel.sh"
   rm -f "$ROOT_MNT/usr/bin/qemu-aarch64-static"
 }
