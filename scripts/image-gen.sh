@@ -22,6 +22,8 @@ readonly MOUNT_DIR="$WORK_DIR/mnt"
 readonly BOOT_MNT="$MOUNT_DIR/boot"
 readonly ROOT_MNT="$MOUNT_DIR/root"
 readonly IMAGE="$(pwd)/mnt-reform-${KVER}-aarch64.img"
+readonly CHROOT_INSTALLER_SOURCE="$SCRIPT_DIR/install_kernel_chroot.sh"
+readonly CHROOT_INSTALLER_TARGET="$ROOT_MNT/tmp/install_kernel.sh"
 
 readonly KERNEL_URL="https://github.com/cetola/linux-mnt-reform/archive/refs/tags/${KVER}-${PKGREL}-mnt-reform.tar.gz"
 readonly QCACLD_URL="https://github.com/cetola/mnt-reform-qcacld2/archive/refs/tags/${QCACLD_VER}.tar.gz"
@@ -30,6 +32,9 @@ readonly ARCH_URL="http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar
 
 readonly TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 readonly LOGFILE="$(pwd)/image-gen-${KVER}-${TIMESTAMP}.log"
+
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/common.sh"
 
 # Global state
 LOOPDEV=""
@@ -50,23 +55,19 @@ BOOTLOADER_FILENAME=""
 # ============================================================================
 
 log() {
-  echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*"
+  common_log "$@"
 }
 
 log_error() {
-  echo "ERROR: $*" >&2
+  common_error "$@"
 }
 
 log_warn() {
-  echo "WARNING: $*" >&2
+  common_warn "$@"
 }
 
 log_section() {
-  echo
-  echo "=========================================="
-  echo "$*"
-  echo "=========================================="
-  echo
+  common_section "$@"
 }
 
 die() {
@@ -457,167 +458,7 @@ copy_pkgbuild() {
 
 create_chroot_script() {
   log "Creating chroot installation script..."
-  cat > "$ROOT_MNT/tmp/install_kernel.sh" << 'CHROOT_SCRIPT'
-#!/bin/bash
-set -euo pipefail
-shopt -s nullglob
-
-echo "Inside chroot - initializing pacman keyring..."
-pacman-key --init
-pacman-key --populate archlinuxarm
-
-PACMAN="pacman --disable-sandbox"
-JOBS="$(nproc)"
-
-echo "Configuring parallel build settings (jobs=${JOBS})..."
-export MAKEFLAGS="-j${JOBS}"
-export CMAKE_BUILD_PARALLEL_LEVEL="${JOBS}"
-export NINJAFLAGS="-j${JOBS}"
-
-# Prefer parallel DKMS builds for long-running module compiles (e.g. qcacld).
-mkdir -p /etc/dkms
-cat > /etc/dkms/framework.conf <<EOF
-parallel_jobs=${JOBS}
-EOF
-
-echo "Upgrading base system (avoid partial upgrade issues)..."
-$PACMAN -Syu --noconfirm --ignore linux-aarch64,linux-aarch64-headers
-
-echo "Installing essential packages..."
-$PACMAN -S --needed --noconfirm \
-  base base-devel dracut networkmanager cpio git dkms sudo
-
-echo "Removing conflicting linux-aarch64 package if present..."
-$PACMAN -R --noconfirm linux-aarch64 || true
-
-install_pkgbuild_deps() {
-  local pkgdir="$1"
-  local srcinfo=""
-  local deps=()
-  local local_pkg_names=()
-  local filtered_deps=()
-  local dep=""
-
-  # Collect dependency metadata as non-root (makepkg refuses root).
-  if ! srcinfo="$(
-    cd "$pkgdir"
-    sudo -u nobody makepkg --printsrcinfo
-  )"; then
-    echo "Failed to read PKGBUILD dependency metadata in $pkgdir" >&2
-    exit 1
-  fi
-
-  mapfile -t deps < <(
-    printf '%s\n' "$srcinfo" \
-      | awk -F' = ' '/^[[:space:]]*(depends|makedepends)[[:space:]]*=/ {print $2}' \
-      | sed -E 's/[<>=].*$//' \
-      | sed -E 's/:.*$//' \
-      | sed '/^$/d' \
-      | sort -u
-  )
-
-  # Exclude package names built by this same PKGBUILD; they won't exist in repos.
-  mapfile -t local_pkg_names < <(
-    printf '%s\n' "$srcinfo" \
-      | awk -F' = ' '/^[[:space:]]*pkgname[[:space:]]*=/ {print $2}' \
-      | sed '/^$/d' \
-      | sort -u
-  )
-
-  for dep in "${deps[@]}"; do
-    if printf '%s\n' "${local_pkg_names[@]}" | grep -Fxq "$dep"; then
-      continue
-    fi
-    filtered_deps+=("$dep")
-  done
-
-  if [[ ${#filtered_deps[@]} -eq 0 ]]; then
-    echo "No additional PKGBUILD dependencies detected for $pkgdir"
-    return 0
-  fi
-
-  echo "Installing PKGBUILD dependencies for $pkgdir: ${filtered_deps[*]}"
-  $PACMAN -S --needed --noconfirm "${filtered_deps[@]}"
-}
-
-build_and_install_pkgbuild() {
-  local pkgdir="$1"
-  local pkgglob="$2"
-
-  chown -R nobody:nobody "$pkgdir"
-  install_pkgbuild_deps "$pkgdir"
-
-  echo "Building package from $pkgdir..."
-  (
-    cd "$pkgdir"
-    sudo -u nobody env \
-      MAKEFLAGS="$MAKEFLAGS" \
-      CMAKE_BUILD_PARALLEL_LEVEL="$CMAKE_BUILD_PARALLEL_LEVEL" \
-      NINJAFLAGS="$NINJAFLAGS" \
-      makepkg --noconfirm
-  )
-
-  local built_packages=("$pkgdir"/$pkgglob)
-  if [[ ${#built_packages[@]} -eq 0 ]]; then
-    echo "No packages found matching '$pkgglob' in $pkgdir" >&2
-    exit 1
-  fi
-
-  echo "Installing package(s) from $pkgdir..."
-  $PACMAN -U --noconfirm "${built_packages[@]}"
-}
-
-build_and_install_aur_package() {
-  local pkgname="$1"
-  local aur_repo="https://aur.archlinux.org/${pkgname}.git"
-  local aur_dir="/tmp/${pkgname}-aur"
-
-  echo "Building and installing AUR package: ${pkgname}..."
-  rm -rf "$aur_dir"
-  sudo -u nobody git clone --depth 1 "$aur_repo" "$aur_dir"
-  chown -R nobody:nobody "$aur_dir"
-
-  install_pkgbuild_deps "$aur_dir"
-
-  (
-    cd "$aur_dir"
-    sudo -u nobody env \
-      MAKEFLAGS="$MAKEFLAGS" \
-      CMAKE_BUILD_PARALLEL_LEVEL="$CMAKE_BUILD_PARALLEL_LEVEL" \
-      NINJAFLAGS="$NINJAFLAGS" \
-      makepkg --noconfirm
-  )
-
-  local built_packages=("$aur_dir"/${pkgname}-*.pkg.tar.*)
-  if [[ ${#built_packages[@]} -eq 0 ]]; then
-    echo "No packages found matching '${pkgname}-*.pkg.tar.*' in $aur_dir" >&2
-    exit 1
-  fi
-
-  $PACMAN -U --noconfirm "${built_packages[@]}"
-}
-
-echo "Building and installing linux-mnt-reform kernel..."
-build_and_install_pkgbuild "/tmp/linux-mnt-reform" "linux-mnt-reform-*.pkg.tar.*"
-
-echo "Building and installing AUR package reform-tools..."
-build_and_install_aur_package "reform-tools"
-
-echo "Building and installing mnt-reform-qcacld2..."
-build_and_install_pkgbuild "/tmp/mnt-reform-qcacld2" "*qcacld*.pkg.tar.*"
-
-echo "Building and installing mnt-reform-lpc..."
-build_and_install_pkgbuild "/tmp/mnt-reform-lpc" "*lpc*.pkg.tar.*"
-
-echo "Kernel, qcacld2, lpc, and reform-tools packages installed successfully!"
-
-echo "Cleaning pacman package cache to reduce image size..."
-$PACMAN -Scc --noconfirm || true
-
-ls -lh /boot/
-CHROOT_SCRIPT
-  
-  chmod +x "$ROOT_MNT/tmp/install_kernel.sh"
+  install -m 0755 "$CHROOT_INSTALLER_SOURCE" "$CHROOT_INSTALLER_TARGET"
 }
 
 run_chroot_installation() {
@@ -631,7 +472,7 @@ cleanup_chroot_environment() {
   rm -rf "$ROOT_MNT/tmp/mnt-reform-qcacld2"
   rm -rf "$ROOT_MNT/tmp/mnt-reform-lpc"
   rm -rf "$ROOT_MNT/tmp/reform-tools-aur"
-  rm -f "$ROOT_MNT/tmp/install_kernel.sh"
+  rm -f "$CHROOT_INSTALLER_TARGET"
   rm -f "$ROOT_MNT/usr/bin/qemu-aarch64-static"
 }
 

@@ -12,6 +12,9 @@ readonly FSBL_SCRIPT_PATH="${BASH_SOURCE[0]}"
 readonly FSBL_SCRIPT_DIR="$(cd "$(dirname "$FSBL_SCRIPT_PATH")" && pwd)"
 readonly FSBL_TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 
+# shellcheck source=/dev/null
+source "$FSBL_SCRIPT_DIR/common.sh"
+
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   FSBL_STANDALONE=1
 else
@@ -34,15 +37,15 @@ FSBL_SOURCE_REPO_DIR=""
 FSBL_REPO_URL=""
 
 fsbl_log() {
-  echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*"
+  common_log "$@"
 }
 
 fsbl_log_warn() {
-  echo "WARNING: $*" >&2
+  common_warn "$@"
 }
 
 fsbl_log_error() {
-  echo "ERROR: $*" >&2
+  common_error "$@"
 }
 
 fsbl_die() {
@@ -156,18 +159,7 @@ fsbl_disable_command_trace() {
 }
 
 fsbl_require_tools() {
-  local missing=()
-  local tool
-
-  for tool in "$@"; do
-    if ! command -v "$tool" >/dev/null 2>&1; then
-      missing+=("$tool")
-    fi
-  done
-
-  if [[ ${#missing[@]} -gt 0 ]]; then
-    fsbl_die "Missing required tool(s): ${missing[*]}"
-  fi
+  common_require_tools "$@" || return 1
 }
 
 fsbl_validate_required_context() {
