@@ -300,8 +300,6 @@ download_dependencies() {
 }
 
 preflight_bootloader_artifact() {
-  [[ "$SD_BOOT" != "true" ]] && return 0
-
   log_section "Preflight: resolving bootloader artifact"
   log "BOOTLOADER_SOURCE_MODE=${BOOTLOADER_SOURCE_MODE:-prebuilt}"
   get_fsbl_artifact
@@ -314,8 +312,6 @@ preflight_bootloader_artifact() {
 }
 
 verify_bootloader_checksum() {
-  [[ "$SD_BOOT" != "true" ]] && return 0
-
   if [[ "${BOOTLOADER_SOURCE_MODE:-prebuilt}" == "source" ]]; then
     log "Skipping static checksum verification for source-built bootloader artifact."
     return 0
@@ -365,6 +361,14 @@ install_bootloader_to_image() {
   log "Writing bootloader to image (offset=$BOOTLOADER_OFFSET, skip=$FLASHBIN_OFFSET)..."
   dd if="$bootloader_path" of="$IMAGE" conv=notrunc bs=512 \
     seek="$((BOOTLOADER_OFFSET / 512))" skip="$((FLASHBIN_OFFSET / 512))"
+}
+
+install_bootloader_to_boot_partition() {
+  local bootloader_path="${BOOTLOADER_ARTIFACT_PATH:-$DOWNLOADS_DIR/$BOOTLOADER_FILENAME}"
+  local boot_partition_bootloader="$BOOT_MNT/flash.bin"
+
+  log "Copying bootloader artifact into boot filesystem: $boot_partition_bootloader"
+  install -m 0644 "$bootloader_path" "$boot_partition_bootloader"
 }
 
 # ============================================================================
@@ -582,6 +586,7 @@ main() {
   download_dependencies
   verify_bootloader_checksum
   install_bootloader_to_image
+  install_bootloader_to_boot_partition
   extract_rootfs
   extract_kernel
   extract_qcacld

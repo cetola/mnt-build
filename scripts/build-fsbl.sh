@@ -544,7 +544,6 @@ fsbl_compare_source_vs_prebuilt() {
 # Public function for source-from-image-gen usage.
 get_fsbl_artifact() {
   local rc=0
-  local should_skip=0
 
   fsbl_init_defaults
   fsbl_init_logging
@@ -560,14 +559,9 @@ get_fsbl_artifact() {
 
   if [[ "$rc" -eq 0 ]]; then
     fsbl_log "Resolved bootloader reference (${FSBL_REF_KIND}): ${FSBL_RESOLVED_REF}"
-
-    if [[ "${SD_BOOT:-false}" != "true" ]]; then
-      fsbl_log "SD_BOOT=false for ${SYSIMAGE}; skipping bootloader artifact resolution."
-      should_skip=1
-    fi
   fi
 
-  if [[ "$rc" -eq 0 && "$should_skip" -eq 0 ]]; then
+  if [[ "$rc" -eq 0 ]]; then
     case "${BOOTLOADER_SOURCE_MODE}" in
       prebuilt)
         fsbl_handle_prebuilt || rc=$?
@@ -578,16 +572,16 @@ get_fsbl_artifact() {
     esac
   fi
 
-  if [[ "$rc" -eq 0 && "$should_skip" -eq 0 ]]; then
+  if [[ "$rc" -eq 0 ]]; then
     [[ -n "${BOOTLOADER_ARTIFACT_PATH:-}" ]] || fsbl_die "BOOTLOADER_ARTIFACT_PATH was not set by handler." || rc=$?
   fi
-  if [[ "$rc" -eq 0 && "$should_skip" -eq 0 ]]; then
+  if [[ "$rc" -eq 0 ]]; then
     [[ -f "${BOOTLOADER_ARTIFACT_PATH}" ]] || fsbl_die "Bootloader artifact does not exist: ${BOOTLOADER_ARTIFACT_PATH}" || rc=$?
   fi
-  if [[ "$rc" -eq 0 && "$should_skip" -eq 0 ]]; then
+  if [[ "$rc" -eq 0 ]]; then
     fsbl_emit_artifact_metadata "$BOOTLOADER_ARTIFACT_PATH" || rc=$?
   fi
-  if [[ "$rc" -eq 0 && "$should_skip" -eq 0 ]]; then
+  if [[ "$rc" -eq 0 ]]; then
     fsbl_emit_next_step_commands "$BOOTLOADER_ARTIFACT_PATH" || rc=$?
   fi
 
