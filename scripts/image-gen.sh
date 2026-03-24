@@ -480,6 +480,28 @@ cleanup_chroot_environment() {
   rm -f "$ROOT_MNT/usr/bin/qemu-aarch64-static"
 }
 
+# Reclaim free-space compressibility before image compression.
+reclaim_filesystem_free_space() {
+  log "Reclaiming free space for better image compression..."
+
+  # Best effort pre-trim: discard any currently free extents.
+  fstrim -v "$ROOT_MNT" || true
+  fstrim -v "$BOOT_MNT" || true
+
+  # Write zeros into free space so deleted data does not remain as entropy.
+  dd if=/dev/zero of="$ROOT_MNT/.zero-fill" bs=64M status=none conv=fsync || true
+  sync
+  rm -f "$ROOT_MNT/.zero-fill"
+
+  dd if=/dev/zero of="$BOOT_MNT/.zero-fill" bs=16M status=none conv=fsync || true
+  sync
+  rm -f "$BOOT_MNT/.zero-fill"
+
+  # Final trim after zero-fill.
+  fstrim -v "$ROOT_MNT" || true
+  fstrim -v "$BOOT_MNT" || true
+}
+
 # ============================================================================
 # Post-Processing Functions
 # ============================================================================
@@ -602,6 +624,7 @@ main() {
   cleanup_chroot_environment
   
   # Finalization
+  reclaim_filesystem_free_space
   cleanup_mounts
   sync
   

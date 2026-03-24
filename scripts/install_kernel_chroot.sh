@@ -8,6 +8,8 @@ pacman-key --populate archlinuxarm
 
 PACMAN="pacman --disable-sandbox"
 JOBS="$(nproc)"
+PACMAN_FULL_UPGRADE="${PACMAN_FULL_UPGRADE:-0}"
+INSTALL_REFORM_TOOLS="${INSTALL_REFORM_TOOLS:-0}"
 
 echo "Configuring parallel build settings (jobs=${JOBS})..."
 export MAKEFLAGS="-j${JOBS}"
@@ -20,8 +22,12 @@ cat > /etc/dkms/framework.conf <<EOF
 parallel_jobs=${JOBS}
 EOF
 
-echo "Upgrading base system (avoid partial upgrade issues)..."
-$PACMAN -Syu --noconfirm --ignore linux-aarch64,linux-aarch64-headers
+if [[ "$PACMAN_FULL_UPGRADE" == "1" ]]; then
+  echo "Upgrading base system (PACMAN_FULL_UPGRADE=1)..."
+  $PACMAN -Syu --noconfirm --ignore linux-aarch64,linux-aarch64-headers
+else
+  echo "Skipping full system upgrade (PACMAN_FULL_UPGRADE=0)."
+fi
 
 echo "Installing essential packages..."
 $PACMAN -S --needed --noconfirm \
@@ -140,8 +146,12 @@ build_and_install_aur_package() {
 echo "Building and installing linux-mnt-reform kernel..."
 build_and_install_pkgbuild "/tmp/linux-mnt-reform" "linux-mnt-reform-*.pkg.tar.*"
 
-echo "Building and installing AUR package reform-tools..."
-build_and_install_aur_package "reform-tools"
+if [[ "$INSTALL_REFORM_TOOLS" == "1" ]]; then
+  echo "Building and installing AUR package reform-tools (INSTALL_REFORM_TOOLS=1)..."
+  build_and_install_aur_package "reform-tools"
+else
+  echo "Skipping reform-tools install (INSTALL_REFORM_TOOLS=0)."
+fi
 
 echo "Building and installing mnt-reform-qcacld2..."
 build_and_install_pkgbuild "/tmp/mnt-reform-qcacld2" "*qcacld*.pkg.tar.*"
@@ -149,9 +159,15 @@ build_and_install_pkgbuild "/tmp/mnt-reform-qcacld2" "*qcacld*.pkg.tar.*"
 echo "Building and installing mnt-reform-lpc..."
 build_and_install_pkgbuild "/tmp/mnt-reform-lpc" "*lpc*.pkg.tar.*"
 
-echo "Kernel, qcacld2, lpc, and reform-tools packages installed successfully!"
+if [[ "$INSTALL_REFORM_TOOLS" == "1" ]]; then
+  echo "Kernel, qcacld2, lpc, and reform-tools packages installed successfully!"
+else
+  echo "Kernel, qcacld2, and lpc packages installed successfully!"
+fi
 
 echo "Cleaning pacman package cache to reduce image size..."
-$PACMAN -Scc --noconfirm || true
+rm -rf /var/cache/pacman/pkg/* || true
+rm -rf /var/lib/pacman/sync/* || true
+rm -f /var/lib/pacman/db.lck || true
 
 ls -lh /boot/
