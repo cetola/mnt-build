@@ -483,19 +483,33 @@ cleanup_chroot_environment() {
 # Reclaim free-space compressibility before image compression.
 reclaim_filesystem_free_space() {
   log "Reclaiming free space for better image compression..."
+  local zero_fill_max_mb="${ZERO_FILL_MAX_MB:-2048}"
+
+  # Validate env input and keep a safe default.
+  if ! [[ "$zero_fill_max_mb" =~ ^[0-9]+$ ]]; then
+    log_warn "Invalid ZERO_FILL_MAX_MB='$zero_fill_max_mb', using 2048."
+    zero_fill_max_mb=2048
+  fi
 
   # Best effort pre-trim: discard any currently free extents.
   fstrim -v "$ROOT_MNT" || true
   fstrim -v "$BOOT_MNT" || true
 
-  # Write zeros into free space so deleted data does not remain as entropy.
-  dd if=/dev/zero of="$ROOT_MNT/.zero-fill" bs=64M status=none conv=fsync || true
-  sync
-  rm -f "$ROOT_MNT/.zero-fill"
+  # Write a bounded amount of zeros so we do not exhaust runner backing storage.
+  if (( zero_fill_max_mb > 0 )); then
+    log "Zero-filling up to ${zero_fill_max_mb} MiB on root filesystem..."
+    dd if=/dev/zero of="$ROOT_MNT/.zero-fill" bs=1M count="$zero_fill_max_mb" status=none || true
+    sync || true
+    rm -f "$ROOT_MNT/.zero-fill" || true
+  else
+    log "ZERO_FILL_MAX_MB=0; skipping root zero-fill."
+  fi
 
-  dd if=/dev/zero of="$BOOT_MNT/.zero-fill" bs=16M status=none conv=fsync || true
-  sync
-  rm -f "$BOOT_MNT/.zero-fill"
+  # Keep boot fill very small.
+  log "Zero-filling up to 128 MiB on boot filesystem..."
+  dd if=/dev/zero of="$BOOT_MNT/.zero-fill" bs=1M count=128 status=none || true
+  sync || true
+  rm -f "$BOOT_MNT/.zero-fill" || true
 
   # Final trim after zero-fill.
   fstrim -v "$ROOT_MNT" || true
