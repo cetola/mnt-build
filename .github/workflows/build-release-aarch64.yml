@@ -89,7 +89,6 @@ jobs:
           OUTPUT=$(aws ec2 run-instances \
             --image-id "$ARM64_AMI" \
             --instance-type c7g.8xlarge \
-            --instance-market-options '{"MarketType":"spot","SpotOptions":{"SpotInstanceType":"one-time","MaxPrice":"0.70"}}' \
             --key-name github-actions-runner \
             --security-group-ids sg-09c18dc7c46327e69 \
             --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":30,"VolumeType":"gp3"}}]' \
@@ -110,7 +109,6 @@ jobs:
               OUTPUT=$(aws ec2 run-instances \
                 --image-id "$ARM64_AMI" \
                 --instance-type c7g.8xlarge \
-                --instance-market-options '{"MarketType":"spot","SpotOptions":{"SpotInstanceType":"one-time","MaxPrice":"0.70"}}' \
                 --key-name github-actions-runner \
                 --security-group-ids sg-09c18dc7c46327e69 \
                 --placement AvailabilityZone=$AZ \

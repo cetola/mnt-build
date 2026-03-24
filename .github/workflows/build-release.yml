@@ -50,8 +50,7 @@ jobs:
           echo "Attempting to launch instance (AWS will choose availability zone)..."
           OUTPUT=$(aws ec2 run-instances \
             --image-id ami-00f46ccd1cbfb363e \
-            --instance-type c6i.8xlarge \
-            --instance-market-options '{"MarketType":"spot","SpotOptions":{"SpotInstanceType":"one-time","MaxPrice":"0.70"}}' \
+            --instance-type c6a.8xlarge \
             --key-name github-actions-runner \
             --security-group-ids sg-09c18dc7c46327e69 \
             --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":30,"VolumeType":"gp3"}}]' \
@@ -71,8 +70,7 @@ jobs:
               echo "Trying availability zone: $AZ"
               OUTPUT=$(aws ec2 run-instances \
                 --image-id ami-00f46ccd1cbfb363e \
-                --instance-type c6i.8xlarge \
-                --instance-market-options '{"MarketType":"spot","SpotOptions":{"SpotInstanceType":"one-time","MaxPrice":"0.70"}}' \
+                --instance-type c6a.8xlarge \
                 --key-name github-actions-runner \
                 --security-group-ids sg-09c18dc7c46327e69 \
                 --placement AvailabilityZone=$AZ \

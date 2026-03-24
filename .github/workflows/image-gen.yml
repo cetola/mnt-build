@@ -66,8 +66,7 @@ jobs:
           echo "Attempting to launch instance (AWS-selected zone)..."
           OUTPUT=$(aws ec2 run-instances \
             --image-id ami-00f46ccd1cbfb363e \
-            --instance-type c6i.8xlarge \
-            --instance-market-options '{"MarketType":"spot","SpotOptions":{"SpotInstanceType":"one-time","MaxPrice":"0.70"}}' \
+            --instance-type c6a.8xlarge \
             --key-name github-actions-runner \
             --security-group-ids sg-09c18dc7c46327e69 \
             --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":80,"VolumeType":"gp3"}}]' \
@@ -81,8 +80,7 @@ jobs:
             for AZ in "${AVAILABILITY_ZONES[@]}"; do
               OUTPUT=$(aws ec2 run-instances \
                 --image-id ami-00f46ccd1cbfb363e \
-                --instance-type c6i.8xlarge \
-                --instance-market-options '{"MarketType":"spot","SpotOptions":{"SpotInstanceType":"one-time","MaxPrice":"0.70"}}' \
+                --instance-type c6a.8xlarge \
                 --key-name github-actions-runner \
                 --security-group-ids sg-09c18dc7c46327e69 \
                 --placement AvailabilityZone="$AZ" \
@@ -209,9 +207,27 @@ jobs:
           poll_interval=30
           final_rc=""
           prev_tail=""
+          instance_id="${{ steps.launch-instance.outputs.instance_id }}"
           for ((i=1; i<=max_polls; i++)); do
             status="$(ssh $SSH_OPTS "ubuntu@$PUBLIC_IP" "if [[ -f ${REMOTE_EXIT_CODE} ]]; then cat ${REMOTE_EXIT_CODE}; else echo RUNNING; fi" 2>/dev/null || echo SSH_RETRY)"
+            status="$(printf '%s' "$status" | tr -d '\r\n')"
             if [[ "$status" == "RUNNING" || "$status" == "SSH_RETRY" || -z "$status" ]]; then
+              if [[ "$status" == "SSH_RETRY" || -z "$status" ]]; then
+                # SSH failed: ask EC2 directly whether the instance is still alive.
+                ec2_state="$(aws ec2 describe-instances \
+                  --instance-ids "$instance_id" \
+                  --query 'Reservations[0].Instances[0].State.Name' \
+                  --output text 2>/dev/null || echo unknown)"
+                if [[ "$ec2_state" != "running" ]]; then
+                  echo "EC2 instance is no longer running (state=$ec2_state). Failing image-gen poll early." >&2
+                  aws ec2 describe-instances \
+                    --instance-ids "$instance_id" \
+                    --query 'Reservations[0].Instances[0].{State:State.Name,StateReason:StateReason,StateTransitionReason:StateTransitionReason,InstanceLifecycle:InstanceLifecycle,PublicIp:PublicIpAddress}' \
+                    --output json || true
+                  exit 143
+                fi
+                echo "SSH unreachable but EC2 state is still 'running'; will retry poll." >&2
+              fi
               elapsed_min=$(( (i * poll_interval) / 60 ))
               log_tail="$(ssh $SSH_OPTS "ubuntu@$PUBLIC_IP" "tail -n 5 ~/mnt-build/image-gen-remote-run.log 2>/dev/null" || true)"
               if [[ -n "$log_tail" && "$log_tail" != "$prev_tail" ]]; then
