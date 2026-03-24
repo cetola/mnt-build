@@ -42,6 +42,7 @@ BOOT_PART=""
 ROOT_PART=""
 SYSIMAGE=""
 DTBPATH=""
+KERNEL_DTB_STEM=""
 BOOTLOADER_SHA1=""
 BOOTLOADER_PROJECT=""
 BOOTLOADER_TAG=""
@@ -472,6 +473,34 @@ run_chroot_installation() {
   unshare -m chroot "$ROOT_MNT" /tmp/install_kernel.sh
 }
 
+configure_boot_dtb_symlink() {
+  log "Configuring boot DTB symlink for $SYSIMAGE..."
+  local dtb_dir="$BOOT_MNT/dtbs"
+  local expected_dtb=""
+  local target_link=""
+
+  if [[ -z "${KERNEL_DTB_STEM:-}" ]]; then
+    log_warn "No kernel DTB mapping defined for $SYSIMAGE. Skipping DTB symlink setup."
+    return 0
+  fi
+
+  expected_dtb="${KERNEL_DTB_STEM}-${KVER}.dtb"
+  if [[ ! -f "$dtb_dir/$expected_dtb" ]]; then
+    log_warn "Expected DTB not found: $dtb_dir/$expected_dtb"
+    log_warn "Skipping DTB symlink setup; image generation will continue."
+    log_warn "User may need to manually copy/link the correct DTB."
+    ls -lah "$dtb_dir" || true
+    return 0
+  fi
+
+  target_link="$BOOT_MNT/mnt-reform-${KVER}.dtb"
+  ln -sfn "dtbs/${expected_dtb}" "$target_link"
+  ln -sfn "mnt-reform-${KVER}.dtb" "$BOOT_MNT/mnt-reform.dtb"
+  log "DTB symlinks updated:"
+  log "  mnt-reform-${KVER}.dtb -> dtbs/${expected_dtb}"
+  log "  mnt-reform.dtb -> mnt-reform-${KVER}.dtb"
+}
+
 cleanup_chroot_environment() {
   log "Cleaning up chroot environment..."
   rm -rf "$ROOT_MNT/tmp/linux-mnt-reform"
@@ -637,6 +666,7 @@ main() {
   # Kernel installation
   create_chroot_script
   run_chroot_installation
+  configure_boot_dtb_symlink
   cleanup_chroot_environment
   
   # Finalization

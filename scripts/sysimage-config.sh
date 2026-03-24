@@ -8,6 +8,7 @@ readonly SUPPORTED_SYSIMAGES=(
 
 reset_sysimage_config() {
   DTBPATH=""
+  KERNEL_DTB_STEM=""
   BOOTLOADER_SHA1=""
   BOOTLOADER_PROJECT=""
   BOOTLOADER_TAG=""
@@ -92,6 +93,7 @@ configure_sysimage() {
 configure_sysimage_fallback() {
   case "$SYSIMAGE" in
     pocket-reform-system-a311d)
+      KERNEL_DTB_STEM="meson-g12b-bananapi-cm4-mnt-pocket-reform"
       set_sysimage_config \
         "amlogic/meson-g12b-bananapi-cm4-mnt-pocket-reform.dtb" \
         "c96ea54a1947ce59cc48b1cc2d7d1dce494d8ff9" \
@@ -102,6 +104,7 @@ configure_sysimage_fallback() {
         true
       ;;
     reform-next-system-rk3588)
+      KERNEL_DTB_STEM="rk3588-mnt-reform-next"
       set_sysimage_config \
         "rockchip/rk3588-mnt-reform-next.dtb" \
         "cb9a3caaf69cd4458341c1c8c9527a86153ea4a3" \
@@ -112,6 +115,7 @@ configure_sysimage_fallback() {
         true
       ;;
     pocket-reform-system-rk3588)
+      KERNEL_DTB_STEM="rk3588-mnt-pocket-reform"
       set_sysimage_config \
         "rockchip/rk3588-mnt-pocket-reform.dtb" \
         "1edcd78a47ce32927e854118bf6bf9b86d2f8fe7" \
