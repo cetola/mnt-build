@@ -86,6 +86,7 @@ Options:
                       - pocket-reform-system-a311d
                       - reform-next-system-rk3588
                       - pocket-reform-system-rk3588
+                      - pocket-reform-system-imx8mp
   -h, --help          Show this help.
 EOF
 }
