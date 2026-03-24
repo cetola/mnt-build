@@ -23,22 +23,6 @@ on:
         description: Optional U-Boot commit SHA (used in source mode)
         required: false
         type: string
-      pacman_full_upgrade:
-        description: Run full pacman -Syu inside chroot
-        required: true
-        default: "no"
-        type: choice
-        options:
-          - "no"
-          - "yes"
-      install_reform_tools:
-        description: Build/install reform-tools AUR package in image
-        required: true
-        default: "yes"
-        type: choice
-        options:
-          - "no"
-          - "yes"
       zero_fill_max_mb:
         description: Max MiB for bounded zero-fill before final trim
         required: true
@@ -191,21 +175,7 @@ jobs:
           SYSIMAGE="$(printf '%s' "${{ github.event.inputs.sysimage }}" | tr -d '\r\n')"
           BOOTLOADER_SOURCE_MODE="$(printf '%s' "${{ github.event.inputs.bootloader_mode }}" | tr -d '\r\n')"
           UBOOT_SHA="$(printf '%s' "${{ github.event.inputs.uboot_sha }}" | tr -d '\r\n')"
-          PACMAN_FULL_UPGRADE_INPUT="$(printf '%s' "${{ github.event.inputs.pacman_full_upgrade }}" | tr -d '\r\n')"
-          INSTALL_REFORM_TOOLS_INPUT="$(printf '%s' "${{ github.event.inputs.install_reform_tools }}" | tr -d '\r\n')"
           ZERO_FILL_MAX_MB="$(printf '%s' "${{ github.event.inputs.zero_fill_max_mb }}" | tr -d '\r\n')"
-
-          case "$PACMAN_FULL_UPGRADE_INPUT" in
-            yes) PACMAN_FULL_UPGRADE="1" ;;
-            no) PACMAN_FULL_UPGRADE="0" ;;
-            *) echo "Invalid pacman_full_upgrade value: $PACMAN_FULL_UPGRADE_INPUT" >&2; exit 1 ;;
-          esac
-
-          case "$INSTALL_REFORM_TOOLS_INPUT" in
-            yes) INSTALL_REFORM_TOOLS="1" ;;
-            no) INSTALL_REFORM_TOOLS="0" ;;
-            *) echo "Invalid install_reform_tools value: $INSTALL_REFORM_TOOLS_INPUT" >&2; exit 1 ;;
-          esac
 
           ssh $SSH_OPTS "ubuntu@$PUBLIC_IP" << EOF
             set -euo pipefail
@@ -213,10 +183,8 @@ jobs:
             chmod +x ./scripts/image-gen.sh
             export BOOTLOADER_SOURCE_MODE="$BOOTLOADER_SOURCE_MODE"
             export UBOOT_SHA="$UBOOT_SHA"
-            export PACMAN_FULL_UPGRADE="$PACMAN_FULL_UPGRADE"
-            export INSTALL_REFORM_TOOLS="$INSTALL_REFORM_TOOLS"
             export ZERO_FILL_MAX_MB="$ZERO_FILL_MAX_MB"
-            sudo --preserve-env=BOOTLOADER_SOURCE_MODE,UBOOT_SHA,PACMAN_FULL_UPGRADE,INSTALL_REFORM_TOOLS,ZERO_FILL_MAX_MB \
+            sudo --preserve-env=BOOTLOADER_SOURCE_MODE,UBOOT_SHA,ZERO_FILL_MAX_MB \
               ./scripts/image-gen.sh --sysimage "$SYSIMAGE"
           EOF
 
@@ -275,8 +243,8 @@ jobs:
               if [[ -n "${{ github.event.inputs.uboot_sha }}" ]]; then
                 echo "U-Boot SHA: ${{ github.event.inputs.uboot_sha }}"
               fi
-              echo "PACMAN_FULL_UPGRADE: ${{ github.event.inputs.pacman_full_upgrade }}"
-              echo "INSTALL_REFORM_TOOLS: ${{ github.event.inputs.install_reform_tools }}"
+              echo "PACMAN_FULL_UPGRADE: 1"
+              echo "INSTALL_REFORM_TOOLS: 1"
               echo "ZERO_FILL_MAX_MB: ${{ github.event.inputs.zero_fill_max_mb }}"
               echo
               echo "Files:"
