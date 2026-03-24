@@ -184,17 +184,64 @@ jobs:
           BOOTLOADER_SOURCE_MODE="$(printf '%s' "${{ github.event.inputs.bootloader_mode }}" | tr -d '\r\n')"
           UBOOT_SHA="$(printf '%s' "${{ github.event.inputs.uboot_sha }}" | tr -d '\r\n')"
           ZERO_FILL_MAX_MB="$(printf '%s' "${{ github.event.inputs.zero_fill_max_mb }}" | tr -d '\r\n')"
+          REMOTE_STATE_DIR="~/mnt-build/.gha-image-gen"
+          REMOTE_EXIT_CODE="${REMOTE_STATE_DIR}/exit_code"
+          REMOTE_PID_FILE="${REMOTE_STATE_DIR}/pid"
+          REMOTE_LOG="~/mnt-build/image-gen-remote-run.log"
 
-          ssh $SSH_OPTS "ubuntu@$PUBLIC_IP" << EOF
-            set -euo pipefail
-            cd ~/mnt-build
-            chmod +x ./scripts/image-gen.sh
-            export BOOTLOADER_SOURCE_MODE="$BOOTLOADER_SOURCE_MODE"
-            export UBOOT_SHA="$UBOOT_SHA"
-            export ZERO_FILL_MAX_MB="$ZERO_FILL_MAX_MB"
-            sudo --preserve-env=BOOTLOADER_SOURCE_MODE,UBOOT_SHA,ZERO_FILL_MAX_MB \
-              ./scripts/image-gen.sh --sysimage "$SYSIMAGE"
-          EOF
+          q_bootloader_mode="$(printf '%q' "$BOOTLOADER_SOURCE_MODE")"
+          q_uboot_sha="$(printf '%q' "$UBOOT_SHA")"
+          q_zero_fill="$(printf '%q' "$ZERO_FILL_MAX_MB")"
+          q_sysimage="$(printf '%q' "$SYSIMAGE")"
+          remote_payload="cd ~/mnt-build || exit 97; chmod +x ./scripts/image-gen.sh; export BOOTLOADER_SOURCE_MODE=${q_bootloader_mode}; export UBOOT_SHA=${q_uboot_sha}; export ZERO_FILL_MAX_MB=${q_zero_fill}; sudo --preserve-env=BOOTLOADER_SOURCE_MODE,UBOOT_SHA,ZERO_FILL_MAX_MB ./scripts/image-gen.sh --sysimage ${q_sysimage}; rc=\$?; echo \$rc > ${REMOTE_EXIT_CODE}; exit \$rc"
+          q_remote_payload="$(printf '%q' "$remote_payload")"
+
+          ssh $SSH_OPTS "ubuntu@$PUBLIC_IP" "set -euo pipefail; \
+            mkdir -p ${REMOTE_STATE_DIR}; \
+            rm -f ${REMOTE_EXIT_CODE}; \
+            rm -f ${REMOTE_PID_FILE}; \
+            nohup bash -lc ${q_remote_payload} > ${REMOTE_LOG} 2>&1 < /dev/null & \
+            echo \$! > ${REMOTE_PID_FILE}"
+
+          echo "Remote image-gen launched. Polling for completion..."
+          max_polls=120   # 1h at 30s intervals
+          poll_interval=30
+          final_rc=""
+          prev_tail=""
+          for ((i=1; i<=max_polls; i++)); do
+            status="$(ssh $SSH_OPTS "ubuntu@$PUBLIC_IP" "if [[ -f ${REMOTE_EXIT_CODE} ]]; then cat ${REMOTE_EXIT_CODE}; else echo RUNNING; fi" 2>/dev/null || echo SSH_RETRY)"
+            if [[ "$status" == "RUNNING" || "$status" == "SSH_RETRY" || -z "$status" ]]; then
+              elapsed_min=$(( (i * poll_interval) / 60 ))
+              log_tail="$(ssh $SSH_OPTS "ubuntu@$PUBLIC_IP" "tail -n 5 ~/mnt-build/image-gen-remote-run.log 2>/dev/null" || true)"
+              if [[ -n "$log_tail" && "$log_tail" != "$prev_tail" ]]; then
+                echo "[poll ${i}/${max_polls} | ~${elapsed_min}m] image-gen progress:"
+                echo "$log_tail"
+                prev_tail="$log_tail"
+              else
+                echo "[poll ${i}/${max_polls} | ~${elapsed_min}m] image-gen still running..."
+              fi
+              sleep "$poll_interval"
+              continue
+            fi
+            final_rc="$status"
+            break
+          done
+
+          if [[ -z "$final_rc" ]]; then
+            echo "Timed out waiting for remote image-gen completion (1h cap)." >&2
+            echo "Attempting to collect logs before forced termination..."
+            mkdir -p build-logs || true
+            scp $SSH_OPTS "ubuntu@$PUBLIC_IP:~/mnt-build/image-gen-remote-run.log" build-logs/ 2>/dev/null || true
+            scp $SSH_OPTS "ubuntu@$PUBLIC_IP:~/mnt-build/image-gen-*.log" build-logs/ 2>/dev/null || true
+            echo "Terminating EC2 instance due to image-gen timeout..."
+            aws ec2 terminate-instances --instance-ids "${{ steps.launch-instance.outputs.instance_id }}" || true
+            exit 124
+          fi
+
+          echo "Remote image-gen exit code: $final_rc"
+          if [[ "$final_rc" != "0" ]]; then
+            exit "$final_rc"
+          fi
 
       - name: Diagnose EC2 state after image-gen failure
         if: ${{ steps.run_image_gen.outcome != 'success' }}
