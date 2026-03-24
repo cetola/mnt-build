@@ -171,7 +171,7 @@ jobs:
           BMAP="${IMG}.bmap"
 
           # Compress in place and remove raw .img
-          zstd -T0 -22 --long=27 --rm "$IMG"
+          zstd -T0 -19 --rm "$IMG"
           IMG_ZST="${IMG}.zst"
 
           cp -v "$IMG_ZST" dist/

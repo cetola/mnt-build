@@ -149,7 +149,6 @@ jobs:
             set -euo pipefail
             sudo apt-get -o DPkg::Lock::Timeout=600 update
             sudo apt-get -o DPkg::Lock::Timeout=600 install -y \
-              git \
               coreutils \
               util-linux \
               parted \
@@ -162,7 +161,16 @@ jobs:
               qemu-user-static \
               binfmt-support \
               bmap-tools \
-              zstd
+              zstd \
+              git \
+              build-essential \
+              make \
+              pkg-config \
+              libssl-dev \
+              bc \
+              flex \
+              bison \
+              device-tree-compiler
           EOF
 
       - name: Run image-gen on instance
@@ -220,7 +228,7 @@ jobs:
             IMG="$(ls -1 mnt-reform-*-aarch64.img | head -n 1)"
             BMAP="${IMG}.bmap"
 
-            zstd -T0 -22 --long=27 --rm "$IMG"
+            zstd -T0 -19 --rm "$IMG"
             IMG_ZST="${IMG}.zst"
 
             cp -v "$IMG_ZST" dist/

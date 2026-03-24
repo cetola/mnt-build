@@ -136,6 +136,8 @@ check_required_tools() {
     "parted:parted"
     "losetup:util-linux"
     "mkfs.ext4:e2fsprogs"
+    "make:make"
+    "git:git"
     "curl:curl"
     "tar:tar"
     "chroot:arch-install-scripts"
