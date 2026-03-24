@@ -11,6 +11,30 @@ JOBS="$(nproc)"
 PACMAN_FULL_UPGRADE="${PACMAN_FULL_UPGRADE:-0}"
 INSTALL_REFORM_TOOLS="${INSTALL_REFORM_TOOLS:-0}"
 
+refresh_pacman_databases() {
+  echo "Refreshing pacman package databases..."
+  $PACMAN -Sy --noconfirm
+}
+
+pacman_run_with_retry() {
+  local attempt=1
+  local max_attempts=2
+  local rc=0
+  while (( attempt <= max_attempts )); do
+    if "$@"; then
+      return 0
+    fi
+    rc=$?
+    if (( attempt < max_attempts )); then
+      echo "pacman command failed (attempt ${attempt}/${max_attempts}); refreshing DB and retrying..."
+      refresh_pacman_databases || true
+      sleep 2
+    fi
+    ((attempt++))
+  done
+  return "$rc"
+}
+
 echo "Configuring parallel build settings (jobs=${JOBS})..."
 export MAKEFLAGS="-j${JOBS}"
 export CMAKE_BUILD_PARALLEL_LEVEL="${JOBS}"
@@ -22,15 +46,19 @@ cat > /etc/dkms/framework.conf <<EOF
 parallel_jobs=${JOBS}
 EOF
 
+refresh_pacman_databases
+
 if [[ "$PACMAN_FULL_UPGRADE" == "1" ]]; then
   echo "Upgrading base system (PACMAN_FULL_UPGRADE=1)..."
-  $PACMAN -Syu --noconfirm --ignore linux-aarch64,linux-aarch64-headers
+  pacman_run_with_retry \
+    $PACMAN -Syu --noconfirm --ignore linux-aarch64,linux-aarch64-headers
 else
   echo "Skipping full system upgrade (PACMAN_FULL_UPGRADE=0)."
 fi
 
 echo "Installing essential packages..."
-$PACMAN -S --needed --noconfirm \
+pacman_run_with_retry \
+  $PACMAN -S --needed --noconfirm \
   base base-devel dracut networkmanager cpio git dkms sudo
 
 echo "Removing conflicting linux-aarch64 package if present..."
@@ -83,7 +111,8 @@ install_pkgbuild_deps() {
   fi
 
   echo "Installing PKGBUILD dependencies for $pkgdir: ${filtered_deps[*]}"
-  $PACMAN -S --needed --noconfirm "${filtered_deps[@]}"
+  pacman_run_with_retry \
+    $PACMAN -S --needed --noconfirm "${filtered_deps[@]}"
 }
 
 build_and_install_pkgbuild() {
