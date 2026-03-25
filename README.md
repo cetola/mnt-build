@@ -83,6 +83,18 @@ I will currently only release images for hardware that I can test. So today, tha
 
 If you use one of the provided images, know I have only tested on the Amlogic A311D MNT Pocket Reform. That being said, the kernel is patched with all patches from reform-debian-packages -> linux -> patches[ver]. As such it should boot on any MNT Reform platform, provided you use the correct DTB, and that you have a u-boot setup that works for your system. 
 
+## :boot: U-Boot
+
+If you only need bootloader artifacts (without generating a full OS image), use `scripts/build-fsbl.sh`. It fetchs a prebuilt bootloader or builds one from source for a target `--sysimage`, then it prints the exact flash offsets (`seek`/`skip`) and `dd` command to use for SD.
+
+Example:
+```bash
+$> ./scripts/build-fsbl.sh --sysimage pocket-reform-system-a311d --mode source
+$> sudo dd if=path/to/<flash.bin> of=/dev/sdX conv=notrunc bs=512 seek=<seek> skip=<skip>
+```
+
+See ./scripts/build-fsbl.sh --help for all options and details.
+
 ## :pencil2: Notes
 
 This is very much a work in progress. Do not try to build unless you are on a release tag. Even then, YMMV.
