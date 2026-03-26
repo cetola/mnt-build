@@ -1,0 +1,11 @@
+# Ignore known constrained y->m results on this kernel tree
+update-constrained ARM_IMX_CPUFREQ_DT
+update-constrained DWMAC_MESON
+update-constrained SND_SOC_FSL_ASRC
+update-constrained USB_DWC3_MESON_G12A
+
+# Ignore known stale/renamed/removed symbols in upstream fragment
+missing-symbol ARM_ROCKCHIP_CPUFREQ
+missing-symbol PHY_FSL_IMX8MQ_HDPTX
+missing-symbol ROCKCHIP_REGULATOR_COUPLER
+missing-symbol VIDEO_ROCKCHIP_VDEC2
