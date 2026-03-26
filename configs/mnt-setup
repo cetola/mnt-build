@@ -1,0 +1,43 @@
+# shellcheck shell=bash
+# Source this file from the repo root (or via absolute path) to use `mnt-build`
+# without `./` in the current shell session.
+
+_mnt_setup_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_mnt_setup_repo_root="$(cd "${_mnt_setup_script_dir}/.." && pwd)"
+_mnt_setup_bin="${_mnt_setup_repo_root}/mnt-build"
+_mnt_setup_bash_comp="${_mnt_setup_repo_root}/completions/mnt-build.bash"
+_mnt_setup_zsh_comp_dir="${_mnt_setup_repo_root}/completions"
+
+if [[ ! -x "${_mnt_setup_bin}" ]]; then
+  echo "mnt-setup: expected executable not found: ${_mnt_setup_bin}" >&2
+  unset _mnt_setup_script_dir _mnt_setup_repo_root _mnt_setup_bin
+  return 1 2>/dev/null || exit 1
+fi
+
+case ":${PATH}:" in
+  *":${_mnt_setup_repo_root}:"*)
+    ;;
+  *)
+    export PATH="${_mnt_setup_repo_root}:${PATH}"
+    ;;
+esac
+
+# Enable completion for mnt-build in current shell session when available.
+if [[ -n "${BASH_VERSION:-}" ]]; then
+  if [[ -f "${_mnt_setup_bash_comp}" ]]; then
+    # shellcheck source=/dev/null
+    source "${_mnt_setup_bash_comp}"
+  fi
+elif [[ -n "${ZSH_VERSION:-}" ]]; then
+  if [[ -d "${_mnt_setup_zsh_comp_dir}" ]]; then
+    case " ${fpath[*]} " in
+      *" ${_mnt_setup_zsh_comp_dir} "*) ;;
+      *) fpath=("${_mnt_setup_zsh_comp_dir}" $fpath) ;;
+    esac
+    autoload -Uz compinit
+    compinit
+  fi
+fi
+
+unset _mnt_setup_script_dir _mnt_setup_repo_root _mnt_setup_bin
+unset _mnt_setup_bash_comp _mnt_setup_zsh_comp_dir

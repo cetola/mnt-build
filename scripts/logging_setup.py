@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
 import logging
+import re
 import sys
 from pathlib import Path
 
@@ -27,9 +28,18 @@ class ColoredFormatter(logging.Formatter):
         return formatter.format(record)
 
 
+class PlainFormatter(logging.Formatter):
+    ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
+
+    def format(self, record):
+        rendered = super().format(record)
+        return self.ANSI_RE.sub('', rendered)
+
+
 def setup_logging(log_file: Path) -> logging.Logger:
     logger = logging.getLogger('kernel_build')
     logger.setLevel(logging.DEBUG)
+    logger.handlers.clear()
 
     # Console handler with colors
     console_handler = logging.StreamHandler(sys.stdout)
@@ -40,8 +50,8 @@ def setup_logging(log_file: Path) -> logging.Logger:
     file_handler = logging.FileHandler(log_file)
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(
-        logging.Formatter('%(levelname)s %(asctime)s - %(message)s',
-                          datefmt='%Y-%m-%d %H:%M:%S')
+        PlainFormatter('%(levelname)s %(asctime)s - %(message)s',
+                       datefmt='%Y-%m-%d %H:%M:%S')
     )
 
     logger.addHandler(console_handler)

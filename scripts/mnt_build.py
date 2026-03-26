@@ -26,24 +26,7 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
               cross_compile: str = DEFAULT_CROSS_COMPILE,
               with_headers: bool = False,
               kernel_only: bool = DEFAULT_KERNEL_ONLY) -> int:
-    """Run the kernel build process.
-
-    Args:
-        version: Kernel version to build
-        build_dir: Build directory (default: ~/mnt-build)
-        jobs: Number of parallel jobs (default: number of CPUs)
-        pkgrel: Package release number
-        skip_git_operations: If True, skip git reset/checkout operations
-        dry_run: If True, only check prerequisites, do not build
-        run_olddefconfig: If True, update config using olddefconfig before building
-        cross_compile: Compiler prefix for kernel build tools. Use empty string for native build.
-        with_headers: If True, also generate an external-module headers tree.
-        kernel_only: Whether to build only the kernel, defaulting to DEFAULT_KERNEL_ONLY.
-
-    Returns:
-        Exit code (0 for success, non-zero for failure)
-    """
-    # Normalize special values that explicitly disable cross-compilation.
+    """Run the kernel build process."""
     if cross_compile is None:
         cross_compile = DEFAULT_CROSS_COMPILE
     normalized_cross_compile = cross_compile.strip()
@@ -51,7 +34,6 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         normalized_cross_compile = ""
 
     config = BuildConfig.create(version=version, build_dir=build_dir, jobs=jobs, pkgrel=pkgrel)
-
 
     config.build_dir.mkdir(parents=True, exist_ok=True)
     logger = setup_logging(config.log_file)
@@ -74,27 +56,54 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
 
         start_time = datetime.now()
 
+        builder.log_phase("Preflight")
         builder.check_prerequisites(run_olddefconfig=run_olddefconfig)
 
+        if dry_run and not skip_git_operations:
+            builder.log_phase("Source Prep")
+            logger.info(
+                "Dry run mode: syncing kernel repository to target version "
+                f"v{config.version} (same checkout behavior as build)."
+            )
+            builder.checkout_kernel_version()
+
+        if dry_run and run_olddefconfig:
+            logger.info(
+                "Dry run + olddefconfig selected: will update config file, "
+                "then exit without building."
+            )
+            builder.log_phase("Patching")
+            builder.apply_patches()
+            builder.log_phase("Config Update")
+            builder.update_config_with_olddefconfig(skip_git_operations=skip_git_operations)
+            logger.info("Dry run mode - config updated via olddefconfig; no build performed")
+            return 0
+
         if dry_run:
+            builder.log_phase("Patching")
             builder.apply_patches()
             logger.info("Dry run mode - exiting after prerequisites check and apply patches")
             return 0
 
+        builder.log_phase("Kernel Build")
         builder.build_kernel(skip_git_operations=skip_git_operations, run_olddefconfig=run_olddefconfig)
         if with_headers:
+            builder.log_phase("Headers")
             headers_dir = builder.install_extmod_build_tree()
             builder.create_headers_tarball(headers_dir)
 
         if kernel_only:
             logger.info("Kernel only mode - skipping module builds and tarball creation")
         else:
+            builder.log_phase("Out-of-Tree Modules")
             builder.build_lpc_module()
             builder.build_qcacld2_module()
+            builder.log_phase("Packaging")
             builder.create_module_tarballs()
             builder.create_tarball()
 
         elapsed = (datetime.now() - start_time).total_seconds()
+        builder.log_phase("Summary")
         logger.info("=" * 60)
         logger.info(f"{Colors.GREEN}✓ Build completed successfully in {elapsed:.0f} seconds!{Colors.RESET}")
         if not kernel_only:
@@ -120,48 +129,93 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         return 1
 
 
+def run_clean(build_dir: Optional[Path] = None) -> int:
+    """Clean kernel repository state for development."""
+    config = BuildConfig.create(version=DEFAULT_KERNEL_VERSION, build_dir=build_dir)
+    config.build_dir.mkdir(parents=True, exist_ok=True)
+    logger = setup_logging(config.log_file)
+    builder = KernelBuilder(config, logger)
 
-def main():
-    """Main entry point."""
+    try:
+        logger.info("=" * 60)
+        logger.info("Starting repository clean")
+        logger.info(f"Build directory: {config.build_dir}")
+        logger.info(f"Kernel directory: {config.linux_dir}")
+        logger.info(f"Log file: {config.log_file}")
+        logger.info("=" * 60)
+
+        builder.log_phase("Clean")
+        builder.clean_kernel_repo()
+
+        builder.log_phase("Summary")
+        logger.info("=" * 60)
+        logger.info(f"{Colors.GREEN}✓ Clean completed successfully{Colors.RESET}")
+        logger.info("=" * 60)
+        return 0
+    except BuildError as e:
+        logger.error(f"Clean failed: {e}")
+        logger.error(f"Check log file for details: {config.log_file}")
+        return 1
+    except KeyboardInterrupt:
+        logger.warning("Clean interrupted by user")
+        return 130
+    except Exception as e:
+        logger.exception(f"Unexpected error: {e}")
+        return 1
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description='Build MNT Reform kernel and modules.',
+        prog='mnt-build',
+        description='MNT Reform kernel tooling.',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument(
-        'version',
-        nargs='?',
+
+    subparsers = parser.add_subparsers(dest='command', required=True)
+
+    build_parser = subparsers.add_parser('build', help='Build kernel and artifacts')
+    build_parser.add_argument(
+        '--kversion',
+        dest='kernel_version',
         default=DEFAULT_KERNEL_VERSION,
         help=f'Kernel version to build (default: {DEFAULT_KERNEL_VERSION})'
     )
-    parser.add_argument(
+    build_parser.add_argument(
         '--build-dir',
         type=Path,
         help='Build directory (default: ~/mnt-build)'
     )
-    parser.add_argument(
+    build_parser.add_argument(
         '-j', '--jobs',
         type=int,
         help='Number of parallel jobs (default: number of CPUs)'
     )
-    parser.add_argument(
+    build_parser.add_argument(
         '--pkgrel',
         type=int,
         default=DEFAULT_PKGREL,
         help=f'Package release number (default: {DEFAULT_PKGREL})'
     )
-    parser.add_argument(
+    build_parser.add_argument(
         '--dry-run',
         action='store_true',
-        help='Check prerequisites and apply patches, do not build'
+        help='Check prerequisites and apply patches, do not build. '
+             'If combined with --olddefconfig, updates config and exits without building.'
     )
-    parser.add_argument(
+    build_parser.add_argument(
         '--olddefconfig',
         action='store_true',
         help='Update kernel config using olddefconfig before building. '
              'Copies configs/defconfig to .config, runs olddefconfig, '
              'then saves the updated config back to configs/config-[VERSION]-mnt-reform-arm64'
     )
-    parser.add_argument(
+    build_parser.add_argument(
+        '--defconfig',
+        dest='olddefconfig',
+        action='store_true',
+        help='Alias for --olddefconfig'
+    )
+    build_parser.add_argument(
         '--skip-git-ops',
         action='store_true',
         default=False,
@@ -171,19 +225,19 @@ def main():
              'When enabled, the script will not reset the repo, fetch tags, checkout the version, '
              'or create git commits/tags during the build process.'
     )
-    parser.add_argument(
+    build_parser.add_argument(
         '--cross-compile',
         default=DEFAULT_CROSS_COMPILE,
         help=f'CROSS_COMPILE prefix (default: {DEFAULT_CROSS_COMPILE}). '
              'Use "" or "none" for native build with no prefix.'
     )
-    parser.add_argument(
+    build_parser.add_argument(
         '--with-headers',
         action='store_true',
         help='Also generate an external-module headers tree using '
              'scripts/package/install-extmod-build.'
     )
-    parser.add_argument(
+    build_parser.add_argument(
         '--kernel-only',
         action='store_true',
         default=DEFAULT_KERNEL_ONLY,
@@ -192,6 +246,14 @@ def main():
              'rebuilding all the other artifacts. No tarball artifacts '
              'are produced.'
     )
+
+    clean_parser = subparsers.add_parser('clean', help='Clean local kernel git state')
+    clean_parser.add_argument(
+        '--build-dir',
+        type=Path,
+        help='Build directory (default: ~/mnt-build)'
+    )
+
     parser.add_argument(
         '--version',
         action='version',
@@ -199,20 +261,32 @@ def main():
         version=f"%(prog)s {__version__}"
     )
 
-    args = parser.parse_args()
+    return parser
 
-    return run_build(
-        version=args.version,
-        build_dir=args.build_dir,
-        jobs=args.jobs,
-        pkgrel=args.pkgrel,
-        skip_git_operations=args.skip_git_ops,
-        dry_run=args.dry_run,
-        run_olddefconfig=args.olddefconfig,
-        cross_compile=args.cross_compile,
-        with_headers=args.with_headers,
-        kernel_only=args.kernel_only
-    )
+
+def main(argv: Optional[list[str]] = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.command == 'build':
+        return run_build(
+            version=args.kernel_version,
+            build_dir=args.build_dir,
+            jobs=args.jobs,
+            pkgrel=args.pkgrel,
+            skip_git_operations=args.skip_git_ops,
+            dry_run=args.dry_run,
+            run_olddefconfig=args.olddefconfig,
+            cross_compile=args.cross_compile,
+            with_headers=args.with_headers,
+            kernel_only=args.kernel_only
+        )
+
+    if args.command == 'clean':
+        return run_clean(build_dir=args.build_dir)
+
+    parser.error(f"Unknown command: {args.command}")
+    return 2
 
 
 if __name__ == '__main__':

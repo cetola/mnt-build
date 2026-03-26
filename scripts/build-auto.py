@@ -3,7 +3,7 @@
 """
 MNT Reform Kernel Auto-Build Script
 Compiles kernel, out-of-tree modules, and creates deployment tarball.
-Assumes an automated build, with reduced args / options from build.py.
+Assumes an automated build, with reduced args / options from mnt_build.py.
 Assumes we checked out the correct SHA of the kernel for building.
 """
 
@@ -11,8 +11,8 @@ import argparse
 import os
 import sys
 
-# Import build functionality from build.py
-from build import run_build, DEFAULT_KERNEL_VERSION, DEFAULT_PKGREL, DEFAULT_CROSS_COMPILE
+# Import build functionality from mnt_build.py
+from mnt_build import run_build, DEFAULT_KERNEL_VERSION, DEFAULT_PKGREL, DEFAULT_CROSS_COMPILE
 
 def main():
     parser = argparse.ArgumentParser(

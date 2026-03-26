@@ -41,7 +41,7 @@ git submodule update --init --recursive
 The first time you build, the config you need will probably not match the config in the repo. So at a minimum you'll want to build with the olddefconfig option:
 
 ```bash
-./scripts/build.py --olddefconfig
+./mnt-build build --olddefconfig
 ```
 
 See --help for more options.
@@ -100,4 +100,3 @@ See ./scripts/build-fsbl.sh --help for all options and details.
 This is very much a work in progress. Do not try to build unless you are on a release tag. Even then, YMMV.
 
 There is a container in the scripts directory if you happen to be building for Arch and care about toolchain skew.
-

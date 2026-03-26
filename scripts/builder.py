@@ -24,6 +24,11 @@ class KernelBuilder:
         self.kernel_only = kernel_only
         self.patch_dirs_used: List[Path] = []
 
+    def log_phase(self, name: str):
+        self.logger.info("=" * 60)
+        self.logger.info(f"Phase: {name}")
+        self.logger.info("=" * 60)
+
     def _make_kernel_vars(self) -> List[str]:
         """Return kernel make variable assignments with optional toolchain prefix."""
         args = [f"ARCH={self.arch}"]
@@ -35,7 +40,7 @@ class KernelBuilder:
     # Command execution
     # ------------------------------------------------------------------
 
-    def run_command(self, cmd: List[str], cwd: Optional[Path] = None,
+    def run_command(self, cmd: List[str], cwd: Path,
                     check: bool = True, input_data: Optional[str] = None,
                     stream_output: bool = False,
                     log_cmd: bool = True) -> subprocess.CompletedProcess:
@@ -46,7 +51,6 @@ class KernelBuilder:
         If log_cmd is False, the command string is logged at DEBUG level instead
         of INFO (useful for high-frequency calls like patch dry-runs).
         """
-        cwd = cwd or Path.cwd()
         cmd_str = ' '.join(cmd)
         (self.logger.info if log_cmd else self.logger.debug)(f"$ {cmd_str}")
         self.logger.debug(f"Running in {cwd}")
@@ -163,7 +167,6 @@ class KernelBuilder:
 
         xtra_dir = getattr(self.config, 'xtra_patches_dir', None)
         if xtra_dir is not None and xtra_dir.exists():
-            self.logger.info("")
             self.logger.info("Applying extra kernel patches...")
             xtra_failed_log_path = self.config.linux_dir / "failed_xtra.log"
             self._apply_patch_set(
@@ -174,7 +177,6 @@ class KernelBuilder:
                 on_failure=stats.add_xtra_failure,
             )
 
-        self.logger.info("")
         self.logger.info("Patch application complete!")
         if stats.has_xtra:
             self.logger.info(f"Succeeded: {stats.success}, Succeeded Extra: {stats.xtra_success}")
@@ -276,22 +278,131 @@ class KernelBuilder:
     # Git / source tree setup
     # ------------------------------------------------------------------
 
+    def _resolve_origin_default_branch(self) -> str:
+        """Resolve default branch name from origin/HEAD (fallback: main/master)."""
+        head_ref = self.run_command(
+            ['git', 'symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'],
+            cwd=self.config.linux_dir,
+            check=False
+        )
+        if head_ref.returncode == 0:
+            ref = (head_ref.stdout or "").strip()
+            if ref.startswith("origin/"):
+                return ref.split("/", 1)[1]
+
+        for candidate in ("main", "master"):
+            exists = self.run_command(
+                ['git', 'rev-parse', '--verify', f'origin/{candidate}'],
+                cwd=self.config.linux_dir,
+                check=False
+            )
+            if exists.returncode == 0:
+                return candidate
+
+        raise BuildError("Could not resolve origin default branch (tried origin/HEAD, main, master).")
+
+    def clean_kernel_repo(self):
+        """Return kernel repository to a clean development baseline.
+
+        - Syncs tags/refs from origin (force, prune)
+        - Resets local default branch to origin/<default>
+        - Removes untracked files
+        - Removes local-only branches (except default branch)
+        - Removes local-only tags
+        """
+        self.logger.info("Cleaning kernel repository state...")
+
+        if not (self.config.linux_dir / ".git").exists():
+            raise BuildError(f"Not a git repository: {self.config.linux_dir}")
+
+        self.logger.info("Fetching origin refs and tags (force/prune)...")
+        self.run_command(
+            ['git', 'fetch', 'origin', '--prune', '--prune-tags', '--tags', '--force'],
+            cwd=self.config.linux_dir
+        )
+
+        default_branch = self._resolve_origin_default_branch()
+
+        # Force clear local tracked/untracked changes before branch switch.
+        # This command is intentionally destructive as part of explicit `clean`.
+        self.logger.info("Discarding local tracked/untracked changes...")
+        self.run_command(['git', 'reset', '--hard', 'HEAD'], cwd=self.config.linux_dir)
+        self.run_command(['git', 'clean', '-fd'], cwd=self.config.linux_dir)
+
+        self.logger.info(f"Resetting local {default_branch} to origin/{default_branch}...")
+        self.run_command(
+            ['git', 'checkout', '-f', '-B', default_branch, f'origin/{default_branch}'],
+            cwd=self.config.linux_dir
+        )
+        self.run_command(['git', 'reset', '--hard', f'origin/{default_branch}'], cwd=self.config.linux_dir)
+        self.run_command(['git', 'clean', '-fd'], cwd=self.config.linux_dir)
+
+        # Build set of origin branch names.
+        remote_refs = self.run_command(
+            ['git', 'for-each-ref', '--format=%(refname:short)', 'refs/remotes/origin'],
+            cwd=self.config.linux_dir
+        ).stdout.splitlines()
+        remote_branch_names = {
+            ref.split('/', 1)[1]
+            for ref in remote_refs
+            if ref.startswith('origin/') and ref != 'origin/HEAD'
+        }
+
+        # Delete local branches not present on origin (except default branch).
+        local_branches = self.run_command(
+            ['git', 'for-each-ref', '--format=%(refname:short)', 'refs/heads'],
+            cwd=self.config.linux_dir
+        ).stdout.splitlines()
+        deleted_branches = []
+        for branch in local_branches:
+            if branch == default_branch:
+                continue
+            if branch not in remote_branch_names:
+                self.run_command(['git', 'branch', '-D', branch], cwd=self.config.linux_dir, check=False)
+                deleted_branches.append(branch)
+
+        # Remove local-only tags; keep only tags that exist on origin.
+        remote_tags_output = self.run_command(
+            ['git', 'ls-remote', '--tags', '--refs', 'origin'],
+            cwd=self.config.linux_dir
+        ).stdout.splitlines()
+        remote_tags = {
+            line.split('\t', 1)[1].removeprefix('refs/tags/')
+            for line in remote_tags_output
+            if '\t' in line and line.split('\t', 1)[1].startswith('refs/tags/')
+        }
+
+        local_tags = self.run_command(['git', 'tag', '-l'], cwd=self.config.linux_dir).stdout.splitlines()
+        deleted_tags = []
+        for tag in local_tags:
+            if tag not in remote_tags:
+                self.run_command(['git', 'tag', '-d', tag], cwd=self.config.linux_dir, check=False)
+                deleted_tags.append(tag)
+
+        # Final tag sync to ensure local tag objects track origin exactly.
+        self.run_command(['git', 'fetch', 'origin', '--tags', '--force'], cwd=self.config.linux_dir)
+
+        self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Kernel repo cleaned")
+        self.logger.info(f"Deleted local-only branches: {len(deleted_branches)}")
+        self.logger.info(f"Deleted local-only tags: {len(deleted_tags)}")
+
     def checkout_kernel_version(self):
         """Reset the git repo and check out the target kernel version."""
         self.logger.info("Resetting repository state...")
-        self.run_command(['git', 'reset', '--hard', 'HEAD'])
-        self.run_command(['git', 'clean', '-fd'])
-        self.run_command(['git', 'checkout', 'master'])
-        self.run_command(['git', 'tag', '-d', f'v{self.config.version}'], check=False)
+        self.run_command(['git', 'reset', '--hard', 'HEAD'], cwd=self.config.linux_dir)
+        self.run_command(['git', 'clean', '-fd'], cwd=self.config.linux_dir)
+        # Ensure we are not on the branch we may delete/recreate below.
+        self.run_command(['git', 'checkout', '--detach'], cwd=self.config.linux_dir, check=False)
+        self.run_command(['git', 'tag', '-d', f'v{self.config.version}'], cwd=self.config.linux_dir, check=False)
 
         self.logger.info("Fetching git tags...")
-        self.run_command(['git', 'fetch', '--tags'])
+        self.run_command(['git', 'fetch', 'origin', '--prune', '--tags', '--force'], cwd=self.config.linux_dir)
 
         branch_name = f"mnt-reform-{self.config.version}"
         self.logger.info(f"Checking out kernel version v{self.config.version}...")
 
-        self.run_command(['git', 'branch', '-D', branch_name], check=False)
-        self.run_command(['git', 'checkout', '-b', branch_name, f'tags/v{self.config.version}'])
+        self.run_command(['git', 'branch', '-D', branch_name], cwd=self.config.linux_dir, check=False)
+        self.run_command(['git', 'checkout', '-B', branch_name, f'tags/v{self.config.version}'], cwd=self.config.linux_dir)
 
     def setup_custom_dts_files(self):
         """Copy custom DTS files and update vendor Makefiles.
@@ -308,7 +419,7 @@ class KernelBuilder:
             if not custom_dts.exists():
                 raise BuildError(f"Custom DTS file not found: {custom_dts}")
 
-            self.run_command(["cp", str(custom_dts), str(dts_dest)])
+            shutil.copy2(custom_dts, dts_dest)
             self.logger.info(f"  Copied {dts_config['name']} to {dts_config['vendor']}/")
 
         # Group by vendor to avoid processing the same Makefile multiple times
@@ -348,13 +459,11 @@ class KernelBuilder:
         self.logger.info("Updating kernel config with olddefconfig...")
         self.logger.info("Preparing kernel to build state before running olddefconfig...")
 
-        os.chdir(self.config.linux_dir)
-
         defconfig_path = self.config.build_dir / "configs" / "defconfig"
         if not defconfig_path.exists():
             raise BuildError(f"defconfig not found: {defconfig_path}")
         self.logger.info(f"Copying {defconfig_path} to .config...")
-        self.run_command(['cp', str(defconfig_path), str(self.config.linux_dir / '.config')])
+        shutil.copy2(defconfig_path, self.config.linux_dir / '.config')
 
         self.logger.info("Running olddefconfig to update config defaults...")
         self.run_command([
@@ -365,7 +474,7 @@ class KernelBuilder:
 
         self.logger.info(f"Saving updated config to {self.config.config_file}...")
         self.config.config_file.parent.mkdir(parents=True, exist_ok=True)
-        self.run_command(['cp', str(self.config.linux_dir / '.config'), str(self.config.config_file)])
+        shutil.copy2(self.config.linux_dir / '.config', self.config.config_file)
 
         self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Config updated successfully")
 
@@ -384,10 +493,11 @@ class KernelBuilder:
         self.logger.info(f"Building kernel {self.config.version}...")
         start_time = datetime.now()
 
-        os.chdir(self.config.linux_dir)
+        self.log_phase("Source Prep")
         if not skip_git_operations:
             self.checkout_kernel_version()
 
+        self.log_phase("Patching")
         patch_stats = self.apply_patches()
         if patch_stats.failed > 0:
             self.logger.warning(
@@ -395,21 +505,27 @@ class KernelBuilder:
                 "Build will continue, but may fail or produce unexpected results."
             )
 
+        self.log_phase("DTS Setup")
         self.setup_custom_dts_files()
 
         if run_olddefconfig:
+            self.log_phase("Config Update")
             self.update_config_with_olddefconfig(skip_git_operations=skip_git_operations)
         else:
             self.logger.info("Copying kernel config...")
-            self.run_command(['cp', str(self.config.config_file), '.config'])
+            shutil.copy2(self.config.config_file, self.config.linux_dir / '.config')
 
         # Commit changes and tag, this is to avoid -dirty in our kernel name
         # Ideally we'd build the kernel outside a git repo, but for now, this
+        self.log_phase("Git Snapshot")
         self.logger.info("Create git tag and commit.")
-        self.run_command(['git', 'add', '--all'])
-        self.run_command(['git', 'commit', '-s', '-m', f'MNT Reform Linux v{self.config.version}'])
-        self.run_command(['git', 'tag', '-d', f'v{self.config.version}'], check=False)
-        self.run_command(['git', 'tag', '-a', f'v{self.config.version}', '-m', f'MNT Reform Linux v{self.config.version}'])
+        self.run_command(['git', 'add', '--all'], cwd=self.config.linux_dir)
+        self.run_command(['git', 'commit', '-s', '-m', f'MNT Reform Linux v{self.config.version}'], cwd=self.config.linux_dir)
+        self.run_command(['git', 'tag', '-d', f'v{self.config.version}'], cwd=self.config.linux_dir, check=False)
+        self.run_command(
+            ['git', 'tag', '-a', f'v{self.config.version}', '-m', f'MNT Reform Linux v{self.config.version}'],
+            cwd=self.config.linux_dir
+        )
 
         # Compile
         if self.kernel_only:
@@ -422,6 +538,7 @@ class KernelBuilder:
             self.logger.info(f"Compiling kernel with {self.config.jobs} jobs (this may take a while)...")
             make_targets = ['Image', 'dtbs', 'modules']
 
+        self.log_phase("Compile")
         self.run_command(
             [
                 'make',
@@ -439,6 +556,7 @@ class KernelBuilder:
             self.logger.info(f"Installing modules to {modules_dir}...")
             if modules_dir.exists():
                 shutil.rmtree(modules_dir)
+            self.log_phase("Module Install")
             self.run_command(
                 [
                     'make',
@@ -676,8 +794,6 @@ class KernelBuilder:
             if tarinfo.issym() and tarinfo.name.endswith("/build"):
                 return None
             return tarinfo
-
-        os.chdir(self.config.linux_dir)
 
         required_files = {
             'kernel': self.config.linux_dir / "arch/arm64/boot/Image",

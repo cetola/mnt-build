@@ -1,0 +1,49 @@
+#compdef mnt-build
+
+_mnt_build() {
+  local context state line
+  typeset -A opt_args
+
+  local -a global_opts
+  global_opts=(
+    '--help[show help]'
+    '--version[show tool version]'
+  )
+
+  if (( CURRENT == 2 )); then
+    _arguments -s \
+      $global_opts \
+      '1:subcommand:(build clean)'
+    return
+  fi
+
+  local subcmd="$words[2]"
+
+  case "$subcmd" in
+    build)
+      _arguments -s \
+        '--help[show build help]' \
+        '--kversion=[kernel version]:kversion:' \
+        '--build-dir=[build directory]:directory:_files -/' \
+        '(-j --jobs)'{-j,--jobs}'[parallel jobs]:jobs:' \
+        '--pkgrel=[package release]:pkgrel:' \
+        '--dry-run[check/apply patches only]' \
+        '--olddefconfig[run olddefconfig and persist config]' \
+        '--defconfig[alias for --olddefconfig]' \
+        '--skip-git-ops[skip git reset/checkout/tag ops]' \
+        '--cross-compile=[cross compile prefix]:prefix:' \
+        '--with-headers[generate extmod headers tree]' \
+        '--kernel-only[build kernel only]'
+      ;;
+    clean)
+      _arguments -s \
+        '--help[show clean help]' \
+        '--build-dir=[build directory]:directory:_files -/'
+      ;;
+    *)
+      _message 'subcommand' 'build clean'
+      ;;
+  esac
+}
+
+_mnt_build "$@"
