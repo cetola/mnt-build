@@ -57,6 +57,6 @@ RUN set -euo pipefail && \
     yay -S --noconfirm --needed bmaptool && \
     rm -rf /tmp/yay
 
-RUN git config --global user.email "build@bot.net" && \
-    git config --global user.name "Build Bot" && \
+RUN git config --global user.email "build@mntar.ch" && \
+    git config --global user.name "MNT-Build Bot" && \
     git config --global --add safe.directory '*'
