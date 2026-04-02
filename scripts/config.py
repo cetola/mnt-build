@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-DEFAULT_KERNEL_VERSION = '6.19.10'
+DEFAULT_KERNEL_VERSION = '6.19.11'
 DEFAULT_PKGREL = 1
 DEFAULT_CROSS_COMPILE = "aarch64-linux-gnu-"
 DEFAULT_KERNEL_ONLY = False
