@@ -13,7 +13,7 @@
       --border: #2f3833;
       --accent: #6fa67b;
       --link: #9bc7d6;
-      --visited: #b4a0c8;
+      --visited: #ffffff;
       --warning: #c7b884;
       --purple: #b48ad6;
     }
@@ -28,6 +28,10 @@
     }
 
     a {
+      text-decoration: underline;
+    }
+
+    a:hover {
       text-decoration: none;
     }
 
@@ -326,7 +330,7 @@
   <main>
     <div class="topbar">
       <a class="theme-link" href="#" id="theme-toggle">
-        <span class="theme-target" data-theme-target="8bit">root@mnt-build:~# ./serve_business</span>
+        <span class="theme-target" data-theme-target="8bit">root@mnt-build:~# ./serve-dull</span>
         <span class="theme-target" data-theme-target="serious">8bit</span>
       </a>
     </div>
@@ -349,10 +353,20 @@
         The current released image supports the <strong class="platform-name">MNT Pocket Reform with the A311D SoM</strong>.
       </p>
       <p>
-        Release: <code>6.19.10-1-mnt-reform</code>
+        Release: <code>6.19.11-1-mnt-reform</code>
       </p>
       <p>
-        <a class="button" href="https://github.com/cetola/mnt-build/releases/tag/6.19.10-1-mnt-reform">Download from Releases</a>
+        <a class="button" href="https://github.com/cetola/mnt-build/releases/tag/6.19.11-1-mnt-reform">Download from Releases</a>
+      </p>
+    </div>
+
+    <div class="section">
+      <h2>Release Notes</h2>
+      <p>
+        The <a href="https://aur.archlinux.org/packages/reform-tools">reform-tools</a> AUR package is still a work in progress, as reform-tools assumes you are running Debian. You can use the scripts are a reference for how to accomplish their goals.
+      </p>
+      <p>
+        Network Manager is installed in an attempt to make connecting to wifi easier. Be sure to disable systemd-networkd before starting up Network Manager. You'll also want to decide between networkd-resolved or dhcpcd.
       </p>
     </div>
 
