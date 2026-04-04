@@ -5,10 +5,6 @@ set -euo pipefail
 # Configuration
 # ============================================================================
 readonly KVER="6.19.11"
-readonly PKGREL="1"
-readonly QCACLD_VER="20251018.277339b9-1"
-readonly LPC_VER="1.85-1"
-readonly KERNEL_VERSION="${KVER}-mnt-reform"
 readonly IMAGE_SIZE_GB=110
 readonly BOOT_SIZE_MB=1024
 readonly MAX_BOOTLOADER_MB=16
@@ -25,9 +21,6 @@ readonly IMAGE="$(pwd)/mnt-reform-${KVER}-aarch64.img"
 readonly CHROOT_INSTALLER_SOURCE="$SCRIPT_DIR/install_kernel_chroot.sh"
 readonly CHROOT_INSTALLER_TARGET="$ROOT_MNT/tmp/install_kernel.sh"
 
-readonly KERNEL_URL="https://github.com/cetola/linux-mnt-reform/archive/refs/tags/${KVER}-${PKGREL}-mnt-reform.tar.gz"
-readonly QCACLD_URL="https://github.com/cetola/mnt-reform-qcacld2/archive/refs/tags/${QCACLD_VER}.tar.gz"
-readonly LPC_URL="https://github.com/cetola/mnt-reform-lpc/archive/refs/tags/${LPC_VER}.tar.gz"
 readonly ARCH_URL="http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz"
 
 readonly TIMESTAMP=$(date +%Y%m%d-%H%M%S)
@@ -297,9 +290,6 @@ download_if_missing() {
 download_dependencies() {
   log "Downloading dependencies..."
   cd "$DOWNLOADS_DIR"
-  download_if_missing "$KERNEL_URL" "kernel.tar.gz"
-  download_if_missing "$QCACLD_URL" "qcacld.tar.gz"
-  download_if_missing "$LPC_URL" "lpc.tar.gz"
   download_if_missing "$ARCH_URL" "archlinuxarm.tar.gz"
 }
 
@@ -384,24 +374,6 @@ extract_rootfs() {
   tar -xpf "$DOWNLOADS_DIR/archlinuxarm.tar.gz" -C "$ROOT_MNT"
 }
 
-extract_kernel() {
-  log "Extracting linux-mnt-reform..."
-  mkdir -p "$WORK_DIR/kernel"
-  tar --no-same-owner -xpf "$DOWNLOADS_DIR/kernel.tar.gz" -C "$WORK_DIR/kernel"
-}
-
-extract_qcacld() {
-  log "Extracting mnt-reform-qcacld2..."
-  mkdir -p "$WORK_DIR/qcacld"
-  tar --no-same-owner -xpf "$DOWNLOADS_DIR/qcacld.tar.gz" -C "$WORK_DIR/qcacld"
-}
-
-extract_lpc() {
-  log "Extracting mnt-reform-lpc..."
-  mkdir -p "$WORK_DIR/lpc"
-  tar --no-same-owner -xpf "$DOWNLOADS_DIR/lpc.tar.gz" -C "$WORK_DIR/lpc"
-}
-
 create_fstab() {
   log "Creating /etc/fstab..."
   cat > "$ROOT_MNT/etc/fstab" << 'EOF'
@@ -421,22 +393,9 @@ setup_chroot_environment() {
   mkdir -p "$ROOT_MNT/boot"
   mount "$BOOT_PART" "$ROOT_MNT/boot"
   
-  setup_bootloader_config
+  mkdir -p "$ROOT_MNT/boot/extlinux"
   mount_virtual_filesystems
   configure_dns
-  copy_pkgbuild
-}
-
-setup_bootloader_config() {
-  log "Setting up bootloader configuration..."
-  mkdir -p "$ROOT_MNT/boot/extlinux"
-  cp \
-    "$WORK_DIR/kernel/linux-mnt-reform-${KVER}-${PKGREL}-mnt-reform/extlinux.conf.example" \
-    "$ROOT_MNT/boot/extlinux/extlinux.conf"
-  
-  # Fix extlinux.conf to use LABEL=ROOT instead of /dev/nvme0n1p1
-  log "Fixing extlinux.conf to use LABEL=ROOT..."
-  sed -i 's|root=/dev/nvme0n1p1|root=LABEL=ROOT|g' "$ROOT_MNT/boot/extlinux/extlinux.conf"
 }
 
 mount_virtual_filesystems() {
@@ -457,11 +416,24 @@ nameserver 1.1.1.1
 EOF
 }
 
-copy_pkgbuild() {
-  log "Copying PKGBUILDs into chroot..."
-  cp -r "$WORK_DIR/kernel/linux-mnt-reform-${KVER}-${PKGREL}-mnt-reform" "$ROOT_MNT/tmp/linux-mnt-reform"
-  cp -r "$WORK_DIR/qcacld/mnt-reform-qcacld2-${QCACLD_VER}" "$ROOT_MNT/tmp/mnt-reform-qcacld2"
-  cp -r "$WORK_DIR/lpc/mnt-reform-lpc-${LPC_VER}" "$ROOT_MNT/tmp/mnt-reform-lpc"
+configure_extlinux() {
+  log "Installing extlinux.conf from kernel package example..."
+  local extlinux_example=""
+  local extlinux_conf="$BOOT_MNT/extlinux/extlinux.conf"
+
+  if [[ -f "$BOOT_MNT/extlinux/extlinux.conf.example" ]]; then
+    extlinux_example="$BOOT_MNT/extlinux/extlinux.conf.example"
+  elif [[ -f "$ROOT_MNT/boot/extlinux/extlinux.conf.example" ]]; then
+    extlinux_example="$ROOT_MNT/boot/extlinux/extlinux.conf.example"
+  else
+    die "Unable to find installed extlinux.conf.example from kernel package"
+  fi
+
+  mkdir -p "$BOOT_MNT/extlinux"
+  cp "$extlinux_example" "$extlinux_conf"
+
+  log "Fixing extlinux.conf to use LABEL=ROOT..."
+  sed -i 's|root=/dev/nvme0n1p1|root=LABEL=ROOT|g' "$extlinux_conf"
 }
 
 create_chroot_script() {
@@ -504,10 +476,6 @@ configure_boot_dtb_symlink() {
 
 cleanup_chroot_environment() {
   log "Cleaning up chroot environment..."
-  rm -rf "$ROOT_MNT/tmp/linux-mnt-reform"
-  rm -rf "$ROOT_MNT/tmp/mnt-reform-qcacld2"
-  rm -rf "$ROOT_MNT/tmp/mnt-reform-lpc"
-  rm -rf "$ROOT_MNT/tmp/reform-tools-aur"
   rm -f "$CHROOT_INSTALLER_TARGET"
   rm -f "$ROOT_MNT/usr/bin/qemu-aarch64-static"
 }
@@ -602,7 +570,7 @@ print_summary() {
   echo "Contents:"
   echo "  - Boot partition with kernel, DTB, and initramfs"
   echo "  - Root filesystem with Arch Linux ARM and kernel modules"
-  echo "  - Kernel, qcacld2, and lpc installed via pacman from PKGBUILDs"
+  echo "  - Kernel, qcacld2, and lpc installed from AUR packages"
   echo
   echo "To write to SD card:"
   if command -v bmaptool >/dev/null 2>&1; then
@@ -656,9 +624,6 @@ main() {
   install_bootloader_to_image
   install_bootloader_to_boot_partition
   extract_rootfs
-  extract_kernel
-  extract_qcacld
-  extract_lpc
   
   # Filesystem configuration
   create_fstab
@@ -668,6 +633,7 @@ main() {
   create_chroot_script
   run_chroot_installation
   configure_boot_dtb_symlink
+  configure_extlinux
   cleanup_chroot_environment
   
   # Finalization

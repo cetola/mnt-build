@@ -8,8 +8,6 @@ pacman-key --populate archlinuxarm
 
 PACMAN="pacman --disable-sandbox"
 JOBS="$(nproc)"
-readonly PACMAN_FULL_UPGRADE="1"
-readonly INSTALL_REFORM_TOOLS="1"
 
 refresh_pacman_databases() {
   echo "Refreshing pacman package databases..."
@@ -58,7 +56,7 @@ pacman_run_with_retry \
   base base-devel dracut networkmanager cpio git dkms sudo
 
 echo "Removing conflicting linux-aarch64 package if present..."
-$PACMAN -R --noconfirm linux-aarch64 || true
+$PACMAN -R --noconfirm linux-aarch64 linux-aarch64-headers || true
 
 install_pkgbuild_deps() {
   local pkgdir="$1"
@@ -111,37 +109,15 @@ install_pkgbuild_deps() {
     $PACMAN -S --needed --noconfirm "${filtered_deps[@]}"
 }
 
-build_and_install_pkgbuild() {
-  local pkgdir="$1"
-  local pkgglob="$2"
-
-  chown -R nobody:nobody "$pkgdir"
-  install_pkgbuild_deps "$pkgdir"
-
-  echo "Building package from $pkgdir..."
-  (
-    cd "$pkgdir"
-    sudo -u nobody env \
-      MAKEFLAGS="$MAKEFLAGS" \
-      CMAKE_BUILD_PARALLEL_LEVEL="$CMAKE_BUILD_PARALLEL_LEVEL" \
-      NINJAFLAGS="$NINJAFLAGS" \
-      makepkg --noconfirm
-  )
-
-  local built_packages=("$pkgdir"/$pkgglob)
-  if [[ ${#built_packages[@]} -eq 0 ]]; then
-    echo "No packages found matching '$pkgglob' in $pkgdir" >&2
-    exit 1
-  fi
-
-  echo "Installing package(s) from $pkgdir..."
-  $PACMAN -U --noconfirm "${built_packages[@]}"
-}
-
 build_and_install_aur_package() {
   local pkgname="$1"
   local aur_repo="https://aur.archlinux.org/${pkgname}.git"
   local aur_dir="/tmp/${pkgname}-aur"
+  local srcinfo=""
+  local package_names=()
+  local built_packages=()
+  local package_name=""
+  local matches=()
 
   echo "Building and installing AUR package: ${pkgname}..."
   rm -rf "$aur_dir"
@@ -159,28 +135,51 @@ build_and_install_aur_package() {
       makepkg --noconfirm
   )
 
-  local built_packages=("$aur_dir"/${pkgname}-*.pkg.tar.*)
-  if [[ ${#built_packages[@]} -eq 0 ]]; then
-    echo "No packages found matching '${pkgname}-*.pkg.tar.*' in $aur_dir" >&2
+  if ! srcinfo="$(
+    cd "$aur_dir"
+    sudo -u nobody makepkg --printsrcinfo
+  )"; then
+    echo "Failed to read built package metadata in $aur_dir" >&2
     exit 1
   fi
+
+  mapfile -t package_names < <(
+    printf '%s\n' "$srcinfo" \
+      | awk -F' = ' '/^[[:space:]]*pkgname[[:space:]]*=/ {print $2}' \
+      | sed '/^$/d' \
+      | sort -u
+  )
+
+  if [[ ${#package_names[@]} -eq 0 ]]; then
+    echo "No package names found in $aur_dir" >&2
+    exit 1
+  fi
+
+  for package_name in "${package_names[@]}"; do
+    matches=("$aur_dir"/${package_name}-*.pkg.tar.*)
+    if [[ ${#matches[@]} -eq 0 ]]; then
+      echo "Missing built package file for declared package '$package_name' in $aur_dir" >&2
+      exit 1
+    fi
+    built_packages+=("${matches[@]}")
+  done
 
   $PACMAN -U --noconfirm "${built_packages[@]}"
 }
 
-echo "Building and installing linux-mnt-reform kernel..."
-build_and_install_pkgbuild "/tmp/linux-mnt-reform" "linux-mnt-reform-*.pkg.tar.*"
+echo "Building and installing AUR package linux-mnt-reform-bin..."
+build_and_install_aur_package "linux-mnt-reform-bin"
 
 echo "Building and installing AUR package reform-tools..."
 build_and_install_aur_package "reform-tools"
 
-echo "Building and installing mnt-reform-qcacld2..."
-build_and_install_pkgbuild "/tmp/mnt-reform-qcacld2" "*qcacld*.pkg.tar.*"
+echo "Building and installing AUR package mnt-reform-qcacld2-dkms..."
+build_and_install_aur_package "mnt-reform-qcacld2-dkms"
 
-echo "Building and installing mnt-reform-lpc..."
-build_and_install_pkgbuild "/tmp/mnt-reform-lpc" "*lpc*.pkg.tar.*"
+echo "Building and installing AUR package mnt-reform-lpc-dkms..."
+build_and_install_aur_package "mnt-reform-lpc-dkms"
 
-echo "Kernel, qcacld2, lpc, and reform-tools packages installed successfully!"
+echo "Kernel, qcacld2, lpc, and reform-tools AUR packages installed successfully!"
 
 echo "Cleaning pacman package cache to reduce image size..."
 rm -rf /var/cache/pacman/pkg/* || true
