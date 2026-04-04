@@ -419,14 +419,10 @@ EOF
 
 configure_extlinux() {
   log "Installing extlinux.conf from kernel package example..."
-  local extlinux_example=""
+  local extlinux_example="$ROOT_MNT/usr/share/doc/linux-mnt-reform-bin/extlinux.conf.example"
   local extlinux_conf="$BOOT_MNT/extlinux/extlinux.conf"
 
-  if [[ -f "$BOOT_MNT/extlinux/extlinux.conf.example" ]]; then
-    extlinux_example="$BOOT_MNT/extlinux/extlinux.conf.example"
-  elif [[ -f "$ROOT_MNT/boot/extlinux/extlinux.conf.example" ]]; then
-    extlinux_example="$ROOT_MNT/boot/extlinux/extlinux.conf.example"
-  else
+  if [[ ! -f "$extlinux_example" ]]; then
     die "Unable to find installed extlinux.conf.example from kernel package"
   fi
 
