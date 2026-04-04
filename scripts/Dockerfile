@@ -14,7 +14,7 @@ RUN pacman -Sy --noconfirm archlinux-keyring && \
     pacman -S --noconfirm \
         dracut git bc kmod inetutils cpio perl tar xz wget python python-pip vim sudo \
         aarch64-linux-gnu-binutils aarch64-linux-gnu-gcc aarch64-linux-gnu-gdb \
-        dtc libelf flex bison openssl rsync curl && \
+        dtc libelf flex bison openssl rsync curl arch-install-scripts && \
     pacman -S --noconfirm \
         parted qemu-user-static qemu-user-static-binfmt && \
     pacman -S --noconfirm \

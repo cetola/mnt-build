@@ -1,0 +1,816 @@
+#!/usr/bin/env python3
+"""Build or run linux-mnt-reform-bin for x86_64 under QEMU."""
+
+from __future__ import annotations
+
+import argparse
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import traceback
+from pathlib import Path
+
+
+AUR_URL = "https://aur.archlinux.org/linux-mnt-reform-bin.git"
+LOG_FILE: Path | None = None
+LOG_HANDLE = None
+
+
+def log_line(message: str) -> None:
+    print(message, flush=True)
+    if LOG_HANDLE is not None:
+        LOG_HANDLE.write(message + "\n")
+        LOG_HANDLE.flush()
+
+
+def open_log_file(base: Path) -> Path:
+    global LOG_FILE, LOG_HANDLE
+    LOG_FILE = base / "boot-x86.log"
+    if LOG_FILE.exists():
+        LOG_FILE.unlink()
+    LOG_HANDLE = LOG_FILE.open("w", encoding="utf-8")
+    return LOG_FILE
+
+
+def run(cmd: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> None:
+    log_line(f"+ {' '.join(cmd)}")
+    process = subprocess.Popen(
+        cmd,
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    assert process.stdout is not None
+    for line in process.stdout:
+        line = line.rstrip("\n")
+        if LOG_HANDLE is not None:
+            LOG_HANDLE.write(line + "\n")
+            LOG_HANDLE.flush()
+        print(line, flush=True)
+    return_code = process.wait()
+    if return_code != 0:
+        raise subprocess.CalledProcessError(return_code, cmd)
+
+
+def run_root(cmd: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> None:
+    if os.geteuid() == 0:
+        run(cmd, cwd=cwd, env=env)
+        return
+    run(["sudo", *cmd], cwd=cwd, env=env)
+
+
+def remove_tree(path: Path) -> None:
+    if not path.exists():
+        return
+    try:
+        shutil.rmtree(path)
+    except PermissionError:
+        run_root(["rm", "-rf", str(path)])
+
+
+def ensure_root_dir(path: Path) -> None:
+    if path.exists():
+        return
+    run_root(["mkdir", "-p", str(path)])
+
+
+def chmod_root(path: Path, mode: str) -> None:
+    run_root(["chmod", mode, str(path)])
+
+
+def copy_tree(source: Path, dest: Path) -> None:
+    if dest.exists():
+        remove_tree(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    run_root(["mkdir", "-p", str(dest)])
+    run_root(["cp", "-a", f"{source}/.", str(dest)])
+
+
+def copy_host_pacman_config(root_tree: Path) -> None:
+    etc_dir = root_tree / "etc"
+    pacman_d_dir = etc_dir / "pacman.d"
+    ensure_root_dir(etc_dir)
+    ensure_root_dir(pacman_d_dir)
+
+    host_pacman_conf = Path("/etc/pacman.conf")
+    host_mirrorlist = Path("/etc/pacman.d/mirrorlist")
+
+    if host_pacman_conf.exists():
+        run_root(["cp", "-a", str(host_pacman_conf), str(etc_dir / "pacman.conf")])
+    if host_mirrorlist.exists():
+        run_root(["cp", "-a", str(host_mirrorlist), str(pacman_d_dir / "mirrorlist")])
+
+
+def create_test_user(root_tree: Path) -> None:
+    root_tree = root_tree.resolve()
+    sudoers_dir = root_tree / "etc" / "sudoers.d"
+    sudoers_file = sudoers_dir / "10-tester"
+    temp_sudoers = Path(tempfile.mkstemp(prefix="boot-x86-sudoers-", dir="/tmp")[1])
+    temp_sudoers.write_text("tester ALL=(ALL:ALL) ALL\n")
+    temp_sudoers.chmod(0o440)
+
+    ensure_root_dir(sudoers_dir)
+    run_root(["groupadd", "-f", "-R", str(root_tree), "wheel"])
+    run_root(
+        [
+            "useradd",
+            "-R",
+            str(root_tree),
+            "-m",
+            "-G",
+            "wheel",
+            "-s",
+            "/bin/bash",
+            "tester",
+        ]
+    )
+    run_root(["bash", "-lc", f"printf 'tester:tester\\n' | chpasswd -R {root_tree}"])
+    run_root(["install", "-o", "0", "-g", "0", "-m", "0440", str(temp_sudoers), str(sudoers_file)])
+    temp_sudoers.unlink()
+
+
+def write_rootfs_init(root_tree: Path) -> Path:
+    init_path = root_tree / "usr" / "local" / "bin" / "boot-x86-root-init"
+    ensure_root_dir(init_path.parent)
+    temp_init = Path(tempfile.mkstemp(prefix="boot-x86-root-init-", dir="/tmp")[1])
+    temp_init.write_text(
+        """#!/usr/bin/bash
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/bin
+export TERM=linux
+mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+mkdir -p /dev/pts /dev/shm /run 2>/dev/null || true
+mount -t devpts devpts /dev/pts -o mode=0620,ptmxmode=0666,gid=5 2>/dev/null || true
+mount -t tmpfs tmpfs /dev/shm 2>/dev/null || true
+mount -t proc proc /proc 2>/dev/null || true
+mount -t sysfs sysfs /sys 2>/dev/null || true
+for nic in /sys/class/net/*; do
+  nic="${nic##*/}"
+  [ "$nic" = "lo" ] && continue
+  ip link set dev "$nic" up 2>/dev/null || true
+  dhcpcd -q -w "$nic" 2>/dev/null || true
+  break
+done
+echo "boot-x86: starting agetty on ttyS0"
+exec /usr/bin/agetty --autologin root --noclear ttyS0 115200 linux
+"""
+    )
+    temp_init.chmod(0o755)
+    run_root(["cp", "-a", str(temp_init), str(init_path)])
+    temp_init.unlink()
+    return init_path
+
+
+def capture(cmd: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> str:
+    result = subprocess.run(
+        cmd,
+        cwd=cwd,
+        env=env,
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    return result.stdout.strip()
+
+
+def command_supports_flag(command: str, flag: str) -> bool:
+    tool = shutil.which(command)
+    if tool is None:
+        return False
+    result = subprocess.run(
+        [tool, "--help"],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    return flag in result.stdout
+
+
+def write_text(path: Path, value: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(value)
+
+
+def read_text(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    return path.read_text().strip()
+
+
+def verify_arch_host() -> None:
+    os_release = Path("/etc/os-release")
+    if not os_release.exists():
+        raise RuntimeError("/etc/os-release not found; cannot verify host distribution")
+
+    values: dict[str, str] = {}
+    for line in os_release.read_text().splitlines():
+        if "=" not in line or line.startswith("#"):
+            continue
+        key, value = line.split("=", 1)
+        values[key] = value.strip().strip('"')
+
+    if values.get("ID") != "arch":
+        pretty = values.get("PRETTY_NAME", "unknown")
+        raise RuntimeError(f"Host is not Arch Linux (found {pretty})")
+
+
+def verify_build_tools() -> None:
+    tools = [
+        "makepkg",
+        "qemu-system-x86_64",
+        "git",
+        "bsdtar",
+        "pacman",
+        "pacstrap",
+        "mkfs.ext4",
+        "truncate",
+    ]
+    if os.geteuid() != 0:
+        tools.append("sudo")
+
+    missing = [tool for tool in tools if shutil.which(tool) is None]
+    if missing:
+        raise RuntimeError(f"Missing required host tools: {', '.join(missing)}")
+
+    if shutil.which("dracut") is None and shutil.which("mkinitcpio") is None:
+        raise RuntimeError("Missing required initramfs generator: install dracut or mkinitcpio")
+
+
+def verify_run_tools() -> None:
+    tools = [
+        "qemu-system-x86_64",
+    ]
+    missing = [tool for tool in tools if shutil.which(tool) is None]
+    if missing:
+        raise RuntimeError(f"Missing required host tools: {', '.join(missing)}")
+
+
+def ensure_workdirs(base: Path) -> dict[str, Path]:
+    dirs = {
+        "base": base,
+        "aur": base / "aur",
+        "packages": base / "packages",
+        "extracted": base / "extracted",
+        "initramfs": base / "initramfs",
+        "rootfs": base / "rootfs",
+        "tmp": base / "tmp",
+        "modules_root": base / "modules-root",
+    }
+    for path in dirs.values():
+        path.mkdir(parents=True, exist_ok=True)
+    return dirs
+
+
+def fetch_pkgbuild_sources(dest: Path) -> Path:
+    checkout = dest / "linux-mnt-reform-bin"
+    if not checkout.exists():
+        print(f"Cloning AUR packaging sources from {AUR_URL}")
+        run(["git", "clone", "--depth", "1", AUR_URL, str(checkout)])
+        return checkout
+
+    if not (checkout / ".git").exists():
+        raise RuntimeError(f"Existing path is not a git checkout: {checkout}")
+
+    print(f"Refreshing existing AUR checkout in {checkout}")
+    run(["git", "fetch", "--depth", "1", "origin"], cwd=checkout)
+    local_rev = capture(["git", "rev-parse", "HEAD"], cwd=checkout)
+    remote_rev = capture(["git", "rev-parse", "origin/master"], cwd=checkout)
+    if local_rev != remote_rev:
+        run(["git", "reset", "--hard", "origin/master"], cwd=checkout)
+    else:
+        print("AUR checkout already up to date")
+    return checkout
+
+
+def build_pkgbuild(pkgbuild_dir: Path, packages_dir: Path, tmp_dir: Path) -> tuple[Path, Path]:
+    build_stamp = packages_dir / ".built-from-rev"
+    pkg_rev = capture(["git", "rev-parse", "HEAD"], cwd=pkgbuild_dir)
+
+    kernel_pkgs = sorted(packages_dir.glob("linux-mnt-reform-bin-[0-9]*-x86_64.pkg.tar.*"))
+    header_pkgs = sorted(packages_dir.glob("linux-mnt-reform-bin-headers-[0-9]*-x86_64.pkg.tar.*"))
+    if read_text(build_stamp) == pkg_rev and kernel_pkgs and header_pkgs:
+        print("Reusing existing built package artifacts")
+        return kernel_pkgs[-1], header_pkgs[-1]
+
+    env = os.environ.copy()
+    env["PKGDEST"] = str(packages_dir.resolve())
+    env["SRCDEST"] = str((tmp_dir / "srcdest").resolve())
+    env["BUILDDIR"] = str((tmp_dir / "build").resolve())
+    env["SRCPKGDEST"] = str((tmp_dir / "srcpkg").resolve())
+
+    run(
+        ["makepkg", "-s", "-f", "--cleanbuild", "--noconfirm"],
+        cwd=pkgbuild_dir,
+        env=env,
+    )
+
+    kernel_pkgs = sorted(packages_dir.glob("linux-mnt-reform-bin-[0-9]*-x86_64.pkg.tar.*"))
+    header_pkgs = sorted(packages_dir.glob("linux-mnt-reform-bin-headers-[0-9]*-x86_64.pkg.tar.*"))
+
+    if not kernel_pkgs:
+        raise RuntimeError("Could not find built linux-mnt-reform-bin package")
+    if not header_pkgs:
+        raise RuntimeError("Could not find built linux-mnt-reform-bin-headers package")
+
+    write_text(build_stamp, pkg_rev)
+    return kernel_pkgs[-1], header_pkgs[-1]
+
+
+def extract_packages(kernel_pkg: Path, headers_pkg: Path, extracted_dir: Path) -> Path:
+    pkgroot = extracted_dir / "pkgroot"
+    stamp = extracted_dir / ".extracted-from"
+    desired = f"{kernel_pkg.name}\n{headers_pkg.name}"
+    if pkgroot.exists() and read_text(stamp) == desired:
+        print("Reusing existing extracted package payloads")
+        return pkgroot
+
+    if pkgroot.exists():
+        shutil.rmtree(pkgroot)
+    pkgroot.mkdir(parents=True)
+
+    run(["bsdtar", "-xpf", str(kernel_pkg), "-C", str(pkgroot)])
+    run(["bsdtar", "-xpf", str(headers_pkg), "-C", str(pkgroot)])
+    write_text(stamp, desired)
+    return pkgroot
+
+
+def find_kernel_image(pkgroot: Path) -> Path:
+    candidates = [
+        pkgroot / "boot" / "vmlinuz-linux-mnt-reform",
+        pkgroot / "boot" / "Image-linux-mnt-reform",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    raise RuntimeError("Could not find packaged kernel image under extracted /boot")
+
+
+def find_module_tree(pkgroot: Path) -> tuple[str, Path]:
+    modules_root = pkgroot / "usr" / "lib" / "modules"
+    candidates = sorted(p for p in modules_root.glob("*") if p.is_dir())
+    if len(candidates) != 1:
+        raise RuntimeError(f"Expected exactly one kernel module directory in {modules_root}, found {len(candidates)}")
+    return candidates[0].name, candidates[0]
+
+
+def stage_modules(module_tree: Path, modules_root: Path) -> Path:
+    target = modules_root / "usr" / "lib" / "modules" / module_tree.name
+    stamp = modules_root / ".staged-kernel-version"
+    if target.exists() and read_text(stamp) == module_tree.name:
+        print("Reusing staged kernel modules")
+        return target
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        shutil.rmtree(target)
+    shutil.copytree(module_tree, target)
+    write_text(stamp, module_tree.name)
+    return target
+
+
+def write_overlay(rootfs_dir: Path) -> tuple[Path, Path]:
+    overlay_init = rootfs_dir / "init.x86-test"
+    etc_dir = rootfs_dir / "etc"
+    etc_dir.mkdir(parents=True, exist_ok=True)
+    motd = etc_dir / "motd"
+
+    overlay_init.write_text(
+        """#!/usr/bin/sh
+export PATH=/usr/bin:/usr/sbin:/bin:/sbin
+mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+mount -t proc proc /proc 2>/dev/null || true
+mount -t sysfs sysfs /sys 2>/dev/null || true
+clear
+echo "boot-x86-test: linux-mnt-reform x86_64 initramfs shell"
+echo
+if [ -f /etc/motd ]; then
+  cat /etc/motd
+  echo
+fi
+exec /usr/bin/sh
+"""
+    )
+    overlay_init.chmod(0o755)
+
+    motd.write_text(
+        "This shell is running from the generated initramfs.\n"
+        "No real root filesystem has been mounted.\n"
+    )
+    return overlay_init, motd
+
+
+def write_mkinitcpio_config(config_path: Path, overlay_init: Path, motd: Path) -> None:
+    config_path.write_text(
+        "\n".join(
+            [
+                'MODULES=(virtio_pci virtio_blk virtio_net ext4 9p 9pnet 9pnet_virtio)',
+                'BINARIES=()',
+                f'FILES=("{overlay_init}" "{motd}")',
+                'HOOKS=(base)',
+                'COMPRESSION="gzip"',
+                "",
+            ]
+        )
+    )
+
+
+def build_initramfs_with_mkinitcpio(
+    kernel_image: Path,
+    modules_root: Path,
+    initramfs_dir: Path,
+    tmp_dir: Path,
+) -> Path:
+    config_path = initramfs_dir / "mkinitcpio.conf"
+    overlay_init, motd = write_overlay(initramfs_dir.parent / "rootfs")
+    write_mkinitcpio_config(config_path, overlay_init, motd)
+
+    image_path = initramfs_dir / "initramfs-linux-mnt-reform-x86-test.img"
+    stamp = initramfs_dir / ".initramfs-mkinitcpio-stamp"
+    desired = f"{kernel_image}\n{modules_root}"
+    if image_path.exists() and read_text(stamp) == desired:
+        print("Reusing existing mkinitcpio initramfs")
+        return image_path
+
+    run(
+        [
+            "mkinitcpio",
+            "-c",
+            str(config_path),
+            "-g",
+            str(image_path),
+            "-k",
+            str(kernel_image),
+            "-r",
+            str(modules_root),
+            "-t",
+            str(tmp_dir),
+            "-v",
+        ]
+    )
+    write_text(stamp, desired)
+    return image_path
+
+
+def build_initramfs_with_dracut(
+    kernel_version: str,
+    modules_root: Path,
+    initramfs_dir: Path,
+    tmp_dir: Path,
+) -> Path:
+    overlay_init, motd = write_overlay(initramfs_dir.parent / "rootfs")
+    image_path = initramfs_dir / "initramfs-linux-mnt-reform-x86-test.img"
+    stamp = initramfs_dir / ".initramfs-dracut-stamp"
+    desired = f"{kernel_version}\n{modules_root}\ndracut-add:bash rootfs-block\ndracut-drivers:virtio_pci virtio_blk virtio_net ext4"
+    if image_path.exists() and read_text(stamp) == desired:
+        print("Reusing existing dracut initramfs")
+        return image_path
+
+    run(
+        [
+            "dracut",
+            "--force",
+            "--tmpdir",
+            str(tmp_dir),
+            "--kmoddir",
+            str(modules_root / "usr" / "lib" / "modules" / kernel_version),
+            "--no-hostonly",
+            "--omit",
+            "systemd",
+            "--add",
+            "bash rootfs-block",
+            "--add-drivers",
+            "virtio_pci virtio_blk virtio_net ext4",
+            "--install",
+            "/usr/bin/sh",
+            "--include",
+            str(overlay_init),
+            "/init.x86-test",
+            "--include",
+            str(motd),
+            "/etc/motd",
+            str(image_path),
+            kernel_version,
+        ]
+    )
+    write_text(stamp, desired)
+    return image_path
+
+
+def try_build_initramfs_with_dracut(
+    kernel_version: str,
+    modules_root: Path,
+    initramfs_dir: Path,
+    tmp_dir: Path,
+) -> Path | None:
+    try:
+        return build_initramfs_with_dracut(kernel_version, modules_root, initramfs_dir, tmp_dir)
+    except subprocess.CalledProcessError as exc:
+        print(f"dracut failed for kernel {kernel_version}, falling back to mkinitcpio")
+        print(f"  exit code: {exc.returncode}")
+        return None
+
+
+def build_initramfs(
+    kernel_image: Path,
+    kernel_version: str,
+    modules_root: Path,
+    initramfs_dir: Path,
+    tmp_dir: Path,
+) -> tuple[Path, str]:
+    if shutil.which("dracut") is not None:
+        image = try_build_initramfs_with_dracut(kernel_version, modules_root, initramfs_dir, tmp_dir)
+        if image is not None:
+            return (image, "dracut")
+
+    return (
+        build_initramfs_with_mkinitcpio(kernel_image, modules_root, initramfs_dir, tmp_dir),
+        "mkinitcpio",
+    )
+
+
+def verify_initramfs(initramfs: Path) -> None:
+    listing = capture(["bsdtar", "-tf", str(initramfs)])
+    required_entries = [
+        "init.x86-test",
+        "etc/motd",
+    ]
+    shell_candidates = {"usr/bin/sh", "bin/sh", "usr/bin/busybox", "bin/busybox"}
+
+    for entry in required_entries:
+        if entry not in listing.splitlines():
+            raise RuntimeError(f"Generated initramfs is missing required entry: {entry}")
+
+    if not any(candidate in listing.splitlines() for candidate in shell_candidates):
+        raise RuntimeError("Generated initramfs does not appear to contain a shell binary")
+
+
+def create_rootfs_image(rootfs_dir: Path, size_mb: int) -> Path:
+    image_path = rootfs_dir / "arch-rootfs.img"
+    root_tree = rootfs_dir / "tree"
+    stamp = rootfs_dir / ".rootfs-stamp"
+    desired = f"{size_mb}\nrootfs-init:agetty-autologin-root-devpts-dhcp\nauto-user:tester-explicit-sudo-rootowned\npacman-db:guest-local\nnetwork:user-mode-virtio"
+
+    if image_path.exists() and root_tree.exists() and read_text(stamp) == desired:
+        print("Reusing existing pacstrap rootfs image")
+        return image_path
+
+    if image_path.exists():
+        image_path.unlink()
+    if root_tree.exists():
+        remove_tree(root_tree)
+    root_tree.mkdir(parents=True, exist_ok=True)
+
+    packages = [
+        "base",
+        "bash",
+        "pacman",
+        "base-devel",
+        "dhcpcd",
+    ]
+
+    try:
+        log_line(f"Creating rootfs with pacstrap in {root_tree}")
+        run_root(
+            [
+                "pacstrap",
+                "-c",
+                "-G",
+                "-K",
+                "-M",
+                str(root_tree),
+                *packages,
+            ]
+        )
+    except subprocess.CalledProcessError as exc:
+        print("pacstrap failed, falling back to pacman --root for container compatibility")
+        print(f"  exit code: {exc.returncode}")
+        scratch_root = Path(tempfile.mkdtemp(prefix="boot-x86-rootfs-", dir="/tmp"))
+        scratch_tree = scratch_root / "tree"
+        pacman_cache = scratch_root / "pacman-cache"
+        pacman_db = scratch_tree / "var" / "lib" / "pacman"
+        pacman_db_sync = pacman_db / "sync"
+        chmod_root(scratch_root, "0777")
+        ensure_root_dir(pacman_cache)
+        ensure_root_dir(pacman_db)
+        ensure_root_dir(pacman_db_sync)
+        ensure_root_dir(scratch_tree)
+        chmod_root(pacman_cache, "0777")
+        chmod_root(pacman_db, "0777")
+        chmod_root(pacman_db_sync, "0777")
+        chmod_root(scratch_tree, "0755")
+        pacman_cmd = [
+            "pacman",
+            "-Sy",
+            "--noconfirm",
+            "--root",
+            str(scratch_tree),
+            "--cachedir",
+            str(pacman_cache),
+            "--dbpath",
+            str(pacman_db),
+        ]
+        if command_supports_flag("pacman", "--disable-sandbox"):
+            pacman_cmd.append("--disable-sandbox")
+        pacman_cmd.extend(packages)
+        try:
+            log_line(f"Creating rootfs with pacman --root in {scratch_tree}")
+            run_root(pacman_cmd)
+            log_line(f"Copying rootfs tree from {scratch_tree} to {root_tree}")
+            copy_tree(scratch_tree, root_tree)
+        finally:
+            run_root(["rm", "-rf", str(scratch_root)])
+
+    log_line(f"Copying host pacman config into {root_tree}")
+    copy_host_pacman_config(root_tree)
+    log_line(f"Creating tester user inside {root_tree}")
+    create_test_user(root_tree)
+    log_line(f"Writing rootfs init wrapper into {root_tree}")
+    write_rootfs_init(root_tree)
+    log_line(f"Creating ext4 image {image_path} from {root_tree}")
+    run(["truncate", "-s", f"{size_mb}M", str(image_path)])
+    run_root(["mkfs.ext4", "-d", str(root_tree), "-F", str(image_path)])
+    write_text(stamp, desired)
+
+    return image_path
+
+
+def build_qemu_cmd(kernel_image: Path, initramfs: Path, rootfs_image: Path, memory_mb: int, smp: int) -> list[str]:
+    cmd = [
+        "qemu-system-x86_64",
+        "-m",
+        str(memory_mb),
+        "-smp",
+        str(smp),
+        "-kernel",
+        str(kernel_image),
+        "-initrd",
+        str(initramfs),
+        "-drive",
+        f"file={rootfs_image},format=raw,if=virtio",
+        "-netdev",
+        "user,id=n1",
+        "-device",
+        "virtio-net-pci,netdev=n1",
+        "-append",
+        "console=ttyS0 root=/dev/vda rootfstype=ext4 rw panic=-1 init=/usr/local/bin/boot-x86-root-init",
+        "-display",
+        "none",
+        "-chardev",
+        "pty,id=char0",
+        "-serial",
+        "chardev:char0",
+        "-monitor",
+        "none",
+        "-no-reboot",
+    ]
+
+    if Path("/dev/kvm").exists() and os.access("/dev/kvm", os.R_OK | os.W_OK):
+        cmd[1:1] = ["-enable-kvm", "-cpu", "host"]
+    else:
+        cmd[1:1] = ["-cpu", "max"]
+
+    return cmd
+
+
+def add_workdir_arg(parser: argparse.ArgumentParser, *, temp_default: bool) -> None:
+    parser.add_argument(
+        "--workdir",
+        type=Path,
+        default=None,
+        help=(
+            "Working directory to use. "
+            + ("Defaults to a new temporary directory." if temp_default else "Required if artifacts are not in the current directory.")
+        ),
+    )
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Build or run linux-mnt-reform-bin x86_64 under QEMU")
+    subparsers = parser.add_subparsers(dest="subcommand", required=True)
+
+    build_parser = subparsers.add_parser("build", help="Build kernel/initramfs/rootfs artifacts on an Arch host.")
+    add_workdir_arg(build_parser, temp_default=True)
+    build_parser.add_argument(
+        "--rootfs-size-mb",
+        type=int,
+        default=2048,
+        help="Size of the pacstrap rootfs disk image in MiB.",
+    )
+
+    run_parser = subparsers.add_parser("run", help="Run QEMU using existing artifacts from a workdir.")
+    add_workdir_arg(run_parser, temp_default=False)
+    run_parser.add_argument("--memory", type=int, default=2048, help="Guest memory in MiB.")
+    run_parser.add_argument("--smp", type=int, default=2, help="Guest CPU count.")
+
+    return parser.parse_args()
+
+
+def resolve_base_path(args: argparse.Namespace) -> Path:
+    if args.workdir is not None:
+        base = args.workdir
+        base.mkdir(parents=True, exist_ok=True)
+        return base
+    if args.subcommand == "build":
+        return Path(tempfile.mkdtemp(prefix="boot-x86-test-"))
+    return Path.cwd()
+
+
+def require_file(path: Path, description: str) -> Path:
+    if not path.exists():
+        raise RuntimeError(f"Missing {description}: {path}")
+    return path
+
+
+def resolve_run_artifacts(base: Path) -> tuple[Path, Path, Path]:
+    dirs = ensure_workdirs(base)
+    pkgroot = require_file(dirs["extracted"] / "pkgroot", "extracted package root")
+    kernel_image = find_kernel_image(pkgroot)
+    initramfs = require_file(dirs["initramfs"] / "initramfs-linux-mnt-reform-x86-test.img", "initramfs image")
+    rootfs_image = require_file(dirs["rootfs"] / "arch-rootfs.img", "rootfs image")
+    verify_initramfs(initramfs)
+    return kernel_image, initramfs, rootfs_image
+
+
+def do_build(args: argparse.Namespace, base: Path) -> int:
+    verify_arch_host()
+    verify_build_tools()
+
+    dirs = ensure_workdirs(base)
+    log_path = open_log_file(base)
+    log_line(f"Working directory: {base}")
+    log_line(f"Log file: {log_path}")
+
+    pkgbuild_dir = fetch_pkgbuild_sources(dirs["aur"])
+    kernel_pkg, headers_pkg = build_pkgbuild(pkgbuild_dir, dirs["packages"], dirs["tmp"])
+    pkgroot = extract_packages(kernel_pkg, headers_pkg, dirs["extracted"])
+    kernel_image = find_kernel_image(pkgroot)
+    kernel_version, module_tree = find_module_tree(pkgroot)
+    stage_modules(module_tree, dirs["modules_root"])
+    initramfs, initramfs_tool = build_initramfs(
+        kernel_image,
+        kernel_version,
+        dirs["modules_root"],
+        dirs["initramfs"],
+        dirs["tmp"],
+    )
+    rootfs_image = create_rootfs_image(dirs["rootfs"], args.rootfs_size_mb)
+    verify_initramfs(initramfs)
+
+    log_line(f"Kernel image: {kernel_image}")
+    log_line(f"Kernel version: {kernel_version}")
+    log_line(f"Initramfs: {initramfs}")
+    log_line(f"Initramfs generator: {initramfs_tool}")
+    log_line(f"Rootfs image: {rootfs_image}")
+    return 0
+
+
+def do_run(args: argparse.Namespace, base: Path) -> int:
+    verify_run_tools()
+
+    dirs = ensure_workdirs(base)
+    log_path = open_log_file(base)
+    log_line(f"Working directory: {base}")
+    log_line(f"Log file: {log_path}")
+
+    kernel_image, initramfs, rootfs_image = resolve_run_artifacts(base)
+    qemu_cmd = build_qemu_cmd(kernel_image, initramfs, rootfs_image, args.memory, args.smp)
+    log_line(f"Kernel image: {kernel_image}")
+    log_line(f"Initramfs: {initramfs}")
+    log_line(f"Rootfs image: {rootfs_image}")
+    log_line("QEMU command:")
+    log_line("  " + " ".join(qemu_cmd))
+    run(qemu_cmd)
+    return 0
+
+
+def main() -> int:
+    args = parse_args()
+    base = resolve_base_path(args)
+    if args.subcommand == "build":
+        return do_build(args, base)
+    if args.subcommand == "run":
+        return do_run(args, base)
+    raise RuntimeError(f"Unknown subcommand: {args.subcommand}")
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except subprocess.CalledProcessError as exc:
+        log_line(f"Command failed with exit code {exc.returncode}: {' '.join(exc.cmd)}")
+        raise SystemExit(exc.returncode)
+    except RuntimeError as exc:
+        log_line(f"Error: {exc}")
+        raise SystemExit(1)
+    except Exception:
+        traceback.print_exc()
+        raise SystemExit(1)
+    finally:
+        if LOG_HANDLE is not None:
+            LOG_HANDLE.close()
