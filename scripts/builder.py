@@ -15,11 +15,12 @@ from logging_setup import Colors
 
 class KernelBuilder:
     def __init__(self, config: BuildConfig, logger: logging.Logger,
+                 arch: str = "arm64",
                  cross_compile: str = DEFAULT_CROSS_COMPILE,
                  kernel_only: bool = DEFAULT_KERNEL_ONLY):
         self.config = config
         self.logger = logger
-        self.arch = "arm64"
+        self.arch = arch
         self.cross_compile = cross_compile.strip() if cross_compile else ""
         self.kernel_only = kernel_only
         self.patch_dirs_used: List[Path] = []

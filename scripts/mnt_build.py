@@ -23,6 +23,7 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
               jobs: Optional[int] = None, pkgrel: int = DEFAULT_PKGREL,
               skip_git_operations: bool = False, dry_run: bool = False,
               run_olddefconfig: bool = False,
+              arch: str = "arm64",
               cross_compile: str = DEFAULT_CROSS_COMPILE,
               with_headers: bool = False,
               kernel_only: bool = DEFAULT_KERNEL_ONLY) -> int:
@@ -38,7 +39,13 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
     config.build_dir.mkdir(parents=True, exist_ok=True)
     logger = setup_logging(config.log_file)
 
-    builder = KernelBuilder(config, logger, cross_compile=normalized_cross_compile, kernel_only=kernel_only)
+    builder = KernelBuilder(
+        config,
+        logger,
+        arch=arch,
+        cross_compile=normalized_cross_compile,
+        kernel_only=kernel_only,
+    )
 
     try:
         logger.info("=" * 60)
@@ -49,6 +56,7 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         logger.info(f"Patches directory: {config.patches_dir}")
         logger.info(f"Log file: {config.log_file}")
         logger.info(f"Parallel jobs: {config.jobs}")
+        logger.info(f"Target arch: {arch}")
         logger.info(f"Cross compile prefix: {normalized_cross_compile if normalized_cross_compile else '(native/no prefix)'}")
         logger.info(f"Generate extmod headers tree: {'yes' if with_headers else 'no'}")
         logger.info(f"Kernel only mode: {'yes (skipping modules and tarball)' if kernel_only else 'no'}")
@@ -226,10 +234,16 @@ def build_parser() -> argparse.ArgumentParser:
              'or create git commits/tags during the build process.'
     )
     build_parser.add_argument(
+        '--arch',
+        default='arm64',
+        help='Kernel ARCH to build for (default: arm64).'
+    )
+    build_parser.add_argument(
         '--cross-compile',
         default=DEFAULT_CROSS_COMPILE,
         help=f'CROSS_COMPILE prefix (default: {DEFAULT_CROSS_COMPILE}). '
-             'Use "" or "none" for native build with no prefix.'
+             'Use "" or "none" for native build with no prefix. '
+             'This does not change ARCH; use --arch to override that.'
     )
     build_parser.add_argument(
         '--with-headers',
@@ -277,6 +291,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             skip_git_operations=args.skip_git_ops,
             dry_run=args.dry_run,
             run_olddefconfig=args.olddefconfig,
+            arch=args.arch,
             cross_compile=args.cross_compile,
             with_headers=args.with_headers,
             kernel_only=args.kernel_only

@@ -19,10 +19,16 @@ def main():
             description='Run automated kernel build.'
             )
     parser.add_argument(
+            '--arch',
+            default='arm64',
+            help='Kernel ARCH to build for (default: arm64).'
+            )
+    parser.add_argument(
             '--cross-compile',
             default=os.environ.get('CROSS_COMPILE', DEFAULT_CROSS_COMPILE),
             help=f'CROSS_COMPILE prefix (default: env CROSS_COMPILE or {DEFAULT_CROSS_COMPILE}). '
-                 'Use "" or "none" for native build with no prefix.'
+                 'Use "" or "none" for native build with no prefix. '
+                 'This does not change ARCH; use --arch to override that.'
             )
     parser.add_argument(
             '--with-headers',
@@ -38,6 +44,7 @@ def main():
             pkgrel=DEFAULT_PKGREL,
             skip_git_operations=True,
             dry_run=False,
+            arch=args.arch,
             cross_compile=args.cross_compile,
             with_headers=args.with_headers
             )
