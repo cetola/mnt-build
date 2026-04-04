@@ -11,6 +11,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Resolve build configuration
+        id: build_config
+        run: |
+          REF_NAME="${GITHUB_REF_NAME}"
+
+          if [[ "$REF_NAME" == *-x86_64 ]]; then
+            echo "arch=x86_64" >> "$GITHUB_OUTPUT"
+            echo "cross_compile=none" >> "$GITHUB_OUTPUT"
+          else
+            echo "arch=arm64" >> "$GITHUB_OUTPUT"
+            echo "cross_compile=aarch64-linux-gnu-" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -30,7 +43,7 @@ jobs:
         continue-on-error: true
         run: |
           cd scripts
-          ./run-container.sh "python3 build-auto.py --with-headers"
+          ./run-container.sh "python3 build-auto.py --with-headers --arch ${{ steps.build_config.outputs.arch }} --cross-compile ${{ steps.build_config.outputs.cross_compile }}"
 
       - name: Collect logs
         if: always()
@@ -100,6 +113,8 @@ jobs:
           steps.run_build.outcome == 'success'
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
           files: release-artifacts/*-mnt.tar.gz
           draft: false
           prerelease: false
