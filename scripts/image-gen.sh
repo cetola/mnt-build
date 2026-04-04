@@ -4,7 +4,6 @@ set -euo pipefail
 # ============================================================================
 # Configuration
 # ============================================================================
-readonly KVER="6.19.11"
 readonly IMAGE_SIZE_GB=110
 readonly BOOT_SIZE_MB=1024
 readonly MAX_BOOTLOADER_MB=16
@@ -17,14 +16,15 @@ readonly DOWNLOADS_DIR="$WORK_DIR/downloads"
 readonly MOUNT_DIR="$WORK_DIR/mnt"
 readonly BOOT_MNT="$MOUNT_DIR/boot"
 readonly ROOT_MNT="$MOUNT_DIR/root"
-readonly IMAGE="$(pwd)/mnt-reform-${KVER}-aarch64.img"
 readonly CHROOT_INSTALLER_SOURCE="$SCRIPT_DIR/install_kernel_chroot.sh"
 readonly CHROOT_INSTALLER_TARGET="$ROOT_MNT/tmp/install_kernel.sh"
+readonly KERNEL_VERSION_FILE="$ROOT_MNT/tmp/linux-mnt-reform-bin.version"
 
 readonly ARCH_URL="http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz"
 
 readonly TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-readonly LOGFILE="$(pwd)/image-gen-${KVER}-${TIMESTAMP}.log"
+IMAGE="$(pwd)/mnt-reform-aarch64.img"
+LOGFILE="$(pwd)/image-gen-${TIMESTAMP}.log"
 
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/common.sh"
@@ -43,6 +43,7 @@ BOOTLOADER_OFFSET=0
 FLASHBIN_OFFSET=0
 SD_BOOT=false
 BOOTLOADER_FILENAME=""
+INSTALLED_KERNEL_VERSION=""
 
 # ============================================================================
 # Utility Functions
@@ -446,6 +447,23 @@ run_chroot_installation() {
   unshare -m chroot "$ROOT_MNT" /tmp/install_kernel.sh
 }
 
+resolve_installed_kernel_version() {
+  log "Resolving installed kernel version from AUR package metadata..."
+
+  if [[ ! -f "$KERNEL_VERSION_FILE" ]]; then
+    die "Installed kernel version file not found: $KERNEL_VERSION_FILE"
+  fi
+
+  INSTALLED_KERNEL_VERSION="$(<"$KERNEL_VERSION_FILE")"
+  INSTALLED_KERNEL_VERSION="${INSTALLED_KERNEL_VERSION%-*}"
+
+  if [[ -z "$INSTALLED_KERNEL_VERSION" ]]; then
+    die "Installed kernel version is empty"
+  fi
+
+  log "Resolved installed kernel version: $INSTALLED_KERNEL_VERSION"
+}
+
 configure_boot_dtb_symlink() {
   log "Configuring boot DTB symlink for $SYSIMAGE..."
   local dtb_dir="$BOOT_MNT/dtbs"
@@ -457,7 +475,7 @@ configure_boot_dtb_symlink() {
     return 0
   fi
 
-  expected_dtb="${KERNEL_DTB_STEM}-${KVER}.dtb"
+  expected_dtb="${KERNEL_DTB_STEM}-${INSTALLED_KERNEL_VERSION}.dtb"
   if [[ ! -f "$dtb_dir/$expected_dtb" ]]; then
     log_warn "Expected DTB not found: $dtb_dir/$expected_dtb"
     log_warn "Skipping DTB symlink setup; image generation will continue."
@@ -466,17 +484,18 @@ configure_boot_dtb_symlink() {
     return 0
   fi
 
-  target_link="$BOOT_MNT/mnt-reform-${KVER}.dtb"
+  target_link="$BOOT_MNT/mnt-reform-${INSTALLED_KERNEL_VERSION}.dtb"
   ln -sfn "dtbs/${expected_dtb}" "$target_link"
-  ln -sfn "mnt-reform-${KVER}.dtb" "$BOOT_MNT/mnt-reform.dtb"
+  ln -sfn "mnt-reform-${INSTALLED_KERNEL_VERSION}.dtb" "$BOOT_MNT/mnt-reform.dtb"
   log "DTB symlinks updated:"
-  log "  mnt-reform-${KVER}.dtb -> dtbs/${expected_dtb}"
-  log "  mnt-reform.dtb -> mnt-reform-${KVER}.dtb"
+  log "  mnt-reform-${INSTALLED_KERNEL_VERSION}.dtb -> dtbs/${expected_dtb}"
+  log "  mnt-reform.dtb -> mnt-reform-${INSTALLED_KERNEL_VERSION}.dtb"
 }
 
 cleanup_chroot_environment() {
   log "Cleaning up chroot environment..."
   rm -f "$CHROOT_INSTALLER_TARGET"
+  rm -f "$KERNEL_VERSION_FILE"
   rm -f "$ROOT_MNT/usr/bin/qemu-aarch64-static"
 }
 
@@ -542,6 +561,21 @@ fix_file_ownership() {
   
   chmod 644 "$IMAGE"
   chmod 644 "$LOGFILE"
+}
+
+rename_outputs_for_kernel_version() {
+  local final_image="$(pwd)/mnt-reform-${INSTALLED_KERNEL_VERSION}-aarch64.img"
+  local final_logfile="$(pwd)/image-gen-${INSTALLED_KERNEL_VERSION}-${TIMESTAMP}.log"
+
+  if [[ "$IMAGE" != "$final_image" ]]; then
+    mv "$IMAGE" "$final_image"
+    IMAGE="$final_image"
+  fi
+
+  if [[ "$LOGFILE" != "$final_logfile" ]]; then
+    mv "$LOGFILE" "$final_logfile"
+    LOGFILE="$final_logfile"
+  fi
 }
 
 generate_bmap() {
@@ -632,6 +666,7 @@ main() {
   # Kernel installation
   create_chroot_script
   run_chroot_installation
+  resolve_installed_kernel_version
   configure_boot_dtb_symlink
   configure_extlinux
   cleanup_chroot_environment
@@ -641,6 +676,7 @@ main() {
   cleanup_mounts
   sync
   
+  rename_outputs_for_kernel_version
   fix_file_ownership
   generate_bmap
   print_summary
