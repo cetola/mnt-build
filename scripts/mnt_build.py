@@ -34,7 +34,7 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
     if normalized_cross_compile.lower() in {"none", "native", "off", "false"}:
         normalized_cross_compile = ""
 
-    config = BuildConfig.create(version=version, build_dir=build_dir, jobs=jobs, pkgrel=pkgrel)
+    config = BuildConfig.create(version=version, arch=arch, build_dir=build_dir, jobs=jobs, pkgrel=pkgrel)
 
     config.build_dir.mkdir(parents=True, exist_ok=True)
     logger = setup_logging(config.log_file)
@@ -57,6 +57,8 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         logger.info(f"Log file: {config.log_file}")
         logger.info(f"Parallel jobs: {config.jobs}")
         logger.info(f"Target arch: {arch}")
+        logger.info(f"Defconfig file: {config.defconfig_file}")
+        logger.info(f"Kernel config file: {config.config_file}")
         logger.info(f"Cross compile prefix: {normalized_cross_compile if normalized_cross_compile else '(native/no prefix)'}")
         logger.info(f"Generate extmod headers tree: {'yes' if with_headers else 'no'}")
         logger.info(f"Kernel only mode: {'yes (skipping modules and tarball)' if kernel_only else 'no'}")
@@ -214,8 +216,8 @@ def build_parser() -> argparse.ArgumentParser:
         '--olddefconfig',
         action='store_true',
         help='Update kernel config using olddefconfig before building. '
-             'Copies configs/defconfig to .config, runs olddefconfig, '
-             'then saves the updated config back to configs/config-[VERSION]-mnt-reform-arm64'
+             'Copies configs/defconfig_[arch] to .config, runs olddefconfig, '
+             'then saves the updated config back to configs/config-[VERSION]-mnt-reform-[arch]'
     )
     build_parser.add_argument(
         '--defconfig',

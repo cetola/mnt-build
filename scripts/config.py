@@ -10,6 +10,10 @@ DEFAULT_PKGREL = 1
 DEFAULT_CROSS_COMPILE = "aarch64-linux-gnu-"
 DEFAULT_KERNEL_ONLY = False
 
+
+def defconfig_name_for_arch(arch: str) -> str:
+    return f"defconfig_{arch}"
+
 DTS_CONFIGS = [
     {
         "name": "imx8mp-mnt-pocket-reform.dts",
@@ -37,10 +41,12 @@ DTS_CONFIGS = [
 @dataclass
 class BuildConfig:
     version: str
+    arch: str
     build_dir: Path
     linux_dir: Path
     patches_dir: Path
     xtra_patches_dir: Path
+    defconfig_file: Path
     config_file: Path
     dtb_files: list[Path]
     output_tar: Path
@@ -52,7 +58,8 @@ class BuildConfig:
     pkgrel: int
 
     @classmethod
-    def create(cls, version: str, build_dir: Optional[Path] = None,
+    def create(cls, version: str, arch: str = "arm64",
+               build_dir: Optional[Path] = None,
                jobs: Optional[int] = None, pkgrel: Optional[int] = None):
         """Create build configuration with sensible defaults."""
         if build_dir is None:
@@ -71,19 +78,23 @@ class BuildConfig:
         version_parts = version.split('.')
         major_minor = f"{version_parts[0]}.{version_parts[1]}"
 
-        # Generate DTB file paths from DTS_CONFIGS
-        dtb_files = [
-            linux_dir / f"arch/arm64/boot/dts/{dts_config['vendor']}/{dts_config['name'].replace('.dts', '.dtb')}"
-            for dts_config in DTS_CONFIGS
-        ]
+        # DTBs are only relevant for the current ARM64 Reform kernel flow.
+        dtb_files = []
+        if arch == "arm64":
+            dtb_files = [
+                linux_dir / f"arch/arm64/boot/dts/{dts_config['vendor']}/{dts_config['name'].replace('.dts', '.dtb')}"
+                for dts_config in DTS_CONFIGS
+            ]
 
         return cls(
             version=version,
+            arch=arch,
             build_dir=build_dir,
             linux_dir=linux_dir,
             patches_dir=build_dir / "reform-debian-packages" / "linux" / f"patches{major_minor}",
             xtra_patches_dir=build_dir / "xtra-patches",
-            config_file=build_dir / "configs" / f"config-{version}-mnt-reform-arm64",
+            defconfig_file=build_dir / "configs" / defconfig_name_for_arch(arch),
+            config_file=build_dir / "configs" / f"config-{version}-mnt-reform-{arch}",
             dtb_files=dtb_files,
             output_tar=linux_dir / f"kernel-{version}-{pkgrel}-mnt.tar.gz",
             output_headers_tar=linux_dir / f"headers-{version}-{pkgrel}-mnt.tar.gz",

@@ -37,6 +37,24 @@ class KernelBuilder:
             args.append(f"CROSS_COMPILE={self.cross_compile}")
         return args
 
+    def _uses_dtbs(self) -> bool:
+        return self.arch == "arm64"
+
+    def _kernel_image_make_target(self) -> str:
+        if self.arch == "x86_64":
+            return "bzImage"
+        return "Image"
+
+    def _kernel_image_relative_path(self) -> Path:
+        if self.arch == "x86_64":
+            return Path("arch/x86/boot/bzImage")
+        return Path(f"arch/{self.arch}/boot/{self._kernel_image_make_target()}")
+
+    def _kernel_srcarch(self) -> str:
+        if self.arch == "x86_64":
+            return "x86"
+        return self.arch
+
     # ------------------------------------------------------------------
     # Command execution
     # ------------------------------------------------------------------
@@ -125,9 +143,8 @@ class KernelBuilder:
             raise BuildError(f"Kernel source not found at: {self.config.linux_dir}")
 
         if run_olddefconfig:
-            defconfig_file = self.config.build_dir / "configs" / "defconfig"
-            if not defconfig_file.exists():
-                raise BuildError(f"defconfig file not found: {defconfig_file}")
+            if not self.config.defconfig_file.exists():
+                raise BuildError(f"defconfig file not found: {self.config.defconfig_file}")
         else:
             if not self.config.config_file.exists():
                 raise BuildError(f"Config file not found: {self.config.config_file}")
@@ -411,6 +428,10 @@ class KernelBuilder:
         Copies DTS files to the kernel source tree and adds corresponding
         entries to vendor-specific Makefiles for DTB creation.
         """
+        if not self._uses_dtbs():
+            self.logger.info(f"Skipping custom DTS setup for ARCH={self.arch}")
+            return
+
         self.logger.info(f"Adding {len(DTS_CONFIGS)} custom DTS files...")
 
         for dts_config in DTS_CONFIGS:
@@ -460,11 +481,10 @@ class KernelBuilder:
         self.logger.info("Updating kernel config with olddefconfig...")
         self.logger.info("Preparing kernel to build state before running olddefconfig...")
 
-        defconfig_path = self.config.build_dir / "configs" / "defconfig"
-        if not defconfig_path.exists():
-            raise BuildError(f"defconfig not found: {defconfig_path}")
-        self.logger.info(f"Copying {defconfig_path} to .config...")
-        shutil.copy2(defconfig_path, self.config.linux_dir / '.config')
+        if not self.config.defconfig_file.exists():
+            raise BuildError(f"defconfig not found: {self.config.defconfig_file}")
+        self.logger.info(f"Copying {self.config.defconfig_file} to .config...")
+        shutil.copy2(self.config.defconfig_file, self.config.linux_dir / '.config')
 
         self.logger.info("Running olddefconfig to update config defaults...")
         self.run_command([
@@ -506,8 +526,11 @@ class KernelBuilder:
                 "Build will continue, but may fail or produce unexpected results."
             )
 
-        self.log_phase("DTS Setup")
-        self.setup_custom_dts_files()
+        if self._uses_dtbs():
+            self.log_phase("DTS Setup")
+            self.setup_custom_dts_files()
+        else:
+            self.logger.info(f"Skipping DTS setup for ARCH={self.arch}")
 
         if run_olddefconfig:
             self.log_phase("Config Update")
@@ -534,10 +557,12 @@ class KernelBuilder:
                 f"Compiling kernel image only with {self.config.jobs} jobs "
                 "(kernel_only=True, skipping dtbs and modules)..."
             )
-            make_targets = ['Image']
+            make_targets = [self._kernel_image_make_target()]
         else:
             self.logger.info(f"Compiling kernel with {self.config.jobs} jobs (this may take a while)...")
-            make_targets = ['Image', 'dtbs', 'modules']
+            make_targets = [self._kernel_image_make_target(), 'modules']
+            if self._uses_dtbs():
+                make_targets.insert(1, 'dtbs')
 
         self.log_phase("Compile")
         self.run_command(
@@ -666,7 +691,7 @@ class KernelBuilder:
             env_cmd = [
                 'env',
                 f'ARCH={self.arch}',
-                f'SRCARCH={self.arch}',
+                f'SRCARCH={self._kernel_srcarch()}',
                 f'srctree={self.config.linux_dir}',
                 'MAKE=make',
                 f'CC={cc}',
@@ -796,13 +821,15 @@ class KernelBuilder:
                 return None
             return tarinfo
 
+        kernel_image = self.config.linux_dir / self._kernel_image_relative_path()
         required_files = {
-            'kernel': self.config.linux_dir / "arch/arm64/boot/Image",
+            'kernel': kernel_image,
             'config': self.config.config_file,
             'modules': self.config.linux_dir / "modules/lib/modules"
         }
-        for i, dtb_path in enumerate(self.config.dtb_files):
-            required_files[f'dtb_{i}'] = dtb_path
+        if self._uses_dtbs():
+            for i, dtb_path in enumerate(self.config.dtb_files):
+                required_files[f'dtb_{i}'] = dtb_path
 
         for name, path in required_files.items():
             if not path.exists():
@@ -813,14 +840,15 @@ class KernelBuilder:
 
         with tarfile.open(self.config.output_tar, 'w:gz') as tar:
             tar.add(
-                self.config.linux_dir / "arch/arm64/boot/Image",
-                arcname="arch/arm64/boot/Image"
+                kernel_image,
+                arcname=str(self._kernel_image_relative_path())
             )
 
-            for dtb_path in self.config.dtb_files:
-                dtb_filename = dtb_path.name.replace('.dtb', f'-{self.config.version}.dtb')
-                tar.add(dtb_path, arcname=dtb_filename)
-                self.logger.info(f"  Added DTB: {dtb_filename}")
+            if self._uses_dtbs():
+                for dtb_path in self.config.dtb_files:
+                    dtb_filename = dtb_path.name.replace('.dtb', f'-{self.config.version}.dtb')
+                    tar.add(dtb_path, arcname=dtb_filename)
+                    self.logger.info(f"  Added DTB: {dtb_filename}")
 
             tar.add(
                 self.config.linux_dir / "modules/lib/modules",
@@ -830,7 +858,7 @@ class KernelBuilder:
 
             tar.add(
                 self.config.config_file,
-                arcname=f"config-{self.config.version}-mnt-reform-arm64"
+                arcname=f"config-{self.config.version}-mnt-reform-{self.config.arch}"
             )
 
             for patch_dir in self.patch_dirs_used:
