@@ -17,22 +17,31 @@ jobs:
           set -euo pipefail
           REF_NAME="${GITHUB_REF_NAME}"
           REF="${GITHUB_REF}"
-          RELEASE_TAG="${REF_NAME}"
+          BUILD_VERSION="$(python3 - <<'PY'
+          import sys
+          sys.path.insert(0, 'scripts')
+          from config import DEFAULT_KERNEL_VERSION, DEFAULT_LOCALVERSION_REV
+          print(f"{DEFAULT_KERNEL_VERSION}.reform{DEFAULT_LOCALVERSION_REV}")
+          PY
+          )"
+          RELEASE_TAG="${BUILD_VERSION}-aarch64"
 
           if [[ "$REF" != "refs/heads/main" && "$REF" != refs/tags/* ]]; then
             echo "workflow_dispatch must target main or a tag" >&2
             exit 1
           fi
 
-          if [[ "$REF_NAME" == *-x86_64 ]]; then
+          if [[ "$REF_NAME" == *-x86_64 || "$REF_NAME" == *-x86 ]]; then
             echo "x86_64 tags are not supported by this arm64-only workflow" >&2
             exit 1
           fi
 
+          echo "build_version=${BUILD_VERSION}" >> "$GITHUB_OUTPUT"
           echo "release_tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Print resolved build configuration
         run: |
+          echo "build_version=${{ steps.build_config.outputs.build_version }}"
           echo "arch=arm64"
           echo "cross_compile=none"
           echo "release_tag=${{ steps.build_config.outputs.release_tag }}"

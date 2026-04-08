@@ -32,9 +32,15 @@ jobs:
           REF_NAME="${GITHUB_REF_NAME}"
           REF="${GITHUB_REF}"
           EVENT_NAME="${GITHUB_EVENT_NAME}"
-          RELEASE_TAG="${REF_NAME}"
           release_arch="arm64"
           cross_compile="aarch64-linux-gnu-"
+          BUILD_VERSION="$(python3 - <<'PY'
+          import sys
+          sys.path.insert(0, 'scripts')
+          from config import DEFAULT_KERNEL_VERSION, DEFAULT_LOCALVERSION_REV
+          print(f"{DEFAULT_KERNEL_VERSION}.reform{DEFAULT_LOCALVERSION_REV}")
+          PY
+          )"
 
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             ARCH_INPUT="$(printf '%s' '${{ github.event.inputs.arch }}' | tr -d '\r\n')"
@@ -48,17 +54,25 @@ jobs:
               echo "workflow_dispatch must target main or a tag" >&2
               exit 1
             fi
-          elif [[ "$REF_NAME" == *-x86_64 ]]; then
+          elif [[ "$REF_NAME" == *-x86_64 || "$REF_NAME" == *-x86 ]]; then
             release_arch="x86_64"
             cross_compile="none"
           fi
 
+          if [[ "${release_arch}" == "x86_64" ]]; then
+            RELEASE_TAG="${BUILD_VERSION}-x86_64"
+          else
+            RELEASE_TAG="${BUILD_VERSION}-aarch64"
+          fi
+
           echo "arch=${release_arch}" >> "$GITHUB_OUTPUT"
           echo "cross_compile=${cross_compile}" >> "$GITHUB_OUTPUT"
+          echo "build_version=${BUILD_VERSION}" >> "$GITHUB_OUTPUT"
           echo "release_tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Print resolved build configuration
         run: |
+          echo "build_version=${{ steps.build_config.outputs.build_version }}"
           echo "arch=${{ steps.build_config.outputs.arch }}"
           echo "cross_compile=${{ steps.build_config.outputs.cross_compile }}"
           echo "release_tag=${{ steps.build_config.outputs.release_tag }}"
