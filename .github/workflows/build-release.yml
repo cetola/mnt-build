@@ -3,8 +3,7 @@ name: Remote Build and Release
 on:
   push:
     tags:
-      - '*-x86_64'
-      - '*-x86'
+      - '*'
   workflow_dispatch:
     inputs:
       arch:
@@ -55,9 +54,6 @@ jobs:
                 release_arch="x86_64"
                 cross_compile="none"
               fi
-            elif [[ "$REF_NAME" == *-aarch64 ]]; then
-              echo "aarch64 tags are handled by the Graviton workflow" >&2
-              exit 1
             elif [[ "$REF" != refs/tags/* ]]; then
               echo "workflow_dispatch must target main or a tag" >&2
               exit 1

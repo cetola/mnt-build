@@ -1,9 +1,6 @@
 name: Remote Build and Release Arm
 
 on:
-  push:
-    tags:
-      - '*-aarch64'
   workflow_dispatch:
 
 permissions:
@@ -37,11 +34,6 @@ jobs:
 
           if [[ "$REF" != "refs/heads/main" && "$REF" != refs/tags/* ]]; then
             echo "workflow_dispatch must target main or a tag" >&2
-            exit 1
-          fi
-
-          if [[ "$REF" == refs/tags/* && "$REF_NAME" != *-aarch64 ]]; then
-            echo "tag-triggered arm64 releases must use a -aarch64 suffix" >&2
             exit 1
           fi
 
