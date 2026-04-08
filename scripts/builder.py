@@ -32,7 +32,7 @@ class KernelBuilder:
 
     def _make_kernel_vars(self) -> List[str]:
         """Return kernel make variable assignments with optional toolchain prefix."""
-        args = [f"ARCH={self.arch}"]
+        args = [f"ARCH={self.arch}", f"LOCALVERSION={self.config.localversion}"]
         if self.cross_compile:
             args.append(f"CROSS_COMPILE={self.cross_compile}")
         return args
@@ -759,7 +759,7 @@ class KernelBuilder:
             self.config.output_headers_tar.unlink()
 
         with tarfile.open(self.config.output_headers_tar, 'w:gz') as tar:
-            tar.add(headers_dir, arcname=f"linux-{self.config.version}")
+            tar.add(headers_dir, arcname=f"linux-{self.config.build_version}")
 
         self._finalize_tarball(self.config.output_headers_tar, "Headers")
 
@@ -846,7 +846,7 @@ class KernelBuilder:
 
             if self._uses_dtbs():
                 for dtb_path in self.config.dtb_files:
-                    dtb_filename = dtb_path.name.replace('.dtb', f'-{self.config.version}.dtb')
+                    dtb_filename = dtb_path.name.replace('.dtb', f'-{self.config.kernel_release}.dtb')
                     tar.add(dtb_path, arcname=dtb_filename)
                     self.logger.info(f"  Added DTB: {dtb_filename}")
 

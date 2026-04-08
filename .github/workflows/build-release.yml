@@ -5,6 +5,15 @@ on:
     tags:
       - '*'
   workflow_dispatch:
+    inputs:
+      arch:
+        description: Target architecture, e.g. arm64 or x86_64
+        required: true
+        default: arm64
+        type: choice
+        options:
+          - arm64
+          - x86_64
 
 permissions:
   contents: write
@@ -17,15 +26,40 @@ jobs:
       - name: Resolve build configuration
         id: build_config
         run: |
+          set -euo pipefail
           REF_NAME="${GITHUB_REF_NAME}"
+          REF="${GITHUB_REF}"
+          EVENT_NAME="${GITHUB_EVENT_NAME}"
+          RELEASE_TAG="${REF_NAME}"
+          release_arch="arm64"
+          cross_compile="aarch64-linux-gnu-"
 
-          if [[ "$REF_NAME" == *-x86_64 ]]; then
-            echo "arch=x86_64" >> "$GITHUB_OUTPUT"
-            echo "cross_compile=none" >> "$GITHUB_OUTPUT"
-          else
-            echo "arch=arm64" >> "$GITHUB_OUTPUT"
-            echo "cross_compile=aarch64-linux-gnu-" >> "$GITHUB_OUTPUT"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            ARCH_INPUT="$(printf '%s' '${{ github.event.inputs.arch }}' | tr -d '\r\n')"
+
+            if [[ "$REF" == "refs/heads/main" ]]; then
+              if [[ "$ARCH_INPUT" == "x86_64" ]]; then
+                release_arch="x86_64"
+                cross_compile="none"
+              fi
+            elif [[ "$REF" != refs/tags/* ]]; then
+              echo "workflow_dispatch must target main or a tag" >&2
+              exit 1
+            fi
+          elif [[ "$REF_NAME" == *-x86_64 ]]; then
+            release_arch="x86_64"
+            cross_compile="none"
           fi
+
+          echo "arch=${release_arch}" >> "$GITHUB_OUTPUT"
+          echo "cross_compile=${cross_compile}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Print resolved build configuration
+        run: |
+          echo "arch=${{ steps.build_config.outputs.arch }}"
+          echo "cross_compile=${{ steps.build_config.outputs.cross_compile }}"
+          echo "release_tag=${{ steps.build_config.outputs.release_tag }}"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -224,8 +258,8 @@ jobs:
           steps.run_build.outcome == 'success'
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
+          tag_name: ${{ steps.build_config.outputs.release_tag }}
+          name: ${{ steps.build_config.outputs.release_tag }}
           files: release-artifacts/*-mnt.tar.gz
           draft: false
           prerelease: false

@@ -26,7 +26,7 @@ _mnt_build() {
         '--kversion=[kernel version]:kversion:' \
         '--build-dir=[build directory]:directory:_files -/' \
         '(-j --jobs)'{-j,--jobs}'[parallel jobs]:jobs:' \
-        '--pkgrel=[package release]:pkgrel:' \
+        '--localversion-rev=[kernel localversion revision]:rev:' \
         '--dry-run[check/apply patches only]' \
         '--olddefconfig[run olddefconfig and persist config]' \
         '--defconfig[alias for --olddefconfig]' \

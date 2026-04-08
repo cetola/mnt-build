@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Optional
 
 DEFAULT_KERNEL_VERSION = '6.19.11'
-DEFAULT_PKGREL = 1
+DEFAULT_LOCALVERSION_NAME = 'reform'
+DEFAULT_LOCALVERSION_REV = 1
 DEFAULT_CROSS_COMPILE = "aarch64-linux-gnu-"
 DEFAULT_KERNEL_ONLY = False
 
@@ -41,6 +42,9 @@ DTS_CONFIGS = [
 @dataclass
 class BuildConfig:
     version: str
+    build_version: str
+    kernel_release: str
+    localversion: str
     arch: str
     build_dir: Path
     linux_dir: Path
@@ -55,12 +59,13 @@ class BuildConfig:
     output_wifi_module_tar: Path
     log_file: Path
     jobs: int
-    pkgrel: int
+    localversion_rev: int
 
     @classmethod
     def create(cls, version: str, arch: str = "arm64",
                build_dir: Optional[Path] = None,
-               jobs: Optional[int] = None, pkgrel: Optional[int] = None):
+               jobs: Optional[int] = None,
+               localversion_rev: Optional[int] = None):
         """Create build configuration with sensible defaults."""
         if build_dir is None:
             build_dir = Path.home() / "mnt-build"
@@ -68,11 +73,14 @@ class BuildConfig:
         if jobs is None:
             jobs = os.cpu_count() or 4
 
-        if pkgrel is None:
-            pkgrel = DEFAULT_PKGREL
+        if localversion_rev is None:
+            localversion_rev = DEFAULT_LOCALVERSION_REV
 
         linux_dir = build_dir / "linux"
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        localversion = f"-{DEFAULT_LOCALVERSION_NAME}{localversion_rev}"
+        kernel_release = f"{version}{localversion}"
+        build_version = f"{version}.{DEFAULT_LOCALVERSION_NAME}{localversion_rev}"
 
         # Extract major.minor version (e.g., "6.17" from "6.17.8")
         version_parts = version.split('.')
@@ -88,6 +96,9 @@ class BuildConfig:
 
         return cls(
             version=version,
+            build_version=build_version,
+            kernel_release=kernel_release,
+            localversion=localversion,
             arch=arch,
             build_dir=build_dir,
             linux_dir=linux_dir,
@@ -96,11 +107,11 @@ class BuildConfig:
             defconfig_file=build_dir / "configs" / defconfig_name_for_arch(arch),
             config_file=build_dir / "configs" / f"config-{version}-mnt-reform-{arch}",
             dtb_files=dtb_files,
-            output_tar=linux_dir / f"kernel-{version}-{pkgrel}-mnt.tar.gz",
-            output_headers_tar=linux_dir / f"headers-{version}-{pkgrel}-mnt.tar.gz",
-            output_lpc_module_tar=linux_dir / f"reform2_lpc-{version}-{pkgrel}-mnt.tar.gz",
-            output_wifi_module_tar=linux_dir / f"wlan-{version}-{pkgrel}-mnt.tar.gz",
+            output_tar=linux_dir / f"kernel-{build_version}-mnt.tar.gz",
+            output_headers_tar=linux_dir / f"headers-{build_version}-mnt.tar.gz",
+            output_lpc_module_tar=linux_dir / f"reform2_lpc-{build_version}-mnt.tar.gz",
+            output_wifi_module_tar=linux_dir / f"wlan-{build_version}-mnt.tar.gz",
             log_file=build_dir / f"build-{version}-{timestamp}.log",
             jobs=jobs,
-            pkgrel=pkgrel
+            localversion_rev=localversion_rev
         )

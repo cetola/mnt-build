@@ -444,14 +444,13 @@ run_chroot_installation() {
 }
 
 resolve_installed_kernel_version() {
-  log "Resolving installed kernel version from AUR package metadata..."
+  log "Resolving installed kernel release from installed module metadata..."
 
   if [[ ! -f "$KERNEL_VERSION_FILE" ]]; then
     die "Installed kernel version file not found: $KERNEL_VERSION_FILE"
   fi
 
   INSTALLED_KERNEL_VERSION="$(<"$KERNEL_VERSION_FILE")"
-  INSTALLED_KERNEL_VERSION="${INSTALLED_KERNEL_VERSION%-*}"
 
   if [[ -z "$INSTALLED_KERNEL_VERSION" ]]; then
     die "Installed kernel version is empty"

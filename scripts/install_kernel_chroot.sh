@@ -181,8 +181,10 @@ build_and_install_aur_package "mnt-reform-lpc-dkms"
 
 echo "Kernel, qcacld2, lpc, and reform-tools AUR packages installed successfully!"
 
-echo "Recording installed kernel package version..."
-$PACMAN -Q linux-mnt-reform-bin | awk '{print $2}' > /tmp/linux-mnt-reform-bin.version
+echo "Recording installed kernel release..."
+find /usr/lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%f\n' \
+  | sort -V \
+  | tail -n 1 > /tmp/linux-mnt-reform-bin.version
 
 echo "Cleaning pacman package cache to reduce image size..."
 rm -rf /var/cache/pacman/pkg/* || true

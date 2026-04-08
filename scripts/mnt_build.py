@@ -12,7 +12,14 @@ from pathlib import Path
 from typing import Optional
 
 from builder import KernelBuilder
-from config import BuildConfig, DEFAULT_CROSS_COMPILE, DEFAULT_KERNEL_ONLY, DEFAULT_KERNEL_VERSION, DEFAULT_PKGREL
+from config import (
+    BuildConfig,
+    DEFAULT_CROSS_COMPILE,
+    DEFAULT_KERNEL_ONLY,
+    DEFAULT_KERNEL_VERSION,
+    DEFAULT_LOCALVERSION_NAME,
+    DEFAULT_LOCALVERSION_REV,
+)
 from errors import BuildError
 from logging_setup import Colors, setup_logging
 
@@ -20,7 +27,8 @@ __version__ = "0.9.3"
 
 
 def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] = None,
-              jobs: Optional[int] = None, pkgrel: int = DEFAULT_PKGREL,
+              jobs: Optional[int] = None,
+              localversion_rev: int = DEFAULT_LOCALVERSION_REV,
               skip_git_operations: bool = False, dry_run: bool = False,
               run_olddefconfig: bool = False,
               arch: str = "arm64",
@@ -34,7 +42,13 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
     if normalized_cross_compile.lower() in {"none", "native", "off", "false"}:
         normalized_cross_compile = ""
 
-    config = BuildConfig.create(version=version, arch=arch, build_dir=build_dir, jobs=jobs, pkgrel=pkgrel)
+    config = BuildConfig.create(
+        version=version,
+        arch=arch,
+        build_dir=build_dir,
+        jobs=jobs,
+        localversion_rev=localversion_rev,
+    )
 
     config.build_dir.mkdir(parents=True, exist_ok=True)
     logger = setup_logging(config.log_file)
@@ -51,7 +65,9 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         logger.info("=" * 60)
         logger.info("Starting kernel build process")
         logger.info(f"Version: {config.version}")
-        logger.info(f"Package release: {config.pkgrel}")
+        logger.info(f"Build version: {config.build_version}")
+        logger.info(f"Kernel release: {config.kernel_release}")
+        logger.info(f"Kernel localversion: {config.localversion}")
         logger.info(f"Build directory: {config.build_dir}")
         logger.info(f"Patches directory: {config.patches_dir}")
         logger.info(f"Log file: {config.log_file}")
@@ -201,10 +217,10 @@ def build_parser() -> argparse.ArgumentParser:
         help='Number of parallel jobs (default: number of CPUs)'
     )
     build_parser.add_argument(
-        '--pkgrel',
+        '--localversion-rev',
         type=int,
-        default=DEFAULT_PKGREL,
-        help=f'Package release number (default: {DEFAULT_PKGREL})'
+        default=DEFAULT_LOCALVERSION_REV,
+        help=f'Kernel localversion revision (default: {DEFAULT_LOCALVERSION_REV})'
     )
     build_parser.add_argument(
         '--dry-run',
@@ -289,7 +305,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             version=args.kernel_version,
             build_dir=args.build_dir,
             jobs=args.jobs,
-            pkgrel=args.pkgrel,
+            localversion_rev=args.localversion_rev,
             skip_git_operations=args.skip_git_ops,
             dry_run=args.dry_run,
             run_olddefconfig=args.olddefconfig,
