@@ -111,7 +111,7 @@ class BuildConfig:
             output_headers_tar=linux_dir / f"headers-{build_version}-mnt.tar.gz",
             output_lpc_module_tar=linux_dir / f"reform2_lpc-{build_version}-mnt.tar.gz",
             output_wifi_module_tar=linux_dir / f"wlan-{build_version}-mnt.tar.gz",
-            log_file=build_dir / f"build-{version}-{timestamp}.log",
+            log_file=build_dir / f"build-{build_version}-{timestamp}.log",
             jobs=jobs,
             localversion_rev=localversion_rev
         )
