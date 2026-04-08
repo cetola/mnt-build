@@ -116,10 +116,10 @@ jobs:
         id: collect_artifacts
         if: ${{ steps.run_build.outcome == 'success' }}
         run: |
-          HEADERS_TARBALL=$(find . -name "headers-*-mnt.tar.gz" -type f)
-          KERNEL_TARBALL=$(find . -name "kernel-*-mnt.tar.gz" -type f)
-          LPC_MODULE=$(find . -name "reform2_lpc-*-mnt.tar.gz" -type f)
-          WIFI_MODULE=$(find . -name "wlan-*-mnt.tar.gz" -type f)
+          HEADERS_TARBALL=$(find . -name "headers-*.tar.gz" -type f)
+          KERNEL_TARBALL=$(find . -name "kernel-*.tar.gz" -type f)
+          LPC_MODULE=$(find . -name "reform2_lpc-*.tar.gz" -type f)
+          WIFI_MODULE=$(find . -name "wlan-*.tar.gz" -type f)
 
           echo "Found build artifacts:"
           echo "Headers: $HEADERS_TARBALL"
@@ -153,7 +153,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-artifacts
-          path: release-artifacts/*-mnt.tar.gz
+          path: |
+            release-artifacts/kernel-*.tar.gz
+            release-artifacts/headers-*.tar.gz
+            release-artifacts/reform2_lpc-*.tar.gz
+            release-artifacts/wlan-*.tar.gz
 
       - name: Create Release
         if: >
@@ -163,7 +167,11 @@ jobs:
         with:
           tag_name: ${{ steps.build_config.outputs.release_tag }}
           name: ${{ steps.build_config.outputs.release_tag }}
-          files: release-artifacts/*-mnt.tar.gz
+          files: |
+            release-artifacts/kernel-*.tar.gz
+            release-artifacts/headers-*.tar.gz
+            release-artifacts/reform2_lpc-*.tar.gz
+            release-artifacts/wlan-*.tar.gz
           draft: false
           prerelease: false
         env:

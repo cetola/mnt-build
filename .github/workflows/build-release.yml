@@ -235,22 +235,22 @@ jobs:
         if: ${{ steps.run_build.outcome == 'success' }}
         run: |
           mkdir -p release-artifacts
-          scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/kernel-*-mnt.tar.gz release-artifacts/ || true
+          scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/kernel-*.tar.gz release-artifacts/ || true
           ls -lh release-artifacts/
 
       - name: Copy headers artifacts back
         if: ${{ steps.run_build.outcome == 'success' }}
         run: |
           mkdir -p release-artifacts
-          scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/headers-*-mnt.tar.gz release-artifacts/ || true
+          scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/headers-*.tar.gz release-artifacts/ || true
           ls -lh release-artifacts/
 
       - name: Copy module artifacts back
         if: ${{ steps.run_build.outcome == 'success' }}
         run: |
           mkdir -p release-artifacts
-          scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/reform2_lpc-*-mnt.tar.gz release-artifacts/ || true
-          scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/wlan-*-mnt.tar.gz release-artifacts/ || true
+          scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/reform2_lpc-*.tar.gz release-artifacts/ || true
+          scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/wlan-*.tar.gz release-artifacts/ || true
           ls -lh release-artifacts/
 
       - name: Terminate EC2 instance
@@ -270,7 +270,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-artifacts
-          path: release-artifacts/*-mnt.tar.gz
+          path: |
+            release-artifacts/kernel-*.tar.gz
+            release-artifacts/headers-*.tar.gz
+            release-artifacts/reform2_lpc-*.tar.gz
+            release-artifacts/wlan-*.tar.gz
 
       - name: Create Release
         if: >
@@ -280,7 +284,11 @@ jobs:
         with:
           tag_name: ${{ steps.build_config.outputs.release_tag }}
           name: ${{ steps.build_config.outputs.release_tag }}
-          files: release-artifacts/*-mnt.tar.gz
+          files: |
+            release-artifacts/kernel-*.tar.gz
+            release-artifacts/headers-*.tar.gz
+            release-artifacts/reform2_lpc-*.tar.gz
+            release-artifacts/wlan-*.tar.gz
           draft: false
           prerelease: false
         env:
