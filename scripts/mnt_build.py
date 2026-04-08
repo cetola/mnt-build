@@ -23,7 +23,7 @@ from config import (
 from errors import BuildError
 from logging_setup import Colors, setup_logging
 
-__version__ = "0.9.4"
+__version__ = "0.9.5"
 
 
 def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] = None,
