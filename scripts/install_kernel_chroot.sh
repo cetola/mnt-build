@@ -8,6 +8,7 @@ pacman-key --populate archlinuxarm
 
 PACMAN="pacman --disable-sandbox"
 JOBS="$(nproc)"
+KERNEL_EXTLINUX_EXAMPLE_TMP="/tmp/linux-mnt-reform-bin.extlinux.conf.example"
 
 refresh_pacman_databases() {
   echo "Refreshing pacman package databases..."
@@ -56,7 +57,26 @@ pacman_run_with_retry \
   base base-devel dracut networkmanager cpio git dkms sudo
 
 echo "Removing conflicting linux-aarch64 package if present..."
-$PACMAN -R --noconfirm linux-aarch64 linux-aarch64-headers || true
+remove_installed_packages() {
+  local installed_packages=()
+  local package_name=""
+
+  for package_name in "$@"; do
+    if pacman -Qq "$package_name" >/dev/null 2>&1; then
+      installed_packages+=("$package_name")
+    fi
+  done
+
+  if [[ ${#installed_packages[@]} -eq 0 ]]; then
+    echo "No matching installed packages to remove."
+    return 0
+  fi
+
+  echo "Removing installed packages: ${installed_packages[*]}"
+  $PACMAN -R --noconfirm "${installed_packages[@]}"
+}
+
+remove_installed_packages linux-aarch64 linux-aarch64-headers
 
 install_pkgbuild_deps() {
   local pkgdir="$1"
@@ -109,15 +129,24 @@ install_pkgbuild_deps() {
     $PACMAN -S --needed --noconfirm "${filtered_deps[@]}"
 }
 
+resolve_package_path() {
+  local package_dir="$1"
+  local package_path="$2"
+
+  if [[ "$package_path" = /* ]]; then
+    printf '%s\n' "$package_path"
+  else
+    printf '%s/%s\n' "$package_dir" "$package_path"
+  fi
+}
+
 build_and_install_aur_package() {
   local pkgname="$1"
   local aur_repo="https://aur.archlinux.org/${pkgname}.git"
   local aur_dir="/tmp/${pkgname}-aur"
-  local srcinfo=""
-  local package_names=()
+  local packagelist=""
   local built_packages=()
-  local package_name=""
-  local matches=()
+  local package_path=""
 
   echo "Building and installing AUR package: ${pkgname}..."
   rm -rf "$aur_dir"
@@ -135,40 +164,43 @@ build_and_install_aur_package() {
       makepkg --noconfirm
   )
 
-  if ! srcinfo="$(
+  if ! packagelist="$(
     cd "$aur_dir"
-    sudo -u nobody makepkg --printsrcinfo
+    sudo -u nobody makepkg --packagelist
   )"; then
-    echo "Failed to read built package metadata in $aur_dir" >&2
+    echo "Failed to read built package list in $aur_dir" >&2
     exit 1
   fi
 
-  mapfile -t package_names < <(
-    printf '%s\n' "$srcinfo" \
-      | awk -F' = ' '/^[[:space:]]*pkgname[[:space:]]*=/ {print $2}' \
-      | sed '/^$/d' \
-      | sort -u
+  mapfile -t built_packages < <(
+    printf '%s\n' "$packagelist" | sed '/^$/d'
   )
 
-  if [[ ${#package_names[@]} -eq 0 ]]; then
-    echo "No package names found in $aur_dir" >&2
+  if [[ ${#built_packages[@]} -eq 0 ]]; then
+    echo "No built package archives reported by makepkg in $aur_dir" >&2
     exit 1
   fi
 
-  for package_name in "${package_names[@]}"; do
-    matches=("$aur_dir"/${package_name}-*.pkg.tar.*)
-    if [[ ${#matches[@]} -eq 0 ]]; then
-      echo "Missing built package file for declared package '$package_name' in $aur_dir" >&2
+  for package_path in "${!built_packages[@]}"; do
+    built_packages[$package_path]="$(resolve_package_path "$aur_dir" "${built_packages[$package_path]}")"
+    if [[ ! -f "${built_packages[$package_path]}" ]]; then
+      echo "Built package archive not found: ${built_packages[$package_path]}" >&2
       exit 1
     fi
-    built_packages+=("${matches[@]}")
   done
 
+  echo "Installing built package archives: ${built_packages[*]}"
   $PACMAN -U --noconfirm "${built_packages[@]}"
 }
 
 echo "Building and installing AUR package linux-mnt-reform-bin..."
 build_and_install_aur_package "linux-mnt-reform-bin"
+
+if [[ -f "/tmp/linux-mnt-reform-bin-aur/extlinux.conf.example" ]]; then
+  install -Dm644 \
+    "/tmp/linux-mnt-reform-bin-aur/extlinux.conf.example" \
+    "$KERNEL_EXTLINUX_EXAMPLE_TMP"
+fi
 
 echo "Building and installing AUR package reform-tools..."
 build_and_install_aur_package "reform-tools"

@@ -176,8 +176,9 @@ jobs:
           set -euo pipefail
 
           mkdir -p dist
+          OUTPUT_DIR="image-gen/downloads"
 
-          IMG="$(ls -1 mnt-reform-*-aarch64.img | head -n 1)"
+          IMG="$(ls -1 "${OUTPUT_DIR}"/mnt-reform-*-aarch64.img | head -n 1)"
           BMAP="${IMG}.bmap"
 
           # Compress in place and remove raw .img
@@ -191,8 +192,8 @@ jobs:
             echo "WARNING: ${BMAP} not found." | tee dist/WARNING-no-bmap.txt
           fi
 
-          if ls -1 image-gen-*.log >/dev/null 2>&1; then
-            cp -v image-gen-*.log dist/
+          if ls -1 "${OUTPUT_DIR}"/image-gen-*.log >/dev/null 2>&1; then
+            cp -v "${OUTPUT_DIR}"/image-gen-*.log dist/
           fi
 
           pushd dist >/dev/null

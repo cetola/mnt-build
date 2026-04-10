@@ -19,12 +19,14 @@ readonly ROOT_MNT="$MOUNT_DIR/root"
 readonly CHROOT_INSTALLER_SOURCE="$SCRIPT_DIR/install_kernel_chroot.sh"
 readonly CHROOT_INSTALLER_TARGET="$ROOT_MNT/tmp/install_kernel.sh"
 readonly KERNEL_VERSION_FILE="$ROOT_MNT/tmp/linux-mnt-reform-bin.version"
+readonly KERNEL_EXTLINUX_STAGED="$ROOT_MNT/tmp/linux-mnt-reform-bin.extlinux.conf.example"
+readonly KERNEL_EXTLINUX_FALLBACK="$SCRIPT_DIR/linux-mnt-reform-bin/extlinux.conf.example"
 
 readonly ARCH_URL="http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz"
 
 readonly TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-IMAGE="$(pwd)/mnt-reform-aarch64.img"
-LOGFILE="$(pwd)/image-gen-${TIMESTAMP}.log"
+IMAGE="$DOWNLOADS_DIR/mnt-reform-aarch64.img"
+LOGFILE="$DOWNLOADS_DIR/image-gen-${TIMESTAMP}.log"
 
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/common.sh"
@@ -423,7 +425,15 @@ configure_extlinux() {
   local extlinux_conf="$BOOT_MNT/extlinux/extlinux.conf"
 
   if [[ ! -f "$extlinux_example" ]]; then
-    die "Unable to find installed extlinux.conf.example from kernel package"
+    extlinux_example="$KERNEL_EXTLINUX_STAGED"
+  fi
+
+  if [[ ! -f "$extlinux_example" ]]; then
+    extlinux_example="$KERNEL_EXTLINUX_FALLBACK"
+  fi
+
+  if [[ ! -f "$extlinux_example" ]]; then
+    die "Unable to find extlinux.conf.example in installed package, staged chroot copy, or workspace fallback"
   fi
 
   mkdir -p "$BOOT_MNT/extlinux"
@@ -559,8 +569,8 @@ fix_file_ownership() {
 }
 
 rename_outputs_for_kernel_version() {
-  local final_image="$(pwd)/mnt-reform-${INSTALLED_KERNEL_VERSION}-aarch64.img"
-  local final_logfile="$(pwd)/image-gen-${INSTALLED_KERNEL_VERSION}-${TIMESTAMP}.log"
+  local final_image="$DOWNLOADS_DIR/mnt-reform-${INSTALLED_KERNEL_VERSION}-aarch64.img"
+  local final_logfile="$DOWNLOADS_DIR/image-gen-${INSTALLED_KERNEL_VERSION}-${TIMESTAMP}.log"
 
   if [[ "$IMAGE" != "$final_image" ]]; then
     mv "$IMAGE" "$final_image"
@@ -621,6 +631,9 @@ main() {
   parse_args "$@"
   configure_sysimage
 
+  # Create working directories before opening the logfile in downloads/.
+  mkdir -p "$DOWNLOADS_DIR" "$BOOT_MNT" "$ROOT_MNT"
+
   # Setup logging
   exec > >(tee -a "$LOGFILE") 2>&1
   
@@ -634,9 +647,6 @@ main() {
   check_required_tools
   echo
   
-  # Create working directories
-  mkdir -p "$DOWNLOADS_DIR" "$BOOT_MNT" "$ROOT_MNT"
-
   # Fail early if bootloader source/build configuration is invalid
   preflight_bootloader_artifact
   
