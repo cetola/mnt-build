@@ -10,6 +10,8 @@ readonly SUPPORTED_SYSIMAGES=(
 reset_sysimage_config() {
   DTBPATH=""
   KERNEL_DTB_STEM=""
+  IMAGE_PLATFORM=""
+  IMAGE_SOM=""
   BOOTLOADER_SHA1=""
   BOOTLOADER_PROJECT=""
   BOOTLOADER_TAG=""
@@ -78,6 +80,7 @@ configure_sysimage() {
   if machine_conf="$(find_machine_conf_for_sysimage "$SYSIMAGE")"; then
     log "Loading machine config from: $machine_conf"
     if load_machine_conf "$machine_conf"; then
+      set_image_identity_for_sysimage
       set_kernel_dtb_stem_for_sysimage
       set_bootloader_filename
       return
@@ -89,8 +92,34 @@ configure_sysimage() {
 
   log_warn "Falling back to hard-coded bootloader metadata for $SYSIMAGE."
   configure_sysimage_fallback
+  set_image_identity_for_sysimage
   set_kernel_dtb_stem_for_sysimage
   set_bootloader_filename
+}
+
+set_image_identity_for_sysimage() {
+  case "$SYSIMAGE" in
+    pocket-reform-system-a311d)
+      IMAGE_PLATFORM="pocket"
+      IMAGE_SOM="a311d"
+      ;;
+    reform-next-system-rk3588)
+      IMAGE_PLATFORM="reform-next"
+      IMAGE_SOM="rk3588"
+      ;;
+    pocket-reform-system-rk3588)
+      IMAGE_PLATFORM="pocket"
+      IMAGE_SOM="rk3588"
+      ;;
+    pocket-reform-system-imx8mp)
+      IMAGE_PLATFORM="pocket"
+      IMAGE_SOM="imx8mp"
+      ;;
+    *)
+      IMAGE_PLATFORM=""
+      IMAGE_SOM=""
+      ;;
+  esac
 }
 
 set_kernel_dtb_stem_for_sysimage() {

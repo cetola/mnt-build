@@ -169,7 +169,7 @@ jobs:
           mkdir -p dist
           OUTPUT_DIR="image-gen/downloads"
 
-          IMG="$(ls -1 "${OUTPUT_DIR}"/mnt-reform-*-aarch64.img | head -n 1)"
+          IMG="$(find "${OUTPUT_DIR}" -maxdepth 1 -type f -name 'arch-sys-mnt-*.img' | sort | head -n 1)"
           BMAP="${IMG}.bmap"
 
           # Compress in place and remove raw .img

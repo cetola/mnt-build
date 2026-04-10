@@ -25,7 +25,7 @@ readonly KERNEL_EXTLINUX_FALLBACK="$SCRIPT_DIR/linux-mnt-reform-bin/extlinux.con
 readonly ARCH_URL="http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz"
 
 readonly TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-IMAGE="$DOWNLOADS_DIR/mnt-reform-aarch64.img"
+IMAGE="$DOWNLOADS_DIR/arch-sys-mnt-image.img"
 LOGFILE="$DOWNLOADS_DIR/image-gen-${TIMESTAMP}.log"
 
 # shellcheck source=/dev/null
@@ -38,6 +38,8 @@ ROOT_PART=""
 SYSIMAGE=""
 DTBPATH=""
 KERNEL_DTB_STEM=""
+IMAGE_PLATFORM=""
+IMAGE_SOM=""
 BOOTLOADER_SHA1=""
 BOOTLOADER_PROJECT=""
 BOOTLOADER_TAG=""
@@ -569,8 +571,15 @@ fix_file_ownership() {
 }
 
 rename_outputs_for_kernel_version() {
-  local final_image="$DOWNLOADS_DIR/mnt-reform-${INSTALLED_KERNEL_VERSION}-aarch64.img"
+  local image_prefix="arch-sys-mnt-image"
+  local final_image=""
   local final_logfile="$DOWNLOADS_DIR/image-gen-${INSTALLED_KERNEL_VERSION}-${TIMESTAMP}.log"
+
+  if [[ -n "${IMAGE_PLATFORM:-}" && -n "${IMAGE_SOM:-}" ]]; then
+    image_prefix="arch-sys-mnt-${IMAGE_PLATFORM}-${IMAGE_SOM}"
+  fi
+
+  final_image="$DOWNLOADS_DIR/${image_prefix}-${INSTALLED_KERNEL_VERSION}.img"
 
   if [[ "$IMAGE" != "$final_image" ]]; then
     mv "$IMAGE" "$final_image"
@@ -605,6 +614,10 @@ print_summary() {
   echo
   echo "Log file saved to: $LOGFILE"
   echo "Target sysimage: $SYSIMAGE"
+  if [[ -n "${IMAGE_PLATFORM:-}" && -n "${IMAGE_SOM:-}" ]]; then
+    echo "Platform: $IMAGE_PLATFORM"
+    echo "SoM: $IMAGE_SOM"
+  fi
   echo
   echo "Contents:"
   echo "  - Boot partition with kernel, DTB, and initramfs"
