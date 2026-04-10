@@ -1,0 +1,25 @@
+From a38d90dab271fd9911cf338e2693fd608744d9f7
+From: Lukas F. Hartmann <lukas@mntre.com>
+Subject: a311d-viu-fifo-lines-config
+Date:   Tue Nov 12 03:00:14 2024 +0100
+
+diff --git a/drivers/gpu/drm/meson/meson_drv.c b/drivers/gpu/drm/meson/meson_drv.c
+index cb67496..20d4cbc 100644
+--- a/drivers/gpu/drm/meson/meson_drv.c
++++ b/drivers/gpu/drm/meson/meson_drv.c
+@@ -300,6 +300,15 @@ static int meson_drv_bind_master(struct device *dev, bool has_components)
+
+ 	/* Hardware Initialization */
+
++	// temporary workaround for different vertical offsets (wraparound)
++	// on different MNT Reform family display panels
++	// until a proper fix is found
++	priv->viu.hold_fifo_lines = 31;
++	if (of_property_present(dev->of_node, "viu-hold-fifo-lines")) {
++		of_property_read_u32(dev->of_node, "viu-hold-fifo-lines", &priv->viu.hold_fifo_lines);
++		dev_warn(drm->dev, "viu-hold-fifo-lines from device tree: %d\n", priv->viu.hold_fifo_lines);
++	}
++
+ 	meson_vpu_init(priv);
+ 	meson_venc_init(priv);
+ 	meson_vpp_init(priv);

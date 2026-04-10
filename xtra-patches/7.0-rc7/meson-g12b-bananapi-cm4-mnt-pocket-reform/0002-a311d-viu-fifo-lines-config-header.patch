@@ -1,0 +1,17 @@
+From a38d90dab271fd9911cf338e2693fd608744d9f7
+From: Lukas F. Hartmann <lukas@mntre.com>
+Subject: a311d-viu-fifo-lines-config-header
+Date:   Tue Nov 12 03:00:14 2024 +0100
+
+diff --git a/drivers/gpu/drm/meson/meson_drv.h b/drivers/gpu/drm/meson/meson_drv.h
+index 3f9345c..5d88d10 100644
+--- a/drivers/gpu/drm/meson/meson_drv.h
++++ b/drivers/gpu/drm/meson/meson_drv.h
+@@ -154,6 +154,7 @@ struct meson_drm {
+ 		uint32_t vpp_hsc_phase_ctrl;
+ 		uint32_t vpp_blend_vd2_h_start_end;
+ 		uint32_t vpp_blend_vd2_v_start_end;
++		uint32_t hold_fifo_lines;
+ 	} viu;
+ 
+ 	struct {
