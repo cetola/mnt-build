@@ -1,0 +1,214 @@
+name: Local Image Gen aarch64
+
+on:
+  workflow_dispatch:
+    inputs:
+      sysimage:
+        description: Target sysimage to build
+        required: true
+        type: choice
+        options:
+          - pocket-reform-system-a311d
+          - reform-next-system-rk3588
+          - pocket-reform-system-rk3588
+          - pocket-reform-system-imx8mp
+      bootloader_mode:
+        description: Bootloader artifact source mode
+        required: true
+        default: prebuilt
+        type: choice
+        options:
+          - prebuilt
+          - source
+      uboot_sha:
+        description: Optional U-Boot commit SHA (used in source mode)
+        required: false
+        type: string
+      zero_fill_max_mb:
+        description: Max MiB for bounded zero-fill before final trim
+        required: true
+        default: "2048"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      - name: Checkout required submodule (reform-tools only)
+        run: |
+          set -euo pipefail
+          git submodule sync -- reform-tools
+          git -c protocol.version=2 submodule update --init --depth 1 reform-tools
+
+      - name: Verify checkout and submodules
+        run: |
+          set -euo pipefail
+          echo "== Checkout debug =="
+          echo "pwd: $(pwd)"
+          echo "head: $(git rev-parse --short HEAD)"
+          echo "submodule status:"
+          git submodule status || true
+
+          if [[ ! -d ./reform-tools/machines ]]; then
+            echo "ERROR: ./reform-tools/machines missing after checkout." >&2
+            echo "Repo root listing:" >&2
+            ls -la >&2
+            exit 1
+          fi
+
+          echo "reform-tools/machines listing:"
+          ls -la ./reform-tools/machines
+
+      - name: Install required host packages
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            coreutils \
+            util-linux \
+            parted \
+            e2fsprogs \
+            curl \
+            tar \
+            cpio \
+            bmap-tools \
+            zstd
+
+          echo "== Versions =="
+          parted --version || true
+          losetup --version || true
+          mkfs.ext4 -V || true
+
+      - name: Preflight sysimage config resolution
+        run: |
+          set -euo pipefail
+          SYSIMAGE="$(printf '%s' "${{ github.event.inputs.sysimage }}" | tr -d '\r\n')"
+          MACHINES_DIR="./reform-tools/machines"
+
+          if [[ ! -d "$MACHINES_DIR" ]]; then
+            echo "ERROR: machines directory does not exist: $MACHINES_DIR" >&2
+            echo "Top-level repo entries:" >&2
+            ls -1 >&2
+            exit 1
+          fi
+
+          CONF="$(grep -R -l --include='*.conf' --fixed-strings "SYSIMAGE=\"$SYSIMAGE\"" "$MACHINES_DIR" | head -n1 || true)"
+          if [[ -z "$CONF" ]]; then
+            echo "No machine config found for $SYSIMAGE under $MACHINES_DIR" >&2
+            echo "Available SYSIMAGE values:" >&2
+            grep -R -h --include='*.conf' '^SYSIMAGE=' "$MACHINES_DIR" | sed -E 's/^SYSIMAGE=\"(.*)\"$/\1/' | sort -u >&2
+            exit 1
+          fi
+
+          echo "Resolved sysimage: $SYSIMAGE"
+          echo "Resolved machine config: $CONF"
+
+      - name: Print selected workflow inputs
+        run: |
+          set -euo pipefail
+          SYSIMAGE="$(printf '%s' "${{ github.event.inputs.sysimage }}" | tr -d '\r\n')"
+          BOOTLOADER_MODE="$(printf '%s' "${{ github.event.inputs.bootloader_mode }}" | tr -d '\r\n')"
+          UBOOT_SHA="$(printf '%s' "${{ github.event.inputs.uboot_sha }}" | tr -d '\r\n')"
+          ZERO_FILL_MAX_MB="$(printf '%s' "${{ github.event.inputs.zero_fill_max_mb }}" | tr -d '\r\n')"
+
+          echo "Selected inputs:"
+          echo "  sysimage=$SYSIMAGE"
+          echo "  bootloader_mode=$BOOTLOADER_MODE"
+          if [[ -n "$UBOOT_SHA" ]]; then
+            echo "  uboot_sha=$UBOOT_SHA"
+          else
+            echo "  uboot_sha=<empty>"
+          fi
+          echo "  zero_fill_max_mb=$ZERO_FILL_MAX_MB"
+
+          {
+            echo "### Selected Workflow Inputs"
+            echo ""
+            echo "- sysimage: \`$SYSIMAGE\`"
+            echo "- bootloader_mode: \`$BOOTLOADER_MODE\`"
+            if [[ -n "$UBOOT_SHA" ]]; then
+              echo "- uboot_sha: \`$UBOOT_SHA\`"
+            else
+              echo "- uboot_sha: *(empty)*"
+            fi
+            echo "- zero_fill_max_mb: \`$ZERO_FILL_MAX_MB\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run image-gen-aarch64.sh on runner (as root)
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/image-gen-aarch64.sh
+          BOOTLOADER_SOURCE_MODE="$(printf '%s' "${{ github.event.inputs.bootloader_mode }}" | tr -d '\r\n')"
+          UBOOT_SHA="$(printf '%s' "${{ github.event.inputs.uboot_sha }}" | tr -d '\r\n')"
+          ZERO_FILL_MAX_MB="$(printf '%s' "${{ github.event.inputs.zero_fill_max_mb }}" | tr -d '\r\n')"
+          echo "Using BOOTLOADER_SOURCE_MODE=${BOOTLOADER_SOURCE_MODE}"
+          if [[ -n "${UBOOT_SHA}" ]]; then
+            echo "Using UBOOT_SHA=${UBOOT_SHA}"
+          fi
+          echo "Using ZERO_FILL_MAX_MB=${ZERO_FILL_MAX_MB}"
+          export BOOTLOADER_SOURCE_MODE UBOOT_SHA ZERO_FILL_MAX_MB
+          sudo --preserve-env=BOOTLOADER_SOURCE_MODE,UBOOT_SHA,ZERO_FILL_MAX_MB \
+            ./scripts/image-gen-aarch64.sh --sysimage "${{ github.event.inputs.sysimage }}"
+
+      - name: Package outputs (zstd, bmap, logs, sha256)
+        run: |
+          set -euo pipefail
+
+          mkdir -p dist
+          OUTPUT_DIR="image-gen/downloads"
+
+          IMG="$(find "${OUTPUT_DIR}" -maxdepth 1 -type f -name 'arch-sys-mnt-*.img' | sort | head -n 1)"
+          BMAP="${IMG}.bmap"
+
+          zstd -T0 -19 --rm "$IMG"
+          IMG_ZST="${IMG}.zst"
+
+          cp -v "$IMG_ZST" dist/
+          if [[ -f "$BMAP" ]]; then
+            cp -v "$BMAP" dist/
+          else
+            echo "WARNING: ${BMAP} not found." | tee dist/WARNING-no-bmap.txt
+          fi
+
+          if ls -1 "${OUTPUT_DIR}"/image-gen-*.log >/dev/null 2>&1; then
+            cp -v "${OUTPUT_DIR}"/image-gen-*.log dist/
+          fi
+
+          pushd dist >/dev/null
+
+          sha256sum "$(basename "$IMG_ZST")" > "$(basename "$IMG_ZST").sha256"
+
+          {
+            echo "Build date (UTC): $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "Sysimage: ${{ github.event.inputs.sysimage }}"
+            echo "Bootloader mode: ${{ github.event.inputs.bootloader_mode }}"
+            if [[ -n "${{ github.event.inputs.uboot_sha }}" ]]; then
+              echo "U-Boot SHA: ${{ github.event.inputs.uboot_sha }}"
+            fi
+            echo "ZERO_FILL_MAX_MB: ${{ github.event.inputs.zero_fill_max_mb }}"
+            echo
+            echo "Files:"
+            ls -lh
+            echo
+            echo "SHA256:"
+            cat *.sha256
+          } > MANIFEST.txt
+
+          popd >/dev/null
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mnt-reform-image-${{ github.event.inputs.sysimage }}
+          path: dist/*
+          if-no-files-found: error

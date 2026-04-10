@@ -1,4 +1,4 @@
-name: Remote Image Gen
+name: Remote Image Gen aarch64
 
 on:
   workflow_dispatch:
@@ -52,21 +52,27 @@ jobs:
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
 
-      - name: Launch EC2 Spot instance
+      - name: Launch EC2 ARM instance
         id: launch-instance
         run: |
           set -euo pipefail
           AVAILABILITY_ZONES=("us-west-2a" "us-west-2b" "us-west-2c" "us-west-2d")
           INSTANCE_ID=""
 
+          ARM64_AMI=$(aws ssm get-parameter \
+            --name /aws/service/canonical/ubuntu/server/24.04/stable/current/arm64/hvm/ebs-gp3/ami-id \
+            --query 'Parameter.Value' \
+            --output text)
+          echo "Using AMI: $ARM64_AMI"
+
           echo "Attempting to launch instance (AWS-selected zone)..."
           OUTPUT=$(aws ec2 run-instances \
-            --image-id ami-00f46ccd1cbfb363e \
-            --instance-type c6a.8xlarge \
+            --image-id "$ARM64_AMI" \
+            --instance-type c7g.8xlarge \
             --key-name github-actions-runner \
             --security-group-ids sg-09c18dc7c46327e69 \
             --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":80,"VolumeType":"gp3"}}]' \
-            --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=github-runner}]' \
+            --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=github-runner-arm64}]' \
             --query 'Instances[0].InstanceId' \
             --output text 2>&1 || true)
 
@@ -74,16 +80,17 @@ jobs:
             echo "First attempt failed, trying explicit AZs..."
             for AZ in "${AVAILABILITY_ZONES[@]}"; do
               OUTPUT=$(aws ec2 run-instances \
-                --image-id ami-00f46ccd1cbfb363e \
-                --instance-type c6a.8xlarge \
+                --image-id "$ARM64_AMI" \
+                --instance-type c7g.8xlarge \
                 --key-name github-actions-runner \
                 --security-group-ids sg-09c18dc7c46327e69 \
                 --placement AvailabilityZone="$AZ" \
                 --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":80,"VolumeType":"gp3"}}]' \
-                --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=github-runner}]' \
+                --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=github-runner-arm64}]' \
                 --query 'Instances[0].InstanceId' \
                 --output text 2>&1 || true)
               if [[ "$OUTPUT" == i-* ]]; then
+                echo "Successfully launched instance in $AZ: $OUTPUT"
                 break
               fi
               echo "Failed in $AZ: $OUTPUT"
@@ -103,11 +110,15 @@ jobs:
             --query 'Reservations[0].Instances[0].PublicIpAddress' \
             --output text)
           echo "public_ip=$PUBLIC_IP" >> "$GITHUB_OUTPUT"
+          echo "Instance running at: $PUBLIC_IP"
 
+          echo "Waiting for SSH to be ready..."
           for i in {1..30}; do
-            if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i ~/.ssh/id_rsa "ubuntu@$PUBLIC_IP" echo "SSH Ready" >/dev/null 2>&1; then
+            if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i ~/.ssh/id_rsa "ubuntu@$PUBLIC_IP" echo "SSH Ready" 2>/dev/null; then
+              echo "SSH is ready!"
               break
             fi
+            echo "Waiting for SSH... attempt $i/30"
             sleep 10
           done
 
@@ -120,6 +131,13 @@ jobs:
 
           ssh $SSH_OPTS "ubuntu@$PUBLIC_IP" << 'EOF'
             set -euo pipefail
+            sudo apt-get update
+            sudo apt-get install -y \
+              parted \
+              e2fsprogs \
+              cpio \
+              bmap-tools \
+              zstd
             cd ~
             git clone --depth 1 --no-checkout https://github.com/${{ github.repository }} mnt-build
             cd mnt-build
@@ -129,40 +147,7 @@ jobs:
             git -c protocol.version=2 submodule update --init --depth 1 reform-tools
           EOF
 
-      - name: Install image-gen host dependencies on instance
-        run: |
-          set -euo pipefail
-          PUBLIC_IP="${{ steps.launch-instance.outputs.public_ip }}"
-          SSH_OPTS="-T -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes -o ConnectTimeout=15"
-          ssh $SSH_OPTS "ubuntu@$PUBLIC_IP" << 'EOF'
-            set -euo pipefail
-            sudo apt-get -o DPkg::Lock::Timeout=600 update
-            sudo apt-get -o DPkg::Lock::Timeout=600 install -y \
-              coreutils \
-              util-linux \
-              parted \
-              e2fsprogs \
-              curl \
-              tar \
-              cpio \
-              gcc-aarch64-linux-gnu \
-              binutils-aarch64-linux-gnu \
-              qemu-user-static \
-              binfmt-support \
-              bmap-tools \
-              zstd \
-              git \
-              build-essential \
-              make \
-              pkg-config \
-              libssl-dev \
-              bc \
-              flex \
-              bison \
-              device-tree-compiler
-          EOF
-
-      - name: Run image-gen on instance
+      - name: Run image-gen-aarch64.sh on instance
         id: run_image_gen
         continue-on-error: true
         run: |
@@ -182,7 +167,7 @@ jobs:
           q_uboot_sha="$(printf '%q' "$UBOOT_SHA")"
           q_zero_fill="$(printf '%q' "$ZERO_FILL_MAX_MB")"
           q_sysimage="$(printf '%q' "$SYSIMAGE")"
-          remote_payload="cd ~/mnt-build || exit 97; chmod +x ./scripts/image-gen.sh; export BOOTLOADER_SOURCE_MODE=${q_bootloader_mode}; export UBOOT_SHA=${q_uboot_sha}; export ZERO_FILL_MAX_MB=${q_zero_fill}; sudo --preserve-env=BOOTLOADER_SOURCE_MODE,UBOOT_SHA,ZERO_FILL_MAX_MB ./scripts/image-gen.sh --sysimage ${q_sysimage}; rc=\$?; echo \$rc > ${REMOTE_EXIT_CODE}; exit \$rc"
+          remote_payload="cd ~/mnt-build || exit 97; chmod +x ./scripts/image-gen-aarch64.sh; export BOOTLOADER_SOURCE_MODE=${q_bootloader_mode}; export UBOOT_SHA=${q_uboot_sha}; export ZERO_FILL_MAX_MB=${q_zero_fill}; sudo --preserve-env=BOOTLOADER_SOURCE_MODE,UBOOT_SHA,ZERO_FILL_MAX_MB ./scripts/image-gen-aarch64.sh --sysimage ${q_sysimage}; rc=\$?; echo \$rc > ${REMOTE_EXIT_CODE}; exit \$rc"
           q_remote_payload="$(printf '%q' "$remote_payload")"
 
           ssh $SSH_OPTS "ubuntu@$PUBLIC_IP" "set -euo pipefail; \
@@ -203,7 +188,6 @@ jobs:
             status="$(printf '%s' "$status" | tr -d '\r\n')"
             if [[ "$status" == "RUNNING" || "$status" == "SSH_RETRY" || -z "$status" ]]; then
               if [[ "$status" == "SSH_RETRY" || -z "$status" ]]; then
-                # SSH failed: ask EC2 directly whether the instance is still alive.
                 ec2_state="$(aws ec2 describe-instances \
                   --instance-ids "$instance_id" \
                   --query 'Reservations[0].Instances[0].State.Name' \
@@ -240,7 +224,6 @@ jobs:
             mkdir -p build-logs || true
             scp $SSH_OPTS "ubuntu@$PUBLIC_IP:~/mnt-build/image-gen-remote-run.log" build-logs/ 2>/dev/null || true
             scp $SSH_OPTS "ubuntu@$PUBLIC_IP:~/mnt-build/image-gen-*.log" build-logs/ 2>/dev/null || true
-            echo "Terminating EC2 instance due to image-gen timeout..."
             aws ec2 terminate-instances --instance-ids "${{ steps.launch-instance.outputs.instance_id }}" || true
             exit 124
           fi
@@ -306,8 +289,6 @@ jobs:
               if [[ -n "${{ github.event.inputs.uboot_sha }}" ]]; then
                 echo "U-Boot SHA: ${{ github.event.inputs.uboot_sha }}"
               fi
-              echo "PACMAN_FULL_UPGRADE: 1"
-              echo "INSTALL_REFORM_TOOLS: 1"
               echo "ZERO_FILL_MAX_MB: ${{ github.event.inputs.zero_fill_max_mb }}"
               echo
               echo "Files:"

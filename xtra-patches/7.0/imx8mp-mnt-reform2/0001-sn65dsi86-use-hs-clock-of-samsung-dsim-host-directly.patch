@@ -1,0 +1,46 @@
+From d9686ba780834f5d728bda8aff9dc585f51380a7
+From: Lukas F. Hartmann <lukas@mntre.com>
+Subject: sn65dsi86-use-hs-clock-of-samsung-dsim-host-directly
+Date:   Thu May 30 14:46:50 2024 +0200
+
+    ti-sn65dsi86: use HS clock of samsung dsim host directly
+
+--- a/drivers/gpu/drm/bridge/ti-sn65dsi86.c
++++ b/drivers/gpu/drm/bridge/ti-sn65dsi86.c
+@@ -186,6 +186,7 @@ struct ti_sn65dsi86 {
+ 	struct drm_bridge		*next_bridge;
+ 	struct gpio_desc		*enable_gpio;
+ 	struct regulator_bulk_data	supplies[SN_REGULATOR_SUPPLY_NUM];
++	u32				hs_rate_hz;
+ 	int				dp_lanes;
+ 	u8				ln_assign;
+ 	u8				ln_polrs;
+@@ -288,7 +289,11 @@ static void ti_sn_bridge_set_refclk_freq
+ 		refclk_lut_size = ARRAY_SIZE(ti_sn_bridge_refclk_lut);
+ 		clk_prepare_enable(pdata->refclk);
+ 	} else {
+-		refclk_rate = ti_sn_bridge_get_dsi_freq(pdata, state) * 1000;
++		if (pdata->hs_rate_hz)
++			refclk_rate = pdata->hs_rate_hz;
++		else
++			refclk_rate = ti_sn_bridge_get_dsi_freq(pdata, state) * 1000;
++
+ 		refclk_lut = ti_sn_bridge_dsiclk_lut;
+ 		refclk_lut_size = ARRAY_SIZE(ti_sn_bridge_dsiclk_lut);
+ 	}
+@@ -718,6 +723,15 @@ static int ti_sn_attach_host(struct auxi
+ 	dsi->format = MIPI_DSI_FMT_RGB888;
+ 	dsi->mode_flags = MIPI_DSI_MODE_VIDEO;
+ 
++	/* For i.MX8MP / Samsung DSIM Host, don't guess the HS rate, but read it from DTS */
++	if (of_device_is_compatible(pdata->host_node, "fsl,imx8mp-mipi-dsim")) {
++		unsigned int hs_hz;
++		if (!of_property_read_u32(pdata->host_node, "samsung,burst-clock-frequency", &hs_hz)) {
++			pdata->hs_rate_hz = hs_hz / 2;
++			DRM_DEV_INFO(pdata->dev, "HS clock set to %u from i.MX8MP / Samsung DSIM.\n", pdata->hs_rate_hz);
++		}
++	}
++
+ 	/* check if continuous dsi clock is required or not */
+ 	pm_runtime_get_sync(dev);
+ 	regmap_read(pdata->regmap, SN_DPPLL_SRC_REG, &val);
