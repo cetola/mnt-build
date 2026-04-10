@@ -175,6 +175,7 @@ class KernelBuilder:
         self.logger.info("Applying MNT kernel patches...")
         mnt_patch_count = self._apply_patch_set(
             self.config.patches_dir,
+            self.config.linux_dir,
             failed_log_path,
             label="",
             on_success=stats.add_success,
@@ -186,14 +187,7 @@ class KernelBuilder:
         xtra_patch_count = 0
         if xtra_dir is not None:
             self.logger.info("Applying extra kernel patches...")
-            xtra_failed_log_path = self.config.linux_dir / "failed_xtra.log"
-            xtra_patch_count = self._apply_patch_set(
-                xtra_dir,
-                xtra_failed_log_path,
-                label="extra",
-                on_success=stats.add_xtra_success,
-                on_failure=stats.add_xtra_failure,
-            )
+            xtra_patch_count = self._apply_xtra_patch_sets(stats)
             stats.set_xtra_found(xtra_patch_count)
 
         if not stats.has_any:
@@ -216,18 +210,81 @@ class KernelBuilder:
 
         return stats
 
+    def _apply_xtra_patch_sets(self, stats: PatchStats) -> int:
+        """Apply versioned extra patches to linux or supported sibling trees."""
+        xtra_dir = self.config.xtra_patches_dir
+        if not xtra_dir.exists():
+            self.logger.warning(f"No patches found in {xtra_dir} (directory does not exist)")
+            return 0
+
+        target_map = {
+            "qcacld2": self.config.qcacld_dir,
+            "reform-tools": self.config.reform_tools_dir,
+        }
+        target_specs = []
+        linux_patch_files: list[Path] = []
+
+        for patch_file in sorted(xtra_dir.rglob("*.patch")):
+            relative_patch = patch_file.relative_to(xtra_dir)
+            top_level = relative_patch.parts[0]
+
+            if top_level in target_map:
+                continue
+
+            linux_patch_files.append(patch_file)
+
+        target_specs.append(
+            {
+                "patches_dir": xtra_dir,
+                "target_dir": self.config.linux_dir,
+                "failed_log_path": self.config.linux_dir / "failed_xtra.log",
+                "label": "extra",
+                "patch_files": linux_patch_files,
+            }
+        )
+
+        for bucket_name, target_dir in target_map.items():
+            bucket_dir = xtra_dir / bucket_name
+            bucket_patch_files = sorted(bucket_dir.rglob("*.patch")) if bucket_dir.exists() else []
+            target_specs.append(
+                {
+                    "patches_dir": bucket_dir,
+                    "target_dir": target_dir,
+                    "failed_log_path": target_dir / f"failed_xtra_{bucket_name}.log",
+                    "label": f"extra:{bucket_name}",
+                    "patch_files": bucket_patch_files,
+                }
+            )
+
+        total_patch_count = 0
+        for spec in target_specs:
+            total_patch_count += self._apply_patch_set(
+                spec["patches_dir"],
+                spec["target_dir"],
+                spec["failed_log_path"],
+                spec["label"],
+                on_success=stats.add_xtra_success,
+                on_failure=stats.add_xtra_failure,
+                patch_files=spec["patch_files"],
+            )
+
+        return total_patch_count
+
     def _apply_patch_set(
         self,
         patches_dir: Path,
+        target_dir: Path,
         failed_log_path: Path,
         label: str,
         on_success,
         on_failure,
+        patch_files: Optional[List[Path]] = None,
     ) -> int:
         """Apply all *.patch files from patches_dir, recording results via callbacks.
 
         Args:
             patches_dir:      Directory to search recursively for .patch files.
+            target_dir:       Repository root to apply patches against.
             failed_log_path:  File to write failure details to (cleared before use).
             label:            Human-readable qualifier for log messages (e.g. "extra").
                               Pass an empty string for the primary patch set.
@@ -235,11 +292,16 @@ class KernelBuilder:
             on_failure:       Callable invoked (patch_name) for each failed patch.
         """
         qualifier = f" ({label})" if label else ""
-        if not patches_dir.exists():
+        if patch_files is None and not patches_dir.exists():
             self.logger.warning(f"No patches found in {patches_dir} (directory does not exist)")
             return 0
 
-        patch_files = sorted(patches_dir.rglob("*.patch"))
+        if not target_dir.exists():
+            self.logger.warning(f"Skipping{qualifier} patches from {patches_dir}; target does not exist: {target_dir}")
+            return 0
+
+        if patch_files is None:
+            patch_files = sorted(patches_dir.rglob("*.patch"))
 
         if not patch_files:
             self.logger.warning(f"No patches found in {patches_dir}")
@@ -248,7 +310,7 @@ class KernelBuilder:
         if patches_dir not in self.patch_dirs_used:
             self.patch_dirs_used.append(patches_dir)
 
-        self.logger.info(f"Found {len(patch_files)}{qualifier} patches to apply")
+        self.logger.info(f"Found {len(patch_files)}{qualifier} patches to apply to {target_dir}")
 
         if failed_log_path.exists():
             failed_log_path.unlink()
@@ -256,7 +318,7 @@ class KernelBuilder:
         failed_log_entries = []
 
         for patch_file in patch_files:
-            patch_name = patch_file.name
+            patch_name = str(patch_file.relative_to(patches_dir))
             self.logger.debug(f"Processing{qualifier} patch: {patch_name}")
 
             with open(patch_file, 'r') as f:
@@ -264,7 +326,7 @@ class KernelBuilder:
 
             dry_run_result = self.run_command(
                 ['patch', '-p1', '--dry-run'],
-                cwd=self.config.linux_dir,
+                cwd=target_dir,
                 input_data=patch_content,
                 check=False,
                 log_cmd=False
@@ -273,7 +335,7 @@ class KernelBuilder:
             if dry_run_result.returncode == 0:
                 apply_result = self.run_command(
                     ['patch', '-p1'],
-                    cwd=self.config.linux_dir,
+                    cwd=target_dir,
                     input_data=patch_content,
                     check=False,
                     log_cmd=False

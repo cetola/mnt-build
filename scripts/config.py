@@ -5,9 +5,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-DEFAULT_KERNEL_VERSION = '6.19.11'
+DEFAULT_KERNEL_VERSION = '7.0-rc7'
 DEFAULT_LOCALVERSION_NAME = 'reform'
-DEFAULT_LOCALVERSION_REV = 3
+DEFAULT_LOCALVERSION_REV = 1
 DEFAULT_CROSS_COMPILE = "aarch64-linux-gnu-"
 DEFAULT_KERNEL_ONLY = False
 
@@ -48,6 +48,8 @@ class BuildConfig:
     arch: str
     build_dir: Path
     linux_dir: Path
+    qcacld_dir: Path
+    reform_tools_dir: Path
     patches_dir: Path
     xtra_patches_dir: Path
     defconfig_file: Path
@@ -102,6 +104,8 @@ class BuildConfig:
             arch=arch,
             build_dir=build_dir,
             linux_dir=linux_dir,
+            qcacld_dir=build_dir / "qcacld2",
+            reform_tools_dir=build_dir / "reform-tools",
             patches_dir=build_dir / "reform-debian-packages" / "linux" / f"patches{major_minor}",
             xtra_patches_dir=build_dir / "xtra-patches" / major_minor,
             defconfig_file=build_dir / "configs" / defconfig_name_for_arch(arch),
