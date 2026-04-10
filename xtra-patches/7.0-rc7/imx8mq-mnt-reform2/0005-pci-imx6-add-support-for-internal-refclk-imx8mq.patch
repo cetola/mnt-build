@@ -1,0 +1,91 @@
+From eccba2801343b7861de2e5cef3185b1167d28587 Mon Sep 17 00:00:00 2001
+From: "Lucie L. Hartmann" <lukas@mntre.com>
+Date: Thu, 23 Oct 2025 18:58:44 +0200
+Subject: [PATCH] pci/imx6: add support for internal refclk on imx8mq
+
+---
+ drivers/pci/controller/dwc/pci-imx6.c | 43 ++++++++++++++++++++++++++-
+ 1 file changed, 42 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/pci/controller/dwc/pci-imx6.c b/drivers/pci/controller/dwc/pci-imx6.c
+index 5a38cfaf989b..22fff01a420b 100644
+--- a/drivers/pci/controller/dwc/pci-imx6.c
++++ b/drivers/pci/controller/dwc/pci-imx6.c
+@@ -152,6 +152,7 @@ struct imx_pcie {
+ 	struct regmap		*iomuxc_gpr;
+ 	u16			msi_ctrl;
+ 	u32			controller_id;
++	bool			internal_refclk;
+ 	struct reset_control	*pciephy_reset;
+ 	struct reset_control	*apps_reset;
+ 	u32			tx_deemph_gen1;
+@@ -270,6 +271,40 @@ static int imx95_pcie_init_phy(struct imx_pcie *imx_pcie)
+ 	return 0;
+ }
+ 
++#define IMX8MQ_ANA_PLLOUT_REG			0x74
++#define IMX8MQ_ANA_PLLOUT_CKE			BIT(4)
++#define IMX8MQ_ANA_PLLOUT_SEL_MASK		0xF
++#define IMX8MQ_ANA_PLLOUT_SEL_SYSPLL1		0xB
++#define IMX8MQ_ANA_PLLOUT_DIV_REG		0x7C
++#define IMX8MQ_ANA_PLLOUT_SYSPLL1_DIV		0x7
++
++static void imx_pcie_enable_internal_refclk(void)
++{
++	uint32_t val;
++	struct device_node* np;
++	void __iomem *base;
++
++	np = of_find_compatible_node(NULL, NULL,
++				"fsl,imx8mq-anatop");
++	base = of_iomap(np, 0);
++	WARN_ON(!base);
++
++	val = readl(base + IMX8MQ_ANA_PLLOUT_REG);
++	val &= ~IMX8MQ_ANA_PLLOUT_SEL_MASK;
++	val |= IMX8MQ_ANA_PLLOUT_SEL_SYSPLL1;
++	writel(val, base + IMX8MQ_ANA_PLLOUT_REG);
++	/* SYS_PLL1 is 800M, PCIE REF CLK is 100M */
++	val = readl(base + IMX8MQ_ANA_PLLOUT_DIV_REG);
++	val |= IMX8MQ_ANA_PLLOUT_SYSPLL1_DIV;
++	writel(val, base + IMX8MQ_ANA_PLLOUT_DIV_REG);
++
++	val = readl(base + IMX8MQ_ANA_PLLOUT_REG);
++	val |= IMX8MQ_ANA_PLLOUT_CKE;
++	writel(val, base + IMX8MQ_ANA_PLLOUT_REG);
++
++	usleep_range(9000,10000);
++}
++
+ static void imx_pcie_configure_type(struct imx_pcie *imx_pcie)
+ {
+ 	const struct imx_pcie_drvdata *drvdata = imx_pcie->drvdata;
+@@ -423,11 +458,15 @@ static int pcie_phy_write(struct imx_pcie *imx_pcie, int addr, u16 data)
+ 
+ static int imx8mq_pcie_init_phy(struct imx_pcie *imx_pcie)
+ {
++	if (imx_pcie->internal_refclk)
++		imx_pcie_enable_internal_refclk();
++
+ 	/* TODO: This code assumes external oscillator is being used */
+ 	regmap_update_bits(imx_pcie->iomuxc_gpr,
+ 			   imx_pcie_grp_offset(imx_pcie),
+ 			   IMX8MQ_GPR_PCIE_REF_USE_PAD,
+-			   IMX8MQ_GPR_PCIE_REF_USE_PAD);
++			   (imx_pcie->internal_refclk ?
++					0 : IMX8MQ_GPR_PCIE_REF_USE_PAD));
+ 	/*
+ 	 * Per the datasheet, the PCIE_VPH is suggested to be 1.8V.  If the
+ 	 * PCIE_VPH is supplied by 3.3V, the VREG_BYPASS should be cleared
+@@ -1675,6 +1714,8 @@ static int imx_pcie_probe(struct platform_device *pdev)
+ 
+ 	switch (imx_pcie->drvdata->variant) {
+ 	case IMX8MQ:
++		imx_pcie->internal_refclk = of_property_read_bool(node, "internal-refclk");
++		break;
+ 	case IMX8MQ_EP:
+ 		domain = of_get_pci_domain_nr(node);
+ 		if (domain < 0 || domain > 1)
+-- 
+2.51.0
+
