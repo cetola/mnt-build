@@ -1,0 +1,115 @@
+name: Publish Image Artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_run_id:
+        description: Workflow run ID containing the image artifact
+        required: true
+        type: string
+      release_tag:
+        description: Exact Git tag of the release to upload to
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download workflow artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARTIFACT_RUN_ID: ${{ github.event.inputs.artifact_run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifact-zips artifact-dist
+
+          gh api \
+            "repos/${{ github.repository }}/actions/runs/$ARTIFACT_RUN_ID/artifacts" \
+            --jq '.artifacts[] | [.name, .archive_download_url] | @tsv' > artifact-list.tsv
+
+          if [[ ! -s artifact-list.tsv ]]; then
+            echo "No artifacts found for workflow run $ARTIFACT_RUN_ID." >&2
+            exit 1
+          fi
+
+          while IFS=$'\t' read -r artifact_name artifact_url; do
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              "$artifact_url" > "artifact-zips/${artifact_name}.zip"
+          done < artifact-list.tsv
+
+          ls -lh artifact-zips
+
+      - name: Unzip non-log artifact
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          zips=(artifact-zips/*.zip)
+          publish_zips=()
+
+          if [[ ${#zips[@]} -eq 0 ]]; then
+            echo "No artifact archives were downloaded." >&2
+            exit 1
+          fi
+
+          for zip_path in "${zips[@]}"; do
+            zip_name="$(basename "$zip_path")"
+            if [[ "$zip_name" == *logs*.zip ]]; then
+              continue
+            fi
+            publish_zips+=("$zip_path")
+          done
+
+          if [[ ${#publish_zips[@]} -eq 0 ]]; then
+            echo "No non-log artifact archive found to publish." >&2
+            exit 1
+          fi
+
+          if [[ ${#publish_zips[@]} -ne 1 ]]; then
+            echo "Expected exactly one non-log artifact archive, found ${#publish_zips[@]}." >&2
+            printf 'Candidates:\n%s\n' "${publish_zips[@]}" >&2
+            exit 1
+          fi
+
+          unzip -o "${publish_zips[0]}" -d artifact-dist
+          find artifact-dist -maxdepth 2 -type f -ls
+
+      - name: Verify downloaded release files
+        id: collect_release_files
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find artifact-dist -type f ! -name '*.log' | sort)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "Extracted artifact has no publishable non-log files." >&2
+            exit 1
+          fi
+
+          mapfile -t excluded_logs < <(find artifact-dist -type f -name '*.log' | sort)
+          if [[ ${#excluded_logs[@]} -gt 0 ]]; then
+            printf 'Excluded log files:\n%s\n' "${excluded_logs[@]}"
+          fi
+
+          printf 'files<<EOF\n' >> "$GITHUB_OUTPUT"
+          printf '%s\n' "${files[@]}" >> "$GITHUB_OUTPUT"
+          printf 'EOF\n' >> "$GITHUB_OUTPUT"
+
+          printf 'Files to publish:\n%s\n' "${files[@]}"
+
+      - name: Upload image files to tagged release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.release_tag }}
+          files: ${{ steps.collect_release_files.outputs.files }}
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
