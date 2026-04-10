@@ -24,6 +24,7 @@ class KernelBuilder:
         self.cross_compile = cross_compile.strip() if cross_compile else ""
         self.kernel_only = kernel_only
         self.patch_dirs_used: List[Path] = []
+        self.patch_stats: Optional[PatchStats] = None
 
     def log_phase(self, name: str):
         self.logger.info("=" * 60)
@@ -149,9 +150,6 @@ class KernelBuilder:
             if not self.config.config_file.exists():
                 raise BuildError(f"Config file not found: {self.config.config_file}")
 
-        if not self.config.patches_dir.exists():
-            raise BuildError(f"Patches directory not found: {self.config.patches_dir}")
-
         self.logger.info("Verifying build toolchain via 'make kernelversion'...")
         make_cmd = ['make', *self._make_kernel_vars(), 'kernelversion']
 
@@ -173,27 +171,38 @@ class KernelBuilder:
         """Apply kernel patches from patches_dir, then xtra_patches_dir if present."""
         stats = PatchStats()
 
-        self.logger.info("Applying MNT kernel patches...")
         failed_log_path = self.config.linux_dir / "failed.log"
-        self._apply_patch_set(
+        self.logger.info("Applying MNT kernel patches...")
+        mnt_patch_count = self._apply_patch_set(
             self.config.patches_dir,
             failed_log_path,
             label="",
             on_success=stats.add_success,
             on_failure=stats.add_failure,
         )
+        stats.set_mnt_found(mnt_patch_count)
 
         xtra_dir = getattr(self.config, 'xtra_patches_dir', None)
-        if xtra_dir is not None and xtra_dir.exists():
+        xtra_patch_count = 0
+        if xtra_dir is not None:
             self.logger.info("Applying extra kernel patches...")
             xtra_failed_log_path = self.config.linux_dir / "failed_xtra.log"
-            self._apply_patch_set(
+            xtra_patch_count = self._apply_patch_set(
                 xtra_dir,
                 xtra_failed_log_path,
                 label="extra",
                 on_success=stats.add_xtra_success,
                 on_failure=stats.add_xtra_failure,
             )
+            stats.set_xtra_found(xtra_patch_count)
+
+        if not stats.has_any:
+            raise BuildError(
+                "No kernel patches found in either "
+                f"{self.config.patches_dir} or {self.config.xtra_patches_dir}"
+            )
+
+        self.patch_stats = stats
 
         self.logger.info("Patch application complete!")
         if stats.has_xtra:
@@ -214,7 +223,7 @@ class KernelBuilder:
         label: str,
         on_success,
         on_failure,
-    ) -> None:
+    ) -> int:
         """Apply all *.patch files from patches_dir, recording results via callbacks.
 
         Args:
@@ -226,11 +235,15 @@ class KernelBuilder:
             on_failure:       Callable invoked (patch_name) for each failed patch.
         """
         qualifier = f" ({label})" if label else ""
+        if not patches_dir.exists():
+            self.logger.warning(f"No patches found in {patches_dir} (directory does not exist)")
+            return 0
+
         patch_files = sorted(patches_dir.rglob("*.patch"))
 
         if not patch_files:
             self.logger.warning(f"No patches found in {patches_dir}")
-            return
+            return 0
 
         if patches_dir not in self.patch_dirs_used:
             self.patch_dirs_used.append(patches_dir)
@@ -281,6 +294,8 @@ class KernelBuilder:
             with open(failed_log_path, 'w') as f:
                 f.write('\n'.join(failed_log_entries))
             self.logger.warning(f"Failed{qualifier} patches logged to: {failed_log_path}")
+
+        return len(patch_files)
 
     def _format_failed_patch(self, patch_name: str, result: subprocess.CompletedProcess) -> str:
         """Format a failed patch entry for the log file."""

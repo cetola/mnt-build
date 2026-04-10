@@ -103,7 +103,7 @@ class BuildConfig:
             build_dir=build_dir,
             linux_dir=linux_dir,
             patches_dir=build_dir / "reform-debian-packages" / "linux" / f"patches{major_minor}",
-            xtra_patches_dir=build_dir / "xtra-patches",
+            xtra_patches_dir=build_dir / "xtra-patches" / major_minor,
             defconfig_file=build_dir / "configs" / defconfig_name_for_arch(arch),
             config_file=build_dir / "configs" / f"config-{version}-mnt-reform-{arch}",
             dtb_files=dtb_files,

@@ -132,6 +132,12 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         builder.log_phase("Summary")
         logger.info("=" * 60)
         logger.info(f"{Colors.GREEN}✓ Build completed successfully in {elapsed:.0f} seconds!{Colors.RESET}")
+        if builder.patch_stats is not None and builder.patch_stats.no_mnt_patches:
+            logger.warning("!" * 60)
+            logger.warning("No MNT Patches")
+            logger.warning(f"No patches were found in: {config.patches_dir}")
+            logger.warning("Build completed using only xtra-patches.")
+            logger.warning("!" * 60)
         if not kernel_only:
             logger.info(f"Output: {config.output_tar}")
             logger.info(f"LPC module output: {config.build_dir / config.output_lpc_module_tar.name}")
