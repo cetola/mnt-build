@@ -23,6 +23,7 @@ jobs:
           set -euo pipefail
           REF_NAME="${GITHUB_REF_NAME}"
           REF="${GITHUB_REF}"
+          prerelease="false"
           BUILD_VERSION="$(python3 - <<'PY'
           import sys
           sys.path.insert(0, 'scripts')
@@ -42,8 +43,17 @@ jobs:
             exit 1
           fi
 
+          if [[ "$REF" == refs/tags/pre-* ]]; then
+            prerelease="true"
+          fi
+
+          if [[ "$REF" == refs/tags/* ]]; then
+            RELEASE_TAG="${REF_NAME}"
+          fi
+
           echo "build_version=${BUILD_VERSION}" >> "$GITHUB_OUTPUT"
           echo "release_tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${prerelease}" >> "$GITHUB_OUTPUT"
 
       - name: Print resolved build configuration
         run: |
@@ -51,6 +61,7 @@ jobs:
           echo "arch=arm64"
           echo "cross_compile=none"
           echo "release_tag=${{ steps.build_config.outputs.release_tag }}"
+          echo "prerelease=${{ steps.build_config.outputs.prerelease }}"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -293,6 +304,6 @@ jobs:
             release-artifacts/reform2_lpc-*.tar.gz
             release-artifacts/wlan-*.tar.gz
           draft: false
-          prerelease: false
+          prerelease: ${{ steps.build_config.outputs.prerelease }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

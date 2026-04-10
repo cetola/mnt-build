@@ -34,6 +34,7 @@ jobs:
           EVENT_NAME="${GITHUB_EVENT_NAME}"
           release_arch="arm64"
           cross_compile="aarch64-linux-gnu-"
+          prerelease="false"
           BUILD_VERSION="$(python3 - <<'PY'
           import sys
           sys.path.insert(0, 'scripts')
@@ -59,16 +60,25 @@ jobs:
             cross_compile="none"
           fi
 
+          if [[ "$REF" == refs/tags/pre-* ]]; then
+            prerelease="true"
+          fi
+
           if [[ "${release_arch}" == "x86_64" ]]; then
             RELEASE_TAG="${BUILD_VERSION}-x86_64"
           else
             RELEASE_TAG="${BUILD_VERSION}-aarch64"
           fi
 
+          if [[ "$REF" == refs/tags/* ]]; then
+            RELEASE_TAG="${REF_NAME}"
+          fi
+
           echo "arch=${release_arch}" >> "$GITHUB_OUTPUT"
           echo "cross_compile=${cross_compile}" >> "$GITHUB_OUTPUT"
           echo "build_version=${BUILD_VERSION}" >> "$GITHUB_OUTPUT"
           echo "release_tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${prerelease}" >> "$GITHUB_OUTPUT"
 
       - name: Print resolved build configuration
         run: |
@@ -76,6 +86,7 @@ jobs:
           echo "arch=${{ steps.build_config.outputs.arch }}"
           echo "cross_compile=${{ steps.build_config.outputs.cross_compile }}"
           echo "release_tag=${{ steps.build_config.outputs.release_tag }}"
+          echo "prerelease=${{ steps.build_config.outputs.prerelease }}"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -173,6 +184,6 @@ jobs:
             release-artifacts/reform2_lpc-*.tar.gz
             release-artifacts/wlan-*.tar.gz
           draft: false
-          prerelease: false
+          prerelease: ${{ steps.build_config.outputs.prerelease }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
