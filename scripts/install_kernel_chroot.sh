@@ -12,7 +12,8 @@ KERNEL_EXTLINUX_EXAMPLE_TMP="/tmp/linux-mnt-reform-bin.extlinux.conf.example"
 
 refresh_pacman_databases() {
   echo "Refreshing pacman package databases..."
-  $PACMAN -Sy --noconfirm
+  rm -rf /var/lib/pacman/sync/* || true
+  $PACMAN -Syy --noconfirm
 }
 
 pacman_run_with_retry() {

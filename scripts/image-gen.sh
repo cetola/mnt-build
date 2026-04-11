@@ -379,6 +379,26 @@ extract_rootfs() {
   tar -xpf "$DOWNLOADS_DIR/archlinuxarm.tar.gz" -C "$ROOT_MNT"
 }
 
+configure_pacman_mirrors() {
+  local mirrorlist="$ROOT_MNT/etc/pacman.d/mirrorlist"
+
+  log "Configuring ArchLinuxARM pacman mirrors..."
+  mkdir -p "$(dirname "$mirrorlist")"
+
+  cat > "$mirrorlist" <<'EOF'
+# Prefer concrete mirrors so pacman can fail over if one backend is stale.
+Server = http://nj.us.mirror.archlinuxarm.org/$arch/$repo
+Server = http://ca.us.mirror.archlinuxarm.org/$arch/$repo
+Server = http://fl.us.mirror.archlinuxarm.org/$arch/$repo
+Server = http://eu.mirror.archlinuxarm.org/$arch/$repo
+Server = http://de.mirror.archlinuxarm.org/$arch/$repo
+Server = http://de3.mirror.archlinuxarm.org/$arch/$repo
+Server = http://de4.mirror.archlinuxarm.org/$arch/$repo
+Server = http://dk.mirror.archlinuxarm.org/$arch/$repo
+Server = http://mirror.archlinuxarm.org/$arch/$repo
+EOF
+}
+
 create_fstab() {
   log "Creating /etc/fstab..."
   cat > "$ROOT_MNT/etc/fstab" << 'EOF'
@@ -676,6 +696,7 @@ main() {
   install_bootloader_to_image
   install_bootloader_to_boot_partition
   extract_rootfs
+  configure_pacman_mirrors
   
   # Filesystem configuration
   create_fstab
