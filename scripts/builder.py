@@ -576,6 +576,16 @@ class KernelBuilder:
 
         self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Config updated successfully")
 
+    def clean_in_tree_kernel_artifacts(self):
+        """Remove in-tree Kbuild outputs while preserving the patched checkout."""
+        self.logger.info("Cleaning in-tree kernel build artifacts...")
+        self.run_command([
+            'make',
+            *self._make_kernel_vars(),
+            'mrproper'
+        ], cwd=self.config.linux_dir)
+        self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} In-tree kernel artifacts removed")
+
     # ------------------------------------------------------------------
     # Kernel build
     # ------------------------------------------------------------------

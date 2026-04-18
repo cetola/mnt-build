@@ -31,6 +31,7 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
               localversion_rev: int = DEFAULT_LOCALVERSION_REV,
               skip_git_operations: bool = False, dry_run: bool = False,
               run_olddefconfig: bool = False,
+              post_clean: bool = False,
               arch: str = "arm64",
               cross_compile: str = DEFAULT_CROSS_COMPILE,
               with_headers: bool = False,
@@ -102,6 +103,13 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
             builder.apply_patches()
             builder.log_phase("Config Update")
             builder.update_config_with_olddefconfig(skip_git_operations=skip_git_operations)
+            if post_clean:
+                builder.log_phase("Cleanup")
+                logger.info(
+                    "Post-clean selected: removing in-tree kernel artifacts while "
+                    "keeping the patched checkout."
+                )
+                builder.clean_in_tree_kernel_artifacts()
             logger.info("Dry run mode - config updated via olddefconfig; no build performed")
             return 0
 
@@ -248,6 +256,12 @@ def build_parser() -> argparse.ArgumentParser:
         help='Alias for --olddefconfig'
     )
     build_parser.add_argument(
+        '--post-clean',
+        action='store_true',
+        help='After --olddefconfig --dry-run, run make mrproper to remove in-tree '
+             'Kbuild artifacts while keeping the patched checkout.'
+    )
+    build_parser.add_argument(
         '--skip-git-ops',
         action='store_true',
         default=False,
@@ -315,6 +329,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             skip_git_operations=args.skip_git_ops,
             dry_run=args.dry_run,
             run_olddefconfig=args.olddefconfig,
+            post_clean=args.post_clean,
             arch=args.arch,
             cross_compile=args.cross_compile,
             with_headers=args.with_headers,

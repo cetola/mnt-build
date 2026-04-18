@@ -77,6 +77,41 @@ if [[ ! -x "$KERNEL_DIR/scripts/config" ]]; then
   exit 1
 fi
 
+require_clean_source_tree() {
+  local dirty=0
+
+  if [[ -f "$KERNEL_DIR/.config" ]]; then
+    echo "Kernel source tree has in-tree config output: $KERNEL_DIR/.config" >&2
+    dirty=1
+  fi
+
+  if [[ -d "$KERNEL_DIR/include/config" ]]; then
+    echo "Kernel source tree has generated config headers: $KERNEL_DIR/include/config" >&2
+    dirty=1
+  fi
+
+  if [[ -d "$KERNEL_DIR/arch/$ARCH/include/generated" ]]; then
+    echo "Kernel source tree has generated arch headers: $KERNEL_DIR/arch/$ARCH/include/generated" >&2
+    dirty=1
+  fi
+
+  if [[ "$dirty" -ne 0 ]]; then
+    cat >&2 <<EOF
+
+Kernel source tree is not clean enough for config sync checks.
+Clear the in-tree Kbuild outputs shown above, then rerun this script.
+EOF
+    exit 2
+  fi
+}
+
+run_logged() {
+  printf '+'
+  printf ' %q' "$@"
+  printf '\n'
+  "$@"
+}
+
 declare -A IGNORE_MAP=()
 
 load_ignores() {
@@ -104,7 +139,7 @@ is_ignored() {
 }
 
 echo "WARNING: Before trusting results, ensure you checked out the correct kernel"
-echo "         and ran: ./mnt-build build --olddefconfig --dry-run"
+echo "         and ran: ./mnt-build build --olddefconfig --dry-run --post-clean"
 echo
 if [[ -f "$IGNORE_FILE" ]]; then
   echo "Using ignore file: $IGNORE_FILE"
@@ -114,6 +149,7 @@ fi
 echo
 
 load_ignores "$IGNORE_FILE"
+require_clean_source_tree
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -178,15 +214,18 @@ set_symbol_in_config() {
 }
 
 upstream_norm="$tmp/upstream.tsv"
+echo "Normalizing upstream config fragment..."
 normalize_config "$UPSTREAM_CONFIG" "$upstream_norm"
 
+echo "Resolving baseline config with olddefconfig..."
 cp "$BASELINE_CONFIG" "$base_o/.config"
-make -s -C "$KERNEL_DIR" ARCH="$ARCH" O="$base_o" olddefconfig >/dev/null
+run_logged make -s -C "$KERNEL_DIR" ARCH="$ARCH" O="$base_o" olddefconfig >/dev/null
 cp "$base_o/.config" "$test_o/.config"
 
 report="$tmp/report.tsv"
 : > "$report"
 
+echo "Applying upstream symbols to scratch config..."
 while IFS=$'\t' read -r sym val; do
   sym="${sym#CONFIG_}"
   base_val="$(extract_value_from_dotconfig "$sym" "$base_o/.config")"
@@ -199,8 +238,10 @@ while IFS=$'\t' read -r sym val; do
   set_symbol_in_config "$sym" "$val" "$test_o/.config"
 done < "$upstream_norm"
 
-make -s -C "$KERNEL_DIR" ARCH="$ARCH" O="$test_o" olddefconfig >/dev/null
+echo "Resolving scratch config with olddefconfig..."
+run_logged make -s -C "$KERNEL_DIR" ARCH="$ARCH" O="$test_o" olddefconfig >/dev/null
 
+echo "Comparing resolved configs..."
 while IFS=$'\t' read -r sym val; do
   sym="${sym#CONFIG_}"
   # Skip if already marked missing.

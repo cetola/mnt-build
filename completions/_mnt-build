@@ -30,6 +30,7 @@ _mnt_build() {
         '--dry-run[check/apply patches only]' \
         '--olddefconfig[run olddefconfig and persist config]' \
         '--defconfig[alias for --olddefconfig]' \
+        '--post-clean[run mrproper after olddefconfig dry-run]' \
         '--skip-git-ops[skip git reset/checkout/tag ops]' \
         '--arch=[kernel ARCH]:arch:' \
         '--cross-compile=[cross compile prefix]:prefix:' \
