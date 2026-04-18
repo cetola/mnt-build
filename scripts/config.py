@@ -15,6 +15,14 @@ DEFAULT_KERNEL_ONLY = False
 def defconfig_name_for_arch(arch: str) -> str:
     return f"defconfig_{arch}"
 
+
+def log_arch_name_for_arch(arch: str) -> str:
+    """Return the user-facing architecture label used in build log filenames."""
+    arch_aliases = {
+        "arm64": "aarch64",
+    }
+    return arch_aliases.get(arch, arch)
+
 DTS_CONFIGS = [
     {
         "name": "imx8mp-mnt-pocket-reform.dts",
@@ -83,6 +91,10 @@ class BuildConfig:
         localversion = f"-{DEFAULT_LOCALVERSION_NAME}{localversion_rev}"
         kernel_release = f"{version}{localversion}"
         build_version = f"{version}.{DEFAULT_LOCALVERSION_NAME}{localversion_rev}"
+        log_build_version = (
+            f"{version}_{log_arch_name_for_arch(arch)}."
+            f"{DEFAULT_LOCALVERSION_NAME}{localversion_rev}"
+        )
 
         # Extract major.minor version (e.g., "6.17" from "6.17.8")
         version_parts = version.split('.')
@@ -115,7 +127,7 @@ class BuildConfig:
             output_headers_tar=linux_dir / f"headers-{build_version}.tar.gz",
             output_lpc_module_tar=linux_dir / f"reform2_lpc-{build_version}.tar.gz",
             output_wifi_module_tar=linux_dir / f"wlan-{build_version}.tar.gz",
-            log_file=build_dir / f"build-{build_version}-{timestamp}.log",
+            log_file=build_dir / f"build-{log_build_version}-{timestamp}.log",
             jobs=jobs,
             localversion_rev=localversion_rev
         )
