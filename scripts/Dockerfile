@@ -49,6 +49,25 @@ RUN set -euo pipefail && \
     sudo cp -a /tmp/openssl-pkg/usr/lib/libssl* /usr/aarch64-linux-gnu/lib/ && \
     rm -rf /tmp/openssl-aarch64.pkg.tar /tmp/core.db /tmp/openssl-pkg
 
+# Install aarch64 compression libs that the updated libcrypto.so now depends on
+# (zlib, zstd, brotli are new dynamic deps as of OpenSSL 3.x on Arch Linux ARM)
+RUN set -euo pipefail && \
+    MIRROR="http://mirror.archlinuxarm.org/aarch64" && \
+    SYSROOT=/usr/aarch64-linux-gnu && \
+    for repo_pkg in "core/zlib" "core/zstd" "extra/brotli"; do \
+      repo="${repo_pkg%%/*}"; pkg="${repo_pkg##*/}"; \
+      curl -fL "${MIRROR}/${repo}/${repo}.db" -o /tmp/repo.db; \
+      entry="$(bsdtar -tf /tmp/repo.db | grep -E "^${pkg}-[^/]+/desc$" | head -n1)"; \
+      [ -n "${entry}" ] || { echo "Package ${pkg} not found in ${repo}" >&2; exit 1; }; \
+      file="$(bsdtar -xOf /tmp/repo.db "${entry}" | awk 'found{print;exit} /^%FILENAME%$/{found=1}')"; \
+      [ -n "${file}" ] || { echo "No FILENAME for ${pkg} in ${repo}" >&2; exit 1; }; \
+      curl -fL "${MIRROR}/${repo}/${file}" -o /tmp/aarch64-pkg.tar; \
+      rm -rf /tmp/aarch64-pkg-dir && mkdir /tmp/aarch64-pkg-dir; \
+      bsdtar -xpf /tmp/aarch64-pkg.tar -C /tmp/aarch64-pkg-dir; \
+      sudo find /tmp/aarch64-pkg-dir/usr/lib -maxdepth 1 -name 'lib*.so*' -exec cp -a {} "${SYSROOT}/lib/" \;; \
+      rm -rf /tmp/repo.db /tmp/aarch64-pkg.tar /tmp/aarch64-pkg-dir; \
+    done
+
 RUN set -euo pipefail && \
     cd /tmp && \
     git clone https://aur.archlinux.org/yay.git && \
