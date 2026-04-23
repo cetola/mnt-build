@@ -75,85 +75,43 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          # Verify the key format
           head -1 ~/.ssh/id_rsa
           tail -1 ~/.ssh/id_rsa
 
-      - name: Launch EC2 Spot Instance
+      - name: Launch EC2 instance
         id: launch-instance
         run: |
-          # Try launching instance, retrying with different availability zones if needed
           AVAILABILITY_ZONES=("us-west-2a" "us-west-2b" "us-west-2c" "us-west-2d")
           INSTANCE_ID=""
+          # Change ubuntu user UID to 1001 to match the builder user inside the chroot,
+          # so artifacts written by builder are directly accessible by ubuntu on the host.
           USER_DATA='#!/bin/bash
-              # Change ubuntu user UID to 1001 to match GitHub Actions runner
               usermod -u 1001 ubuntu
               groupmod -g 1001 ubuntu
               chown -R ubuntu:ubuntu /home/ubuntu
               apt-get update
-              apt-get install -y \
-              git python3 python3-pip \
-              build-essential \
-              sudo \
-              ca-certificates \
-              wget \
-              curl \
-              rsync \
-              bc \
-              kmod \
-              cpio \
-              perl \
-              tar \
-              xz-utils \
-              dracut \
-              device-tree-compiler \
-              libelf-dev \
-              flex \
-              bison \
-              libssl-dev \
-              parted \
-              gdb \
-              strace \
-              lsof \
-              pciutils \
-              usbutils \
-              iproute2 \
-              net-tools \
-              man-db \
-              less \
-              which \
-              file \
-              tmux \
-              unzip \
-              zip
-              pip3 install --upgrade pip'
+              apt-get install -y libarchive-tools arch-install-scripts'
 
-          # Get the latest Ubuntu 24.04 ARM64 AMI
-          echo "Fetching latest Ubuntu 24.04 ARM64 AMI..."
           ARM64_AMI=$(aws ssm get-parameter \
             --name /aws/service/canonical/ubuntu/server/24.04/stable/current/arm64/hvm/ebs-gp3/ami-id \
             --query 'Parameter.Value' \
             --output text)
           echo "Using AMI: $ARM64_AMI"
-          
-          # First, try without specifying subnet/AZ to let AWS choose
-          echo "Attempting to launch ARM64 instance (AWS will choose availability zone)..."
+
           OUTPUT=$(aws ec2 run-instances \
             --image-id "$ARM64_AMI" \
             --instance-type c7g.8xlarge \
             --key-name github-actions-runner \
             --security-group-ids sg-09c18dc7c46327e69 \
-            --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":30,"VolumeType":"gp3"}}]' \
+            --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":40,"VolumeType":"gp3"}}]' \
             --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=github-runner-arm64}]' \
             --user-data "$USER_DATA" \
             --query 'Instances[0].InstanceId' \
             --output text 2>&1)
           EXIT_CODE=$?
           INSTANCE_ID="$OUTPUT"
-          
-          # Check if the command failed
+
           if [ $EXIT_CODE -ne 0 ] || [[ "$INSTANCE_ID" == *"InsufficientInstanceCapacity"* ]] || [[ "$INSTANCE_ID" == *"error"* ]] || [[ "$INSTANCE_ID" == *"Error"* ]] || [[ -z "$INSTANCE_ID" ]]; then
-            # If that fails, try each availability zone explicitly
             echo "First attempt failed, trying specific availability zones..."
             INSTANCE_ID=""
             for AZ in "${AVAILABILITY_ZONES[@]}"; do
@@ -164,33 +122,32 @@ jobs:
                 --key-name github-actions-runner \
                 --security-group-ids sg-09c18dc7c46327e69 \
                 --placement AvailabilityZone=$AZ \
-                --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":30,"VolumeType":"gp3"}}]' \
+                --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":40,"VolumeType":"gp3"}}]' \
                 --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=github-runner-arm64}]' \
                 --user-data "$USER_DATA" \
                 --query 'Instances[0].InstanceId' \
                 --output text 2>&1)
               EXIT_CODE=$?
               INSTANCE_ID="$OUTPUT"
-              
+
               if [ $EXIT_CODE -eq 0 ] && [[ ! "$INSTANCE_ID" == *"InsufficientInstanceCapacity"* ]] && [[ ! "$INSTANCE_ID" == *"error"* ]] && [[ ! "$INSTANCE_ID" == *"Error"* ]] && [[ ! -z "$INSTANCE_ID" ]]; then
                 echo "Successfully launched instance in $AZ: $INSTANCE_ID"
                 break
               else
                 echo "Failed to launch in $AZ: $INSTANCE_ID"
                 INSTANCE_ID=""
-                continue
               fi
             done
           else
             echo "Successfully launched instance (AWS-selected zone): $INSTANCE_ID"
           fi
-          
+
           if [ -z "$INSTANCE_ID" ] || [[ "$INSTANCE_ID" == *"error"* ]] || [[ "$INSTANCE_ID" == *"Error"* ]] || [[ "$INSTANCE_ID" == *"InsufficientInstanceCapacity"* ]]; then
             echo "ERROR: Failed to launch instance in any availability zone"
             echo "Last attempt output: $INSTANCE_ID"
             exit 1
           fi
-          
+
           echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
           echo "Launched instance: $INSTANCE_ID"
           aws ec2 wait instance-running --instance-ids $INSTANCE_ID
@@ -200,8 +157,7 @@ jobs:
             --output text)
           echo "public_ip=$PUBLIC_IP" >> $GITHUB_OUTPUT
           echo "Instance running at: $PUBLIC_IP"
-          
-          # Wait for SSH to be ready
+
           echo "Waiting for SSH to be ready..."
           for i in {1..30}; do
             if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i ~/.ssh/id_rsa ubuntu@$PUBLIC_IP echo "SSH Ready" 2>/dev/null; then
@@ -212,59 +168,129 @@ jobs:
             sleep 10
           done
 
-      - name: Setup build on instance
+      - name: Set up Arch Linux ARM chroot
         run: |
           ssh-keyscan -H ${{ steps.launch-instance.outputs.public_ip }} >> ~/.ssh/known_hosts
           ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }} << 'EOF'
-            cd ~
-            git clone --depth 1 --no-checkout https://github.com/${{ github.repository }} mnt-build
-            cd mnt-build
-            git fetch --depth 1 origin ${{ github.sha }}
-            git checkout ${{ github.sha }}
-            git submodule update --init --recursive --depth 1
+            set -euo pipefail
+
+            # Wait for cloud-init (USER_DATA) to finish installing packages
+            cloud-init status --wait || true
+
+            echo "==> Downloading Arch Linux ARM filesystem..."
+            wget -q http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz -O /tmp/archarm.tar.gz
+
+            echo "==> Extracting filesystem to /opt/arch-chroot..."
+            sudo mkdir -p /opt/arch-chroot
+            sudo bsdtar -xpf /tmp/archarm.tar.gz -C /opt/arch-chroot
+            rm /tmp/archarm.tar.gz
+
+            echo "==> Initializing pacman keyring..."
+            sudo arch-chroot /opt/arch-chroot pacman-key --init
+            sudo arch-chroot /opt/arch-chroot pacman-key --populate archlinuxarm
+
+            echo "==> Updating system..."
+            sudo arch-chroot /opt/arch-chroot pacman -Syu --noconfirm
+
+            echo "==> Installing build dependencies..."
+            sudo arch-chroot /opt/arch-chroot pacman -S --noconfirm \
+              base base-devel tzdata
+            sudo arch-chroot /opt/arch-chroot bash -c "
+              ln -sf /usr/share/zoneinfo/America/Los_Angeles /etc/localtime
+              echo 'America/Los_Angeles' > /etc/timezone
+            "
+            sudo arch-chroot /opt/arch-chroot pacman -S --noconfirm \
+              dracut git bc kmod inetutils cpio perl tar xz wget python python-pip vim sudo
+            sudo arch-chroot /opt/arch-chroot pacman -S --noconfirm \
+              dtc libelf flex bison openssl rsync curl arch-install-scripts
+            sudo arch-chroot /opt/arch-chroot pacman -S --noconfirm \
+              parted
+            sudo arch-chroot /opt/arch-chroot pacman -S --noconfirm \
+              gdb strace lsof pciutils usbutils iproute2 net-tools \
+              man-db man-pages less which file htop tmux unzip zip
+            sudo arch-chroot /opt/arch-chroot pacman -Scc --noconfirm
+
+            echo "==> Creating builder user (UID 1001)..."
+            sudo arch-chroot /opt/arch-chroot useradd -m -u 1001 -G wheel -s /bin/bash builder
+            echo '%wheel ALL=(ALL) NOPASSWD: ALL' | sudo tee -a /opt/arch-chroot/etc/sudoers > /dev/null
+
+            echo "==> Installing yay and bmaptool from AUR..."
+            sudo arch-chroot /opt/arch-chroot /bin/bash -c "
+              cd /tmp
+              git clone https://aur.archlinux.org/yay.git
+              chown -R builder:builder /tmp/yay
+              su builder -c 'cd /tmp/yay && makepkg -si --noconfirm'
+              su builder -c 'yay -S --noconfirm --needed bmaptool'
+              rm -rf /tmp/yay
+            "
+
+            echo "==> Configuring git for builder user..."
+            sudo arch-chroot /opt/arch-chroot su - builder -c "
+              git config --global user.email 'build@mntar.ch'
+              git config --global user.name 'MNT-Build Bot'
+              git config --global --add safe.directory '*'
+            "
+
+            echo "==> Arch Linux ARM chroot is ready."
           EOF
 
-      - name: Run build-auto.py on instance
+      - name: Clone repository
+        run: |
+          ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }} << 'EOF'
+            set -euo pipefail
+            sudo arch-chroot /opt/arch-chroot su - builder -c "
+              git clone --depth 1 --no-checkout https://github.com/${{ github.repository }} ~/mnt-build &&
+              cd ~/mnt-build &&
+              git fetch --depth 1 origin ${{ github.sha }} &&
+              git checkout ${{ github.sha }} &&
+              git submodule update --init --recursive --depth 1
+            "
+          EOF
+
+      - name: Run build
         id: run_build
         continue-on-error: true
         run: |
-          ssh ubuntu@${{ steps.launch-instance.outputs.public_ip }} << 'EOF'
-            cd ~/mnt-build/scripts
-            python3 build-auto.py --with-headers --cross-compile none
+          ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }} << 'EOF'
+            set -euo pipefail
+            sudo arch-chroot /opt/arch-chroot su - builder -c "
+              cd ~/mnt-build/scripts &&
+              python3 build-auto.py --with-headers --cross-compile none
+            "
           EOF
 
       - name: Collect logs
         if: always()
         run: |
           mkdir -p build-logs
-          ssh ubuntu@${{ steps.launch-instance.outputs.public_ip }} << 'EOF'
-            find ~/mnt-build -maxdepth 1 -name "*.log" -type f -exec cp {} /tmp/ \; || true
-            find ~/mnt-build/scripts -name "*.log" -type f -exec cp {} /tmp/ \; || true
-          EOF
+          # Builder UID 1001 == ubuntu UID 1001, so no sudo needed to read artifacts
+          ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }} \
+            "find /opt/arch-chroot/home/builder/mnt-build -maxdepth 1 -name '*.log' -type f -exec cp {} /tmp/ \; 2>/dev/null || true; \
+             find /opt/arch-chroot/home/builder/mnt-build/scripts -name '*.log' -type f -exec cp {} /tmp/ \; 2>/dev/null || true"
           scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:/tmp/*.log build-logs/ 2>/dev/null || true
           echo "Collected logs:"
           ls -lh build-logs/
 
-      - name: Copy kernel artifacts back
+      - name: Copy kernel artifacts
         if: ${{ steps.run_build.outcome == 'success' }}
         run: |
           mkdir -p release-artifacts
-          scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/kernel-*.tar.gz release-artifacts/ || true
+          scp -i ~/.ssh/id_rsa "ubuntu@${{ steps.launch-instance.outputs.public_ip }}:/opt/arch-chroot/home/builder/mnt-build/kernel-*.tar.gz" release-artifacts/ || true
           ls -lh release-artifacts/
 
-      - name: Copy headers artifacts back
+      - name: Copy headers artifacts
         if: ${{ steps.run_build.outcome == 'success' }}
         run: |
           mkdir -p release-artifacts
-          scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/headers-*.tar.gz release-artifacts/ || true
+          scp -i ~/.ssh/id_rsa "ubuntu@${{ steps.launch-instance.outputs.public_ip }}:/opt/arch-chroot/home/builder/mnt-build/headers-*.tar.gz" release-artifacts/ || true
           ls -lh release-artifacts/
 
-      - name: Copy module artifacts back
+      - name: Copy module artifacts
         if: ${{ steps.run_build.outcome == 'success' }}
         run: |
           mkdir -p release-artifacts
-          scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/reform2_lpc-*.tar.gz release-artifacts/ || true
-          scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/wlan-*.tar.gz release-artifacts/ || true
+          scp -i ~/.ssh/id_rsa "ubuntu@${{ steps.launch-instance.outputs.public_ip }}:/opt/arch-chroot/home/builder/mnt-build/reform2_lpc-*.tar.gz" release-artifacts/ || true
+          scp -i ~/.ssh/id_rsa "ubuntu@${{ steps.launch-instance.outputs.public_ip }}:/opt/arch-chroot/home/builder/mnt-build/wlan-*.tar.gz" release-artifacts/ || true
           ls -lh release-artifacts/
 
       - name: Terminate EC2 instance
