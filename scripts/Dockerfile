@@ -52,18 +52,32 @@ RUN set -euo pipefail && \
 # Install aarch64 compression libs that the updated libcrypto.so now depends on
 # (zlib, zstd, brotli are new dynamic deps as of OpenSSL 3.x on Arch Linux ARM)
 RUN set -euo pipefail && \
-    MIRROR="http://mirror.archlinuxarm.org/aarch64" && \
+    MIRRORS=( \
+      "http://nj.us.mirror.archlinuxarm.org/aarch64" \
+      "http://ca.us.mirror.archlinuxarm.org/aarch64" \
+      "http://fl.us.mirror.archlinuxarm.org/aarch64" \
+      "http://eu.mirror.archlinuxarm.org/aarch64" \
+      "http://de.mirror.archlinuxarm.org/aarch64" \
+      "http://de3.mirror.archlinuxarm.org/aarch64" \
+      "http://mirror.archlinuxarm.org/aarch64" \
+    ) && \
     SYSROOT=/usr/aarch64-linux-gnu && \
     for repo_pkg in "core/zlib" "core/zstd" "extra/brotli"; do \
       repo="${repo_pkg%%/*}"; pkg="${repo_pkg##*/}"; \
-      curl -fL "${MIRROR}/${repo}/${repo}.db" -o /tmp/repo.db; \
-      entry="$(bsdtar -tf /tmp/repo.db | grep -E "^${pkg}-[^/]+/desc$" | head -n1)"; \
-      [ -n "${entry}" ] || { echo "Package ${pkg} not found in ${repo}" >&2; exit 1; }; \
-      file="$(bsdtar -xOf /tmp/repo.db "${entry}" | awk 'found{print;exit} /^%FILENAME%$/{found=1}')"; \
-      [ -n "${file}" ] || { echo "No FILENAME for ${pkg} in ${repo}" >&2; exit 1; }; \
-      curl -fL "${MIRROR}/${repo}/${file}" -o /tmp/aarch64-pkg.tar; \
+      resolved=false; \
+      for MIRROR in "${MIRRORS[@]}"; do \
+        curl -fsSL "${MIRROR}/${repo}/${repo}.db" -o /tmp/repo.db 2>/dev/null || continue; \
+        entry="$(bsdtar -tf /tmp/repo.db | grep -E "^${pkg}-[^/]+/desc$" | head -n1 || true)"; \
+        [ -n "${entry}" ] || { echo "  ${pkg} not in ${MIRROR}/${repo}, trying next" >&2; continue; }; \
+        file="$(bsdtar -xOf /tmp/repo.db "${entry}" | awk 'found{print;exit} /^%FILENAME%$/{found=1}' || true)"; \
+        [ -n "${file}" ] || { echo "  No FILENAME for ${pkg} at ${MIRROR}, trying next" >&2; continue; }; \
+        curl -fL "${MIRROR}/${repo}/${file}" -o /tmp/aarch64-pkg.tar || continue; \
+        resolved=true; \
+        break; \
+      done; \
+      [ "${resolved}" = "true" ] || { echo "Package ${pkg} not resolved from any mirror" >&2; exit 1; }; \
       rm -rf /tmp/aarch64-pkg-dir && mkdir /tmp/aarch64-pkg-dir; \
-      bsdtar -xpf /tmp/aarch64-pkg.tar -C /tmp/aarch64-pkg-dir; \
+      bsdtar --no-same-owner -xf /tmp/aarch64-pkg.tar -C /tmp/aarch64-pkg-dir; \
       sudo find /tmp/aarch64-pkg-dir/usr/lib -maxdepth 1 -name 'lib*.so*' -exec cp -a {} "${SYSROOT}/lib/" \;; \
       rm -rf /tmp/repo.db /tmp/aarch64-pkg.tar /tmp/aarch64-pkg-dir; \
     done

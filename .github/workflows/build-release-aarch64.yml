@@ -188,6 +188,33 @@ jobs:
             sudo bsdtar -xpf /tmp/archarm.tar.gz -C /opt/arch-chroot
             rm /tmp/archarm.tar.gz
 
+            echo "==> Installing arch-chroot from upstream..."
+            sudo apt-get install -y --no-install-recommends make m4
+            git clone --depth 1 https://github.com/archlinux/arch-install-scripts.git /tmp/arch-install-scripts
+            make -C /tmp/arch-install-scripts arch-chroot
+            sudo install -m 755 /tmp/arch-install-scripts/arch-chroot /usr/local/bin/arch-chroot
+            rm -rf /tmp/arch-install-scripts
+
+            echo "==> Writing DNS configuration..."
+            sudo rm -f /opt/arch-chroot/etc/resolv.conf
+            printf 'nameserver 8.8.8.8\nnameserver 1.1.1.1\n' | sudo tee /opt/arch-chroot/etc/resolv.conf > /dev/null
+
+            echo "==> Configuring pacman mirrors..."
+            printf '%s\n' \
+              'Server = http://nj.us.mirror.archlinuxarm.org/$arch/$repo' \
+              'Server = http://ca.us.mirror.archlinuxarm.org/$arch/$repo' \
+              'Server = http://fl.us.mirror.archlinuxarm.org/$arch/$repo' \
+              'Server = http://eu.mirror.archlinuxarm.org/$arch/$repo' \
+              'Server = http://de.mirror.archlinuxarm.org/$arch/$repo' \
+              'Server = http://de3.mirror.archlinuxarm.org/$arch/$repo' \
+              'Server = http://de4.mirror.archlinuxarm.org/$arch/$repo' \
+              'Server = http://dk.mirror.archlinuxarm.org/$arch/$repo' \
+              'Server = http://mirror.archlinuxarm.org/$arch/$repo' \
+              | sudo tee /opt/arch-chroot/etc/pacman.d/mirrorlist > /dev/null
+
+            echo "==> Bind-mounting chroot dir (required for pacman 7.x mountpoint detection)..."
+            sudo mount --bind /opt/arch-chroot /opt/arch-chroot
+
             echo "==> Initializing pacman keyring..."
             sudo arch-chroot /opt/arch-chroot pacman-key --init
             sudo arch-chroot /opt/arch-chroot pacman-key --populate archlinuxarm
@@ -203,7 +230,7 @@ jobs:
               echo 'America/Los_Angeles' > /etc/timezone
             "
             sudo arch-chroot /opt/arch-chroot pacman -S --noconfirm \
-              dracut git bc kmod inetutils cpio perl tar xz wget python python-pip vim sudo
+              dracut git bc kmod inetutils cpio perl tar xz wget python python-pip vim sudo patch
             sudo arch-chroot /opt/arch-chroot pacman -S --noconfirm \
               dtc libelf flex bison openssl rsync curl arch-install-scripts
             sudo arch-chroot /opt/arch-chroot pacman -S --noconfirm \
@@ -223,7 +250,7 @@ jobs:
               git clone https://aur.archlinux.org/yay.git
               chown -R builder:builder /tmp/yay
               su builder -c 'cd /tmp/yay && makepkg -si --noconfirm'
-              su builder -c 'yay -S --noconfirm --needed bmaptool'
+              su builder -c 'yay -S --noconfirm --needed --answerdiff=None --answerclean=None bmaptool'
               rm -rf /tmp/yay
             "
 
@@ -234,20 +261,22 @@ jobs:
               git config --global --add safe.directory '*'
             "
 
+
             echo "==> Arch Linux ARM chroot is ready."
+
+            echo "==> Releasing bind mount..."
+            sudo umount /opt/arch-chroot 2>/dev/null || true
           EOF
 
       - name: Clone repository
         run: |
           ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }} << 'EOF'
             set -euo pipefail
-            sudo arch-chroot /opt/arch-chroot su - builder -c "
-              git clone --depth 1 --no-checkout https://github.com/${{ github.repository }} ~/mnt-build &&
-              cd ~/mnt-build &&
-              git fetch --depth 1 origin ${{ github.sha }} &&
-              git checkout ${{ github.sha }} &&
-              git submodule update --init --recursive --depth 1
-            "
+            git clone --depth 1 --no-checkout https://github.com/${{ github.repository }} /opt/arch-chroot/home/builder/mnt-build
+            cd /opt/arch-chroot/home/builder/mnt-build
+            git fetch --depth 1 origin ${{ github.sha }}
+            git checkout ${{ github.sha }}
+            git submodule update --init --recursive --depth 1
           EOF
 
       - name: Run build
@@ -256,10 +285,12 @@ jobs:
         run: |
           ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }} << 'EOF'
             set -euo pipefail
+            sudo mount --bind /opt/arch-chroot /opt/arch-chroot
             sudo arch-chroot /opt/arch-chroot su - builder -c "
               cd ~/mnt-build/scripts &&
               python3 build-auto.py --with-headers --cross-compile none
             "
+            sudo umount /opt/arch-chroot 2>/dev/null || true
           EOF
 
       - name: Collect logs
