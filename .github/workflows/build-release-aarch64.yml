@@ -219,8 +219,9 @@ jobs:
             sudo arch-chroot /opt/arch-chroot pacman-key --init
             sudo arch-chroot /opt/arch-chroot pacman-key --populate archlinuxarm
 
-            echo "==> Updating system..."
-            sudo arch-chroot /opt/arch-chroot pacman -Syu --noconfirm
+            echo "==> Updating system (skipping kernel and firmware)..."
+            FIRMWARE_PKGS=$(sudo arch-chroot /opt/arch-chroot pacman -Qq | grep '^linux-firmware' | tr '\n' ',' | sed 's/,$//')
+            sudo arch-chroot /opt/arch-chroot pacman -Syu --noconfirm --ignore "linux-aarch64,${FIRMWARE_PKGS}"
 
             echo "==> Installing build dependencies..."
             sudo arch-chroot /opt/arch-chroot pacman -S --noconfirm \

@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       artifact_run_id:
-        description: Workflow run ID containing the image artifact
+        description: Image Gen Run ID
         required: true
         type: string
       release_tag:
-        description: Exact Git tag of the release to upload to
+        description: Release Tag
         required: true
         type: string
 
