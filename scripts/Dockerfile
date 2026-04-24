@@ -53,16 +53,13 @@ RUN set -euo pipefail && \
 # (zlib, zstd, brotli are new dynamic deps as of OpenSSL 3.x on Arch Linux ARM)
 RUN set -euo pipefail && \
     MIRRORS=( \
-      "http://nj.us.mirror.archlinuxarm.org/aarch64" \
-      "http://ca.us.mirror.archlinuxarm.org/aarch64" \
-      "http://fl.us.mirror.archlinuxarm.org/aarch64" \
-      "http://eu.mirror.archlinuxarm.org/aarch64" \
-      "http://de.mirror.archlinuxarm.org/aarch64" \
-      "http://de3.mirror.archlinuxarm.org/aarch64" \
       "http://mirror.archlinuxarm.org/aarch64" \
+      "http://de.mirror.archlinuxarm.org/aarch64" \
+      "http://eu.mirror.archlinuxarm.org/aarch64" \
+      "http://sg.mirror.archlinuxarm.org/aarch64" \
     ) && \
     SYSROOT=/usr/aarch64-linux-gnu && \
-    for repo_pkg in "core/zlib" "core/zstd" "extra/brotli"; do \
+    for repo_pkg in "core/zlib" "core/zstd" "extra/brotli" "community/brotli"; do \
       repo="${repo_pkg%%/*}"; pkg="${repo_pkg##*/}"; \
       resolved=false; \
       for MIRROR in "${MIRRORS[@]}"; do \
@@ -75,12 +72,16 @@ RUN set -euo pipefail && \
         resolved=true; \
         break; \
       done; \
-      [ "${resolved}" = "true" ] || { echo "Package ${pkg} not resolved from any mirror" >&2; exit 1; }; \
-      rm -rf /tmp/aarch64-pkg-dir && mkdir /tmp/aarch64-pkg-dir; \
-      bsdtar --no-same-owner -xf /tmp/aarch64-pkg.tar -C /tmp/aarch64-pkg-dir; \
-      sudo find /tmp/aarch64-pkg-dir/usr/lib -maxdepth 1 -name 'lib*.so*' -exec cp -a {} "${SYSROOT}/lib/" \;; \
-      rm -rf /tmp/repo.db /tmp/aarch64-pkg.tar /tmp/aarch64-pkg-dir; \
-    done
+      if [ "${resolved}" = "true" ]; then \
+        rm -rf /tmp/aarch64-pkg-dir && mkdir /tmp/aarch64-pkg-dir; \
+        bsdtar --no-same-owner -xf /tmp/aarch64-pkg.tar -C /tmp/aarch64-pkg-dir; \
+        sudo find /tmp/aarch64-pkg-dir/usr/lib -maxdepth 1 -name 'lib*.so*' -exec cp -a {} "${SYSROOT}/lib/" \;; \
+        rm -rf /tmp/repo.db /tmp/aarch64-pkg.tar /tmp/aarch64-pkg-dir; \
+      fi; \
+    done && \
+    test -f "${SYSROOT}/lib/libz.so" || { echo "zlib not installed" >&2; exit 1; } && \
+    test -f "${SYSROOT}/lib/libzstd.so" || { echo "zstd not installed" >&2; exit 1; } && \
+    test -f "${SYSROOT}/lib/libbrotlidec.so" || { echo "brotli not installed" >&2; exit 1; }
 
 RUN set -euo pipefail && \
     cd /tmp && \
