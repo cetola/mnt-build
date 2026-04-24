@@ -1,6 +1,9 @@
 name: Remote Build and Release Arm
 
 on:
+  push:
+    tags:
+      - '*-aarch64'
   workflow_dispatch:
 
 permissions:

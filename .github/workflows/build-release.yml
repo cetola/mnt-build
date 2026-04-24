@@ -3,7 +3,7 @@ name: Remote Build and Release
 on:
   push:
     tags:
-      - '*'
+      - '*-x86_64'
   workflow_dispatch:
     inputs:
       arch:
