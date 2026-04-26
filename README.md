@@ -23,8 +23,17 @@ Releases will contain the following artifacts:
 See [the docs](https://github.com/yoctoproject/bmaptool) for more info on `bmaptool`, and see [Images](#floppy_disk-images) for details on which images you can download.
 
 ```bash
-sudo bmaptool copy https://github.com/cetola/mnt-build/releases/download/6.19.11.reform3-aarch64/arch-sys-mnt-pocket-a311d-6.19.11-reform3.img.zst /dev/sdX
+sudo bmaptool copy \
+  https://github.com/cetola/mnt-build/releases/download/[kernel_ver]-[arch]/arch-sys-[sysimage]-[kernel_ver].img.zst \
+  /dev/sdX
 ```
+
+Current supported sysimage values are:
+- pocket-reform-system-a311d
+- reform-next-system-rk3588
+- pocket-reform-system-rk3588
+- pocket-reform-system-imx8mp
+
 You'll boot into an Arch Linux ARM filesystem. Users include `root` and `alarm`. Passwords are the same as the username.
 
 ## :construction_worker: Building and Installing
@@ -78,7 +87,7 @@ Once the build is complete, you'll get a kernel tarball containing the kernel, c
   - For SD-boot platforms, bootloader is also written into raw sectors at configured offsets
 - Output: `mnt-reform-image-<sysimage>.tar` which contains the image, bmap file, SHA, and manifest
 
-I will currently only release images for hardware that I can test. So today, that's the Pocket Reform with the A311D SoM. If you are willing to test other platforms / SoMs, create an issue and I'll produce more images.
+I will currently only release images for hardware that I can test. So today, that's the Pocket Reform with the A311D SoM. If you are willing to test other platforms / SoMs, [create an issue](https://github.com/cetola/mnt-build/issues) and I'll produce more images.
 
 The kernel is patched with all patches from `reform-debian-packages/linux/patches[ver]`. As such, it should boot on any MNT Reform platform, provided you use the correct DTB and have a U-Boot setup that works for your system.
 
@@ -95,7 +104,5 @@ $> sudo dd if=path/to/<flash.bin> of=/dev/sdX conv=notrunc bs=512 seek=<seek> sk
 See ./scripts/build-fsbl.sh --help for all options and details.
 
 ## :pencil2: Notes
-
-This is very much a work in progress. Do not try to build unless you are on a release tag. Even then, YMMV.
 
 There is a container in the scripts directory if you happen to be building for Arch and care about toolchain skew.
