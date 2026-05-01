@@ -23,7 +23,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          fetch-depth: 1
+          submodules: false
+
+      - name: Checkout submodules
+        run: git submodule update --init --recursive --depth 1
 
       - name: Resolve build configuration
         id: build_config

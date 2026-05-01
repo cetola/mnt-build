@@ -24,6 +24,11 @@ on:
         description: Optional U-Boot commit SHA (used in source mode)
         required: false
         type: string
+      zero_fill_max_mb:
+        description: Max MiB for bounded zero-fill before final trim
+        required: true
+        default: "2048"
+        type: string
 
 permissions:
   contents: read
@@ -154,12 +159,14 @@ jobs:
           chmod +x ./scripts/image-gen.sh
           BOOTLOADER_SOURCE_MODE="$(printf '%s' "${{ github.event.inputs.bootloader_mode }}" | tr -d '\r\n')"
           UBOOT_SHA="$(printf '%s' "${{ github.event.inputs.uboot_sha }}" | tr -d '\r\n')"
+          ZERO_FILL_MAX_MB="$(printf '%s' "${{ github.event.inputs.zero_fill_max_mb }}" | tr -d '\r\n')"
           echo "Using BOOTLOADER_SOURCE_MODE=${BOOTLOADER_SOURCE_MODE}"
           if [[ -n "${UBOOT_SHA}" ]]; then
             echo "Using UBOOT_SHA=${UBOOT_SHA}"
           fi
-          export BOOTLOADER_SOURCE_MODE UBOOT_SHA
-          sudo --preserve-env=BOOTLOADER_SOURCE_MODE,UBOOT_SHA \
+          echo "Using ZERO_FILL_MAX_MB=${ZERO_FILL_MAX_MB}"
+          export BOOTLOADER_SOURCE_MODE UBOOT_SHA ZERO_FILL_MAX_MB
+          sudo --preserve-env=BOOTLOADER_SOURCE_MODE,UBOOT_SHA,ZERO_FILL_MAX_MB \
             ./scripts/image-gen.sh --sysimage "${{ github.event.inputs.sysimage }}"
 
       - name: Package outputs (zstd, bmap, logs, sha256)
@@ -198,6 +205,7 @@ jobs:
             if [[ -n "${{ github.event.inputs.uboot_sha }}" ]]; then
               echo "U-Boot SHA: ${{ github.event.inputs.uboot_sha }}"
             fi
+            echo "ZERO_FILL_MAX_MB: ${{ github.event.inputs.zero_fill_max_mb }}"
             echo
             echo "Files:"
             ls -lh

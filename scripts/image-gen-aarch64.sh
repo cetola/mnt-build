@@ -140,7 +140,7 @@ check_required_tools() {
     "git:git"
     "curl:curl"
     "tar:tar"
-    "chroot:arch-install-scripts"
+    "chroot:coreutils"
     "cpio:cpio"
   )
 

@@ -228,9 +228,6 @@ jobs:
               dtc libelf flex bison openssl rsync curl arch-install-scripts
             sudo arch-chroot /opt/arch-chroot pacman -S --noconfirm \
               parted
-            sudo arch-chroot /opt/arch-chroot pacman -S --noconfirm \
-              gdb strace lsof pciutils usbutils iproute2 net-tools \
-              man-db man-pages less which file htop tmux unzip zip
             sudo arch-chroot /opt/arch-chroot pacman -Scc --noconfirm
 
             echo "==> Creating builder user matching host ubuntu UID..."
