@@ -114,6 +114,7 @@ prepare_arm_libs() {
 # ── argument parsing ──────────────────────────────────────────────────────────
 
 WITH_ARM_LIBS=false
+NO_CACHE=false
 BUILD_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -130,9 +131,13 @@ while [[ $# -gt 0 ]]; do
             WITH_ARM_LIBS=true
             shift
             ;;
+        --no-cache)
+            NO_CACHE=true
+            shift
+            ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--uid UID] [--username USERNAME] [--with-arm-libs]"
+            echo "Usage: $0 [--uid UID] [--username USERNAME] [--with-arm-libs] [--no-cache]"
             exit 1
             ;;
     esac
@@ -146,7 +151,15 @@ else
     mkdir -p "${ARM_STAGING}/lib" "${ARM_STAGING}/include"
 fi
 
+if [ "${NO_CACHE}" = false ]; then
+    echo "WARNING: building with Docker layer cache enabled -- packages may be stale." >&2
+    echo "         Pass --no-cache to force a full rebuild from scratch." >&2
+fi
+
+DOCKER_BUILD_FLAGS=()
+[ "${NO_CACHE}" = true ] && DOCKER_BUILD_FLAGS+=("--no-cache")
+
 cd "${SCRIPT_DIR}"
-docker build --no-cache -t arch-kernel-builder "${BUILD_ARGS[@]}" . 2>&1 | tee container-build.log
+docker build "${DOCKER_BUILD_FLAGS[@]}" -t arch-kernel-builder "${BUILD_ARGS[@]}" . 2>&1 | tee container-build.log
 
 rm -rf "${ARM_STAGING}"

@@ -15,12 +15,6 @@ RUN pacman -Sy --noconfirm archlinux-keyring && \
         dracut git bc kmod inetutils cpio perl tar xz wget python python-pip vim sudo \
         aarch64-linux-gnu-binutils aarch64-linux-gnu-gcc aarch64-linux-gnu-gdb \
         dtc libelf flex bison openssl rsync curl arch-install-scripts && \
-    pacman -S --noconfirm \
-        parted qemu-user-static qemu-user-static-binfmt && \
-    pacman -S --noconfirm \
-        gdb strace lsof pciutils usbutils iproute2 net-tools \
-        man-db man-pages less which file htop tmux unzip zip && \
-    pacman -S --noconfirm qemu-full && \
     pacman -Scc --noconfirm
 
 RUN useradd -m -u ${UID} -G wheel -s /bin/bash ${USERNAME} && \
