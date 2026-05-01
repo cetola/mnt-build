@@ -874,11 +874,27 @@ class KernelBuilder:
                         "wlan.ko",
                     ),
                     (
-                        self.config.build_dir / "qcacld2/debian-meta/usr",
-                        "usr",
+                        self.config.build_dir / "qcacld2/debian/bdwlan30.bin",
+                        "usr/lib/firmware/qcacld2/bdwlan30.bin",
                     ),
                     (
-                        self.config.build_dir / "qcacld2/debian-meta/etc/modprobe.d/reform-qcacld2.conf",
+                        self.config.build_dir / "qcacld2/debian/otp30.bin",
+                        "usr/lib/firmware/qcacld2/otp30.bin",
+                    ),
+                    (
+                        self.config.build_dir / "qcacld2/debian/qwlan30.bin",
+                        "usr/lib/firmware/qcacld2/qwlan30.bin",
+                    ),
+                    (
+                        self.config.build_dir / "qcacld2/debian/cfg.dat",
+                        "usr/lib/firmware/wlan/qcacld2/cfg.dat",
+                    ),
+                    (
+                        self.config.build_dir / "qcacld2/debian/qcom_cfg.ini",
+                        "usr/lib/firmware/wlan/qcacld2/qcom_cfg.ini",
+                    ),
+                    (
+                        self.config.build_dir / "qcacld2/debian/reform-qcacld2.conf",
                         "etc/modprobe.d/reform-qcacld2.conf",
                     ),
                 ],

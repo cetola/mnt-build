@@ -86,14 +86,6 @@ jobs:
         run: |
           AVAILABILITY_ZONES=("us-west-2a" "us-west-2b" "us-west-2c" "us-west-2d")
           INSTANCE_ID=""
-          # Change ubuntu user UID to 1001 to match the builder user inside the chroot,
-          # so artifacts written by builder are directly accessible by ubuntu on the host.
-          USER_DATA='#!/bin/bash
-              usermod -u 1001 ubuntu
-              groupmod -g 1001 ubuntu
-              chown -R ubuntu:ubuntu /home/ubuntu
-              apt-get update
-              apt-get install -y libarchive-tools arch-install-scripts'
 
           ARM64_AMI=$(aws ssm get-parameter \
             --name /aws/service/canonical/ubuntu/server/24.04/stable/current/arm64/hvm/ebs-gp3/ami-id \
@@ -108,7 +100,7 @@ jobs:
             --security-group-ids sg-09c18dc7c46327e69 \
             --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":40,"VolumeType":"gp3"}}]' \
             --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=github-runner-arm64}]' \
-            --user-data "$USER_DATA" \
+            \
             --query 'Instances[0].InstanceId' \
             --output text 2>&1)
           EXIT_CODE=$?
@@ -127,7 +119,7 @@ jobs:
                 --placement AvailabilityZone=$AZ \
                 --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":40,"VolumeType":"gp3"}}]' \
                 --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=github-runner-arm64}]' \
-                --user-data "$USER_DATA" \
+                \
                 --query 'Instances[0].InstanceId' \
                 --output text 2>&1)
               EXIT_CODE=$?
@@ -177,8 +169,9 @@ jobs:
           ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }} << 'EOF'
             set -euo pipefail
 
-            # Wait for cloud-init (USER_DATA) to finish installing packages
-            cloud-init status --wait || true
+            echo "==> Installing host dependencies..."
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends libarchive-tools make m4
 
             echo "==> Downloading Arch Linux ARM filesystem..."
             wget -q http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz -O /tmp/archarm.tar.gz
@@ -189,7 +182,6 @@ jobs:
             rm /tmp/archarm.tar.gz
 
             echo "==> Installing arch-chroot from upstream..."
-            sudo apt-get install -y --no-install-recommends make m4
             git clone --depth 1 https://github.com/archlinux/arch-install-scripts.git /tmp/arch-install-scripts
             make -C /tmp/arch-install-scripts arch-chroot
             sudo install -m 755 /tmp/arch-install-scripts/arch-chroot /usr/local/bin/arch-chroot
@@ -241,8 +233,10 @@ jobs:
               man-db man-pages less which file htop tmux unzip zip
             sudo arch-chroot /opt/arch-chroot pacman -Scc --noconfirm
 
-            echo "==> Creating builder user (UID 1001)..."
-            sudo arch-chroot /opt/arch-chroot useradd -m -u 1001 -G wheel -s /bin/bash builder
+            echo "==> Creating builder user matching host ubuntu UID..."
+            UBUNTU_UID=$(id -u ubuntu)
+            sudo arch-chroot /opt/arch-chroot userdel -r alarm 2>/dev/null || true
+            sudo arch-chroot /opt/arch-chroot useradd -m -u ${UBUNTU_UID} -G wheel -s /bin/bash builder
             echo '%wheel ALL=(ALL) NOPASSWD: ALL' | sudo tee -a /opt/arch-chroot/etc/sudoers > /dev/null
 
             echo "==> Installing yay and bmaptool from AUR..."
@@ -262,7 +256,6 @@ jobs:
               git config --global --add safe.directory '*'
             "
 
-
             echo "==> Arch Linux ARM chroot is ready."
 
             echo "==> Releasing bind mount..."
@@ -273,11 +266,13 @@ jobs:
         run: |
           ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }} << 'EOF'
             set -euo pipefail
-            git clone --depth 1 --no-checkout https://github.com/${{ github.repository }} /opt/arch-chroot/home/builder/mnt-build
-            cd /opt/arch-chroot/home/builder/mnt-build
-            git fetch --depth 1 origin ${{ github.sha }}
-            git checkout ${{ github.sha }}
-            git submodule update --init --recursive --depth 1
+            sudo arch-chroot /opt/arch-chroot su - builder -c "
+              git clone --depth 1 --no-checkout https://github.com/${{ github.repository }} ~/mnt-build &&
+              cd ~/mnt-build &&
+              git fetch --depth 1 origin ${{ github.sha }} &&
+              git checkout ${{ github.sha }} &&
+              git submodule update --init --recursive --depth 1
+            "
           EOF
 
       - name: Run build
@@ -298,7 +293,7 @@ jobs:
         if: always()
         run: |
           mkdir -p build-logs
-          # Builder UID 1001 == ubuntu UID 1001, so no sudo needed to read artifacts
+          # Builder UID matches ubuntu UID, so no sudo needed to read artifacts
           ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }} \
             "find /opt/arch-chroot/home/builder/mnt-build -maxdepth 1 -name '*.log' -type f -exec cp {} /tmp/ \; 2>/dev/null || true; \
              find /opt/arch-chroot/home/builder/mnt-build/scripts -name '*.log' -type f -exec cp {} /tmp/ \; 2>/dev/null || true"
