@@ -1,0 +1,24 @@
+Just a quick note to remind myself what's going on here, as this branch is
+persisting longer (sadly) than I thought it would.
+
+The patches essentally add "knobs" to turn that edit how the panel driver's
+timings work, or when they occur.
+
+The panel-updates and lpc-updates folders hold scripts that will edit the kernel
+in such a way as to take advantage of a new lpc driver. This requires an update
+to firmware which can be found here:
+https://source.mnt.re/stephano/pocket-reform/-/tree/sysctl-fw-panel-v2?ref_type=heads
+
+This firmware change allows all "levers" of the display to be controlled by the
+kernel, rather than having part of the control in the firmware and the rest in
+the kernel.
+
+For whatever reason, on my Pocket Reform display, applying the kernel patches
+makes the display much more reliable. If I had to guess this is because the
+timings are indeed a bit off. I have to then guess that the reason only some
+folks see issues is because some panels are more sensitive than others.
+Regardless, keeping these patches on my system helps.
+
+Adding the lpc-updates and panel-updates on the other hand doesn't seem to help
+at all. Regardless of how I change those "knobs" I cannot get the panel to
+reliably come up every time. It still blanks out occationally.
