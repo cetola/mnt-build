@@ -1,0 +1,29 @@
+name: Mirror Submodules
+
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - src: https://source.mnt.re/reform/qcacld2.git
+            dst: https://github.com/cetola/qcacld2-mirror.git
+          - src: https://source.mnt.re/reform/reform-tools.git
+            dst: https://github.com/cetola/reform-tools-mirror.git
+          - src: https://source.mnt.re/reform/reform-debian-packages.git
+            dst: https://github.com/cetola/reform-debian-packages-mirror.git
+
+    steps:
+      - name: Mirror ${{ matrix.src }}
+        run: |
+          git clone --mirror "${{ matrix.src }}" repo
+          cd repo
+          git remote set-url --push origin "https://x-access-token:${{ secrets.MIRROR_TOKEN }}@${DST#https://}"
+          git push --mirror
+        env:
+          DST: ${{ matrix.dst }}
