@@ -17,6 +17,10 @@ jobs:
             dst: https://github.com/cetola/reform-tools-mirror.git
           - src: https://source.mnt.re/reform/reform-debian-packages.git
             dst: https://github.com/cetola/reform-debian-packages-mirror.git
+          - src: https://source.mnt.re/reform/reform-next.git
+            dst: git@github.com:cetola/reform-next-mirror.git
+          - src: https://source.mnt.re/reform/pocket-reform.git
+            dst: git@github.com:cetola/pocket-reform-mirror.git
 
     steps:
       - name: Mirror ${{ matrix.src }}
