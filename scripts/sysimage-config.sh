@@ -5,6 +5,7 @@ readonly SUPPORTED_SYSIMAGES=(
   reform-next-system-rk3588
   pocket-reform-system-rk3588
   pocket-reform-system-imx8mp
+  pocket-reform-system-rk3588s
 )
 
 reset_sysimage_config() {
@@ -107,6 +108,10 @@ set_image_identity_for_sysimage() {
       IMAGE_PLATFORM="reform-next"
       IMAGE_SOM="rk3588"
       ;;
+    pocket-reform-system-rk3588s)
+      IMAGE_PLATFORM="pocket"
+      IMAGE_SOM="rk3588s"
+      ;;
     pocket-reform-system-rk3588)
       IMAGE_PLATFORM="pocket"
       IMAGE_SOM="rk3588"
@@ -129,6 +134,9 @@ set_kernel_dtb_stem_for_sysimage() {
       ;;
     reform-next-system-rk3588)
       KERNEL_DTB_STEM="rk3588-mnt-reform-next"
+      ;;
+    pocket-reform-system-rk3588s)
+      KERNEL_DTB_STEM="rk3588s-mnt-pocket-reform"
       ;;
     pocket-reform-system-rk3588)
       KERNEL_DTB_STEM="rk3588-mnt-pocket-reform"
@@ -167,6 +175,16 @@ configure_sysimage_fallback() {
     pocket-reform-system-rk3588)
       set_sysimage_config \
         "rockchip/rk3588-mnt-pocket-reform.dtb" \
+        "1edcd78a47ce32927e854118bf6bf9b86d2f8fe7" \
+        "reform-rk3588-uboot" \
+        "2026-01-28" \
+        32768 \
+        0 \
+        true
+      ;;
+    pocket-reform-system-rk3588s)
+      set_sysimage_config \
+        "rockchip/rk3588s-mnt-pocket-reform.dtb" \
         "1edcd78a47ce32927e854118bf6bf9b86d2f8fe7" \
         "reform-rk3588-uboot" \
         "2026-01-28" \

@@ -11,6 +11,7 @@ on:
           - pocket-reform-system-a311d
           - reform-next-system-rk3588
           - pocket-reform-system-rk3588
+          - pocket-reform-system-rk3588s
           - pocket-reform-system-imx8mp
       bootloader_mode:
         description: Bootloader artifact source mode

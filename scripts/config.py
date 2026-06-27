@@ -46,6 +46,12 @@ DTS_CONFIGS = [
     }
 ]
 
+VENDOR_CONFIG_MAP = {
+    "rockchip": "CONFIG_ARCH_ROCKCHIP",
+    "freescale": "CONFIG_ARCH_MXC",
+    "amlogic":   "CONFIG_ARCH_MESON",
+}
+
 
 @dataclass
 class BuildConfig:
@@ -60,6 +66,7 @@ class BuildConfig:
     reform_tools_dir: Path
     patches_dir: Path
     xtra_patches_dir: Path
+    xtra_dtbs_dir: Path
     defconfig_file: Path
     config_file: Path
     dtb_files: list[Path]
@@ -102,11 +109,19 @@ class BuildConfig:
 
         # DTBs are only relevant for the current ARM64 Reform kernel flow.
         dtb_files = []
+        xtra_dtbs_dir = build_dir / "xtra-dtbs"
         if arch == "arm64":
             dtb_files = [
                 linux_dir / f"arch/arm64/boot/dts/{dts_config['vendor']}/{dts_config['name'].replace('.dts', '.dtb')}"
                 for dts_config in DTS_CONFIGS
             ]
+            if xtra_dtbs_dir.exists():
+                for vendor_dir in sorted(xtra_dtbs_dir.iterdir()):
+                    if vendor_dir.is_dir() and vendor_dir.name in VENDOR_CONFIG_MAP:
+                        for dts_file in sorted(vendor_dir.glob("*.dts")):
+                            dtb_files.append(
+                                linux_dir / f"arch/arm64/boot/dts/{vendor_dir.name}/{dts_file.stem}.dtb"
+                            )
 
         return cls(
             version=version,
@@ -120,6 +135,7 @@ class BuildConfig:
             reform_tools_dir=build_dir / "reform-tools",
             patches_dir=build_dir / "reform-debian-packages" / "linux" / f"patches{major_minor}",
             xtra_patches_dir=build_dir / "xtra-patches" / major_minor,
+            xtra_dtbs_dir=xtra_dtbs_dir,
             defconfig_file=build_dir / "configs" / defconfig_name_for_arch(arch),
             config_file=build_dir / "configs" / f"config-{version}-mnt-reform-{arch}",
             dtb_files=dtb_files,

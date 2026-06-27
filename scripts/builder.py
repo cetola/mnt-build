@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from config import BuildConfig, DEFAULT_CROSS_COMPILE, DEFAULT_KERNEL_ONLY, DTS_CONFIGS
+from config import BuildConfig, DEFAULT_CROSS_COMPILE, DEFAULT_KERNEL_ONLY, DTS_CONFIGS, VENDOR_CONFIG_MAP
 from errors import BuildError, PatchStats
 from logging_setup import Colors
 
@@ -504,31 +504,49 @@ class KernelBuilder:
 
         Copies DTS files to the kernel source tree and adds corresponding
         entries to vendor-specific Makefiles for DTB creation.
+        Sources: reform-debian-packages (DTS_CONFIGS) and xtra-dtbs/ (optional).
         """
         if not self._uses_dtbs():
             self.logger.info(f"Skipping custom DTS setup for ARCH={self.arch}")
             return
 
-        self.logger.info(f"Adding {len(DTS_CONFIGS)} custom DTS files...")
-
+        # Build unified list of (source_path, name, vendor, config_sym)
+        all_dts: list[tuple] = []
         for dts_config in DTS_CONFIGS:
-            custom_dts = self.config.build_dir / f"reform-debian-packages/linux/{dts_config['name']}"
-            dts_dest = self.config.linux_dir / f"arch/arm64/boot/dts/{dts_config['vendor']}/{dts_config['name']}"
+            source = self.config.build_dir / f"reform-debian-packages/linux/{dts_config['name']}"
+            all_dts.append((source, dts_config['name'], dts_config['vendor'], dts_config['config']))
 
-            if not custom_dts.exists():
-                raise BuildError(f"Custom DTS file not found: {custom_dts}")
+        xtra_dir = self.config.xtra_dtbs_dir
+        if xtra_dir.exists():
+            for vendor_dir in sorted(xtra_dir.iterdir()):
+                if not vendor_dir.is_dir():
+                    continue
+                vendor = vendor_dir.name
+                config_sym = VENDOR_CONFIG_MAP.get(vendor)
+                if config_sym is None:
+                    self.logger.warning(f"Unknown vendor '{vendor}' in xtra-dtbs, skipping")
+                    continue
+                for dts_file in sorted(vendor_dir.glob("*.dts")):
+                    all_dts.append((dts_file, dts_file.name, vendor, config_sym))
+            xtra_count = len(all_dts) - len(DTS_CONFIGS)
+            if xtra_count:
+                self.logger.info(f"Found {xtra_count} extra DTS file(s) in {xtra_dir}")
 
-            shutil.copy2(custom_dts, dts_dest)
-            self.logger.info(f"  Copied {dts_config['name']} to {dts_config['vendor']}/")
+        self.logger.info(f"Adding {len(all_dts)} custom DTS files...")
+
+        for source, name, vendor, _ in all_dts:
+            if not source.exists():
+                raise BuildError(f"Custom DTS file not found: {source}")
+            dts_dest = self.config.linux_dir / f"arch/arm64/boot/dts/{vendor}/{name}"
+            shutil.copy2(source, dts_dest)
+            self.logger.info(f"  Copied {name} to {vendor}/")
 
         # Group by vendor to avoid processing the same Makefile multiple times
         vendors_to_update: dict = {}
-        for dts_config in DTS_CONFIGS:
-            vendor = dts_config['vendor']
+        for _, name, vendor, config_sym in all_dts:
             if vendor not in vendors_to_update:
                 vendors_to_update[vendor] = []
-            dtb_name = dts_config['name'].replace('.dts', '.dtb')
-            vendors_to_update[vendor].append((dtb_name, dts_config['config']))
+            vendors_to_update[vendor].append((name.replace('.dts', '.dtb'), config_sym))
 
         for vendor, dtb_entries in vendors_to_update.items():
             self.logger.info(f"Modifying {vendor} dts Makefile...")
