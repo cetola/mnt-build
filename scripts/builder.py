@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from config import BuildConfig, DEFAULT_CROSS_COMPILE, DEFAULT_KERNEL_ONLY, DTS_CONFIGS, VENDOR_CONFIG_MAP
+from config import BuildConfig, DEFAULT_CROSS_COMPILE, DEFAULT_KERNEL_ONLY, DTS_CONFIGS, EXTRA_DTB_PATHS, VENDOR_CONFIG_MAP
 from errors import BuildError, PatchStats
 from logging_setup import Colors
 
@@ -562,6 +562,11 @@ class KernelBuilder:
             if entries_to_add:
                 with open(makefile, "a") as f:
                     f.write("\n" + "".join(entries_to_add))
+
+        if EXTRA_DTB_PATHS:
+            self.logger.info(f"Also shipping {len(EXTRA_DTB_PATHS)} upstream DTB(s) (built by kernel, not copied):")
+            for path in EXTRA_DTB_PATHS:
+                self.logger.info(f"  {Path(path).name}")
 
     # ------------------------------------------------------------------
     # Config management
