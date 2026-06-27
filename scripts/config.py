@@ -52,6 +52,12 @@ VENDOR_CONFIG_MAP = {
     "amlogic":   "CONFIG_ARCH_MESON",
 }
 
+# Upstream DTBs built by make dtbs that should be verified and packaged
+# alongside the custom DTBs, without requiring any source copying.
+EXTRA_DTB_PATHS = [
+    "arch/arm64/boot/dts/rockchip/rk3588s-radxa-cm5-io.dtb",
+]
+
 
 @dataclass
 class BuildConfig:
@@ -122,6 +128,8 @@ class BuildConfig:
                             dtb_files.append(
                                 linux_dir / f"arch/arm64/boot/dts/{vendor_dir.name}/{dts_file.stem}.dtb"
                             )
+            for extra_path in EXTRA_DTB_PATHS:
+                dtb_files.append(linux_dir / extra_path)
 
         return cls(
             version=version,
