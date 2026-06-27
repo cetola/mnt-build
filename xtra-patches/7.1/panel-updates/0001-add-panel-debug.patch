@@ -1,0 +1,1257 @@
+From 87695a41a4b1b2b7aa7588aae6f808e999da7712 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephanoc@gmail.com>
+Date: Sat, 14 Mar 2026 14:19:55 -0700
+Subject: [PATCH] add panel debug
+
+---
+ .../gpu/drm/panel/panel-mnt-pocket-reform.c   | 1098 +++++++++++++----
+ 1 file changed, 825 insertions(+), 273 deletions(-)
+
+diff --git a/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c b/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
+index 7f6a19bb83bc..b851360be0dc 100644
+--- a/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
++++ b/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
+@@ -13,6 +13,7 @@
+ #include <linux/backlight.h>
+ #include <linux/delay.h>
+ #include <linux/gpio/consumer.h>
++#include <linux/errno.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
+ #include <linux/regulator/consumer.h>
+@@ -132,287 +133,815 @@ drm_panel_create_dsi_backlight(struct jdi_panel *jdi)
+ 					      &dsi_bl_ops, &props);
+ }
+ 
+-static ssize_t dsi_write_raw(struct mipi_dsi_device *dsi,
+-                             const void *data, size_t len)
++static int dsi_write_raw(struct jdi_panel *jdi, const void *data, size_t len,
++			 const char *tag)
+ {
++	struct mipi_dsi_device *dsi = jdi->dsi;
++	struct device *dev = &dsi->dev;
++	const u8 *buf = data;
+ 	const struct mipi_dsi_msg msg = {
+ 		.channel = dsi->channel,
+ 		.tx_buf = data,
+ 		.tx_len = len,
+ 		.type = MIPI_DSI_DCS_LONG_WRITE,
+-		.flags = MIPI_DSI_MSG_USE_LPM
++		.flags = MIPI_DSI_MSG_USE_LPM,
+ 	};
++	ssize_t ret;
++
++	ret = dsi->host->ops->transfer(dsi->host, &msg);
++	if (ret < 0) {
++		dev_err(dev,
++			"[display raw] %s failed: ret=%zd len=%zu cmd=0x%02x\n",
++			tag ? tag : "write", ret, len, len ? buf[0] : 0xff);
++		return ret;
++	}
++
++	dev_dbg(dev,
++		"[display raw] %s ok: ret=%zd len=%zu cmd=0x%02x\n",
++		tag ? tag : "write", ret, len, len ? buf[0] : 0xff);
++
++	return 0;
++}
++
++static int jdi_dcs_soft_reset(struct jdi_panel *jdi)
++{
++	int ret = mipi_dsi_dcs_soft_reset(jdi->dsi);
++	if (ret < 0)
++		dev_err(&jdi->dsi->dev,
++			"[display dcs] soft_reset failed: %d\n", ret);
++	return ret;
++}
++
++static int jdi_dcs_exit_sleep_mode(struct jdi_panel *jdi)
++{
++	int ret = mipi_dsi_dcs_exit_sleep_mode(jdi->dsi);
++	if (ret < 0)
++		dev_err(&jdi->dsi->dev,
++			"[display dcs] exit_sleep_mode failed: %d\n", ret);
++	return ret;
++}
++
++static int jdi_dcs_set_display_on(struct jdi_panel *jdi)
++{
++	int ret = mipi_dsi_dcs_set_display_on(jdi->dsi);
++	if (ret < 0)
++		dev_err(&jdi->dsi->dev,
++			"[display dcs] set_display_on failed: %d\n", ret);
++	return ret;
++}
+ 
+-	return dsi->host->ops->transfer(dsi->host, &msg);
++static int jdi_dcs_set_display_off(struct jdi_panel *jdi)
++{
++	int ret = mipi_dsi_dcs_set_display_off(jdi->dsi);
++	if (ret < 0)
++		dev_err(&jdi->dsi->dev,
++			"[display dcs] set_display_off failed: %d\n", ret);
++	return ret;
+ }
+ 
+-static void pocket_display_v2_init(struct jdi_panel* jdi) {
++static int jdi_dcs_read_u8(struct jdi_panel *jdi, u8 cmd, u8 *val)
++{
++	int ret = mipi_dsi_dcs_read(jdi->dsi, cmd, val, sizeof(*val));
++
++	if (ret < 0) {
++		dev_err(&jdi->dsi->dev,
++			"[display dcs] read 0x%02x failed: %d\n", cmd, ret);
++		return ret;
++	}
++
++	dev_info(&jdi->dsi->dev,
++		 "[display dcs] read 0x%02x = 0x%02x\n", cmd, *val);
++	return ret;
++}
++
++static int pocket_display_v2_init(struct jdi_panel *jdi)
++{
+ 	struct mipi_dsi_device *dsi = jdi->dsi;
+ 	struct device *dev = &jdi->dsi->dev;
+ 	int ret;
+ 
+-	mipi_dsi_dcs_soft_reset(dsi);
++	ret = jdi_dcs_soft_reset(jdi);
++	if (ret < 0)
++		return ret;
+ 	msleep(20);
+ 
+ 	// for unknown reasons, if we send all the data tables
+ 	// on the first init, it takes very long (~14 seconds),
+ 	// but it's quick the second time around.
+ 	if (jdi->display_v2_init_count > 0) {
+-		dsi_write_raw(dsi, (u8[]) {0xE0,0xAB,0xBA}, 3);
+-		dsi_write_raw(dsi, (u8[]) {0xFF,0x01}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x83,0x16}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x90,0x81}, 2);
+-
+-		dsi_write_raw(dsi, (u8[]) {0xFF,0x02}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x80,0xA0}, 2); // vcom
+-		dsi_write_raw(dsi, (u8[]) {0x81,0x50}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x82,0x50}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xA2,0xB0}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xA3,0x49}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xA4,0x6B}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xA5,0x34}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xA6,0x22}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xA7,0x34}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xA8,0x22}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xA9,0x51}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xAA,0xD4}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xAB,0xA6}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xAC,0x05}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xAD,0xAB}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xAE,0x3B}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xAF,0x1B}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xB0,0x1E}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xB1,0xAB}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xB2,0xC1}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xB3,0x22}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xB4,0xFF}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xB5,0xCC}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xB6,0x23}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xB7,0x01}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xBF,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xC0,0x0E}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xC1,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xC2,0xFF}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xC3,0x08}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xC5,0xFF}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xC7,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xC8,0x05}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xC9,0x12}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xCA,0x29}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xCB,0x41}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xCE,0x06}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xD1,0x7F}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xD2,0x6A}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xD3,0x63}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xD4,0x63}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xD5,0x61}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xD6,0x61}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xD7,0x5D}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xD8,0x5B}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xD9,0x55}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xDA,0x4D}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xDB,0x4B}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xDC,0x49}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xDD,0x47}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xDE,0x43}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xDF,0x27}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xE0,0x14}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xE1,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xE2,0x7F}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xE3,0x6A}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xE4,0x63}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xE5,0x63}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xE6,0x61}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xE7,0x61}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xE8,0x5D}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xE9,0x5B}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xEA,0x55}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xEB,0x4D}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xEC,0x4B}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xED,0x49}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xEE,0x47}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xEF,0x43}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xF0,0x27}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xF1,0x14}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xF2,0x00}, 2);
+-
+-		dsi_write_raw(dsi, (u8[]) {0xFF,0x03}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x9D,0x00}, 2);
+-
+-		dsi_write_raw(dsi, (u8[]) {0xFF,0x04}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x80,0xCD}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x81,0xCB}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x82,0xA9}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x83,0x8C}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x84,0x46}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x85,0x66}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x86,0x66}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x87,0x64}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x88,0xA0}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x89,0x08}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x8A,0xA0}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x8B,0x08}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x8C,0x02}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x8D,0x81}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x8E,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x8F,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x90,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x91,0x05}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x92,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x93,0x0F}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x94,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x95,0x08}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x96,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x97,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x98,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x99,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x9A,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x9B,0x01}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x9C,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x9D,0x74}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x9E,0x12}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x9F,0xB2}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xA0,0x07}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xA1,0xA0}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xA2,0x08}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xA3,0x60}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xA4,0x08}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xA5,0x02}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xA6,0x54}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xA7,0x80}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xA8,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xA9,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xAA,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xAB,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xAC,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xAD,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xAE,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xAF,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xB0,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xB1,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xB2,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xB3,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xB4,0x09}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xB5,0x01}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xB6,0x13}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xB7,0x08}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xB8,0x12}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xB9,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xBA,0x03}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xBB,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xBC,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xBD,0x01}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xBE,0x70}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xBF,0xBA}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xC0,0x98}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xC1,0x76}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xC2,0x54}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xC3,0x32}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xC4,0x10}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xC5,0xCD}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xC6,0xEF}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xC7,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xC8,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xC9,0x20}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xCB,0x21}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xCD,0x0B}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xCF,0x10}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xD0,0x12}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xD1,0x14}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xD2,0x16}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xD3,0x18}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xD4,0x1A}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xD5,0x05}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xD6,0x07}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xD7,0x09}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xD9,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xDA,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xDB,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xDC,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xDD,0x20}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xDF,0x21}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xE3,0x0B}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xE5,0x11}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xE6,0x13}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xE7,0x15}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xE8,0x17}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xE9,0x19}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xEA,0x1B}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xEB,0x06}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xEC,0x08}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xED,0x0A}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xEF,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xF0,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xF1,0xA2}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xF2,0x18}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xF3,0x11}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xF4,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xF5,0x11}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xF6,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xF7,0x11}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xF8,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xF9,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xFA,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xFB,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xFC,0x20}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xFD,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xFE,0x00}, 2);
+-
+-		dsi_write_raw(dsi, (u8[]) {0xFF,0x05}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x8F,0xE8}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x90,0x84}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x91,0x77}, 2);
+-
+-		dsi_write_raw(dsi, (u8[]) {0xFF,0x06}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x80,0x10}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x81,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x82,0x07}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x83,0x9F}, 2);
+-
+-		dsi_write_raw(dsi, (u8[]) {0xFF,0x07}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x80,0x14}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x81,0x12}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x82,0x02}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x83,0x20}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x84,0x24}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x85,0x0C}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x86,0x39}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x87,0x77}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x88,0x80}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x89,0x33}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x8A,0x00}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x8B,0x04}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x8C,0x09}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x8D,0x40}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x8E,0x40}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x91,0x11}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x92,0x2C}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x93,0x2D}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0x94,0x03}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xA0,0x0A}, 2);
+-		dsi_write_raw(dsi, (u8[]) {0xA2,0x13}, 2);
+-
+-		dsi_write_raw(dsi, (u8[]) {0xFF,0x00}, 2);
+-		dev_info(dev, "[display v2] sent tables OK\n");
++		ret = dsi_write_raw(jdi, (u8[]) {0xE0,0xAB,0xBA}, 3, "v2-0xE0");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xFF,0x01}, 2, "v2-0xFF");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x83,0x16}, 2, "v2-0x83");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x90,0x81}, 2, "v2-0x90");
++		if (ret < 0)
++			return ret;
++
++		ret = dsi_write_raw(jdi, (u8[]) {0xFF,0x02}, 2, "v2-0xFF");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x80,0xA0}, 2, "v2-0x80");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x81,0x50}, 2, "v2-0x81");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x82,0x50}, 2, "v2-0x82");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xA2,0xB0}, 2, "v2-0xA2");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xA3,0x49}, 2, "v2-0xA3");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xA4,0x6B}, 2, "v2-0xA4");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xA5,0x34}, 2, "v2-0xA5");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xA6,0x22}, 2, "v2-0xA6");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xA7,0x34}, 2, "v2-0xA7");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xA8,0x22}, 2, "v2-0xA8");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xA9,0x51}, 2, "v2-0xA9");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xAA,0xD4}, 2, "v2-0xAA");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xAB,0xA6}, 2, "v2-0xAB");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xAC,0x05}, 2, "v2-0xAC");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xAD,0xAB}, 2, "v2-0xAD");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xAE,0x3B}, 2, "v2-0xAE");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xAF,0x1B}, 2, "v2-0xAF");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xB0,0x1E}, 2, "v2-0xB0");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xB1,0xAB}, 2, "v2-0xB1");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xB2,0xC1}, 2, "v2-0xB2");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xB3,0x22}, 2, "v2-0xB3");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xB4,0xFF}, 2, "v2-0xB4");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xB5,0xCC}, 2, "v2-0xB5");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xB6,0x23}, 2, "v2-0xB6");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xB7,0x01}, 2, "v2-0xB7");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xBF,0x00}, 2, "v2-0xBF");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xC0,0x0E}, 2, "v2-0xC0");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xC1,0x00}, 2, "v2-0xC1");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xC2,0xFF}, 2, "v2-0xC2");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xC3,0x08}, 2, "v2-0xC3");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xC5,0xFF}, 2, "v2-0xC5");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xC7,0x00}, 2, "v2-0xC7");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xC8,0x05}, 2, "v2-0xC8");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xC9,0x12}, 2, "v2-0xC9");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xCA,0x29}, 2, "v2-0xCA");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xCB,0x41}, 2, "v2-0xCB");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xCE,0x06}, 2, "v2-0xCE");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xD1,0x7F}, 2, "v2-0xD1");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xD2,0x6A}, 2, "v2-0xD2");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xD3,0x63}, 2, "v2-0xD3");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xD4,0x63}, 2, "v2-0xD4");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xD5,0x61}, 2, "v2-0xD5");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xD6,0x61}, 2, "v2-0xD6");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xD7,0x5D}, 2, "v2-0xD7");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xD8,0x5B}, 2, "v2-0xD8");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xD9,0x55}, 2, "v2-0xD9");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xDA,0x4D}, 2, "v2-0xDA");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xDB,0x4B}, 2, "v2-0xDB");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xDC,0x49}, 2, "v2-0xDC");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xDD,0x47}, 2, "v2-0xDD");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xDE,0x43}, 2, "v2-0xDE");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xDF,0x27}, 2, "v2-0xDF");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xE0,0x14}, 2, "v2-0xE0");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xE1,0x00}, 2, "v2-0xE1");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xE2,0x7F}, 2, "v2-0xE2");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xE3,0x6A}, 2, "v2-0xE3");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xE4,0x63}, 2, "v2-0xE4");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xE5,0x63}, 2, "v2-0xE5");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xE6,0x61}, 2, "v2-0xE6");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xE7,0x61}, 2, "v2-0xE7");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xE8,0x5D}, 2, "v2-0xE8");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xE9,0x5B}, 2, "v2-0xE9");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xEA,0x55}, 2, "v2-0xEA");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xEB,0x4D}, 2, "v2-0xEB");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xEC,0x4B}, 2, "v2-0xEC");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xED,0x49}, 2, "v2-0xED");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xEE,0x47}, 2, "v2-0xEE");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xEF,0x43}, 2, "v2-0xEF");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xF0,0x27}, 2, "v2-0xF0");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xF1,0x14}, 2, "v2-0xF1");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xF2,0x00}, 2, "v2-0xF2");
++		if (ret < 0)
++			return ret;
++
++		ret = dsi_write_raw(jdi, (u8[]) {0xFF,0x03}, 2, "v2-0xFF");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x9D,0x00}, 2, "v2-0x9D");
++		if (ret < 0)
++			return ret;
++
++		ret = dsi_write_raw(jdi, (u8[]) {0xFF,0x04}, 2, "v2-0xFF");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x80,0xCD}, 2, "v2-0x80");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x81,0xCB}, 2, "v2-0x81");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x82,0xA9}, 2, "v2-0x82");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x83,0x8C}, 2, "v2-0x83");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x84,0x46}, 2, "v2-0x84");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x85,0x66}, 2, "v2-0x85");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x86,0x66}, 2, "v2-0x86");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x87,0x64}, 2, "v2-0x87");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x88,0xA0}, 2, "v2-0x88");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x89,0x08}, 2, "v2-0x89");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x8A,0xA0}, 2, "v2-0x8A");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x8B,0x08}, 2, "v2-0x8B");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x8C,0x02}, 2, "v2-0x8C");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x8D,0x81}, 2, "v2-0x8D");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x8E,0x00}, 2, "v2-0x8E");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x8F,0x00}, 2, "v2-0x8F");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x90,0x00}, 2, "v2-0x90");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x91,0x05}, 2, "v2-0x91");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x92,0x00}, 2, "v2-0x92");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x93,0x0F}, 2, "v2-0x93");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x94,0x00}, 2, "v2-0x94");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x95,0x08}, 2, "v2-0x95");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x96,0x00}, 2, "v2-0x96");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x97,0x00}, 2, "v2-0x97");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x98,0x00}, 2, "v2-0x98");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x99,0x00}, 2, "v2-0x99");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x9A,0x00}, 2, "v2-0x9A");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x9B,0x01}, 2, "v2-0x9B");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x9C,0x00}, 2, "v2-0x9C");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x9D,0x74}, 2, "v2-0x9D");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x9E,0x12}, 2, "v2-0x9E");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x9F,0xB2}, 2, "v2-0x9F");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xA0,0x07}, 2, "v2-0xA0");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xA1,0xA0}, 2, "v2-0xA1");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xA2,0x08}, 2, "v2-0xA2");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xA3,0x60}, 2, "v2-0xA3");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xA4,0x08}, 2, "v2-0xA4");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xA5,0x02}, 2, "v2-0xA5");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xA6,0x54}, 2, "v2-0xA6");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xA7,0x80}, 2, "v2-0xA7");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xA8,0x00}, 2, "v2-0xA8");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xA9,0x00}, 2, "v2-0xA9");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xAA,0x00}, 2, "v2-0xAA");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xAB,0x00}, 2, "v2-0xAB");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xAC,0x00}, 2, "v2-0xAC");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xAD,0x00}, 2, "v2-0xAD");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xAE,0x00}, 2, "v2-0xAE");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xAF,0x00}, 2, "v2-0xAF");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xB0,0x00}, 2, "v2-0xB0");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xB1,0x00}, 2, "v2-0xB1");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xB2,0x00}, 2, "v2-0xB2");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xB3,0x00}, 2, "v2-0xB3");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xB4,0x09}, 2, "v2-0xB4");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xB5,0x01}, 2, "v2-0xB5");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xB6,0x13}, 2, "v2-0xB6");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xB7,0x08}, 2, "v2-0xB7");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xB8,0x12}, 2, "v2-0xB8");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xB9,0x00}, 2, "v2-0xB9");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xBA,0x03}, 2, "v2-0xBA");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xBB,0x00}, 2, "v2-0xBB");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xBC,0x00}, 2, "v2-0xBC");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xBD,0x01}, 2, "v2-0xBD");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xBE,0x70}, 2, "v2-0xBE");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xBF,0xBA}, 2, "v2-0xBF");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xC0,0x98}, 2, "v2-0xC0");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xC1,0x76}, 2, "v2-0xC1");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xC2,0x54}, 2, "v2-0xC2");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xC3,0x32}, 2, "v2-0xC3");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xC4,0x10}, 2, "v2-0xC4");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xC5,0xCD}, 2, "v2-0xC5");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xC6,0xEF}, 2, "v2-0xC6");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xC7,0x00}, 2, "v2-0xC7");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xC8,0x00}, 2, "v2-0xC8");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xC9,0x20}, 2, "v2-0xC9");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xCB,0x21}, 2, "v2-0xCB");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xCD,0x0B}, 2, "v2-0xCD");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xCF,0x10}, 2, "v2-0xCF");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xD0,0x12}, 2, "v2-0xD0");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xD1,0x14}, 2, "v2-0xD1");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xD2,0x16}, 2, "v2-0xD2");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xD3,0x18}, 2, "v2-0xD3");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xD4,0x1A}, 2, "v2-0xD4");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xD5,0x05}, 2, "v2-0xD5");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xD6,0x07}, 2, "v2-0xD6");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xD7,0x09}, 2, "v2-0xD7");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xD9,0x00}, 2, "v2-0xD9");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xDA,0x00}, 2, "v2-0xDA");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xDB,0x00}, 2, "v2-0xDB");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xDC,0x00}, 2, "v2-0xDC");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xDD,0x20}, 2, "v2-0xDD");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xDF,0x21}, 2, "v2-0xDF");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xE3,0x0B}, 2, "v2-0xE3");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xE5,0x11}, 2, "v2-0xE5");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xE6,0x13}, 2, "v2-0xE6");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xE7,0x15}, 2, "v2-0xE7");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xE8,0x17}, 2, "v2-0xE8");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xE9,0x19}, 2, "v2-0xE9");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xEA,0x1B}, 2, "v2-0xEA");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xEB,0x06}, 2, "v2-0xEB");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xEC,0x08}, 2, "v2-0xEC");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xED,0x0A}, 2, "v2-0xED");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xEF,0x00}, 2, "v2-0xEF");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xF0,0x00}, 2, "v2-0xF0");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xF1,0xA2}, 2, "v2-0xF1");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xF2,0x18}, 2, "v2-0xF2");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xF3,0x11}, 2, "v2-0xF3");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xF4,0x00}, 2, "v2-0xF4");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xF5,0x11}, 2, "v2-0xF5");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xF6,0x00}, 2, "v2-0xF6");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xF7,0x11}, 2, "v2-0xF7");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xF8,0x00}, 2, "v2-0xF8");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xF9,0x00}, 2, "v2-0xF9");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xFA,0x00}, 2, "v2-0xFA");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xFB,0x00}, 2, "v2-0xFB");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xFC,0x20}, 2, "v2-0xFC");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xFD,0x00}, 2, "v2-0xFD");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xFE,0x00}, 2, "v2-0xFE");
++		if (ret < 0)
++			return ret;
++
++		ret = dsi_write_raw(jdi, (u8[]) {0xFF,0x05}, 2, "v2-0xFF");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x8F,0xE8}, 2, "v2-0x8F");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x90,0x84}, 2, "v2-0x90");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x91,0x77}, 2, "v2-0x91");
++		if (ret < 0)
++			return ret;
++
++		ret = dsi_write_raw(jdi, (u8[]) {0xFF,0x06}, 2, "v2-0xFF");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x80,0x10}, 2, "v2-0x80");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x81,0x00}, 2, "v2-0x81");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x82,0x07}, 2, "v2-0x82");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x83,0x9F}, 2, "v2-0x83");
++		if (ret < 0)
++			return ret;
++
++		ret = dsi_write_raw(jdi, (u8[]) {0xFF,0x07}, 2, "v2-0xFF");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x80,0x14}, 2, "v2-0x80");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x81,0x12}, 2, "v2-0x81");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x82,0x02}, 2, "v2-0x82");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x83,0x20}, 2, "v2-0x83");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x84,0x24}, 2, "v2-0x84");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x85,0x0C}, 2, "v2-0x85");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x86,0x39}, 2, "v2-0x86");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x87,0x77}, 2, "v2-0x87");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x88,0x80}, 2, "v2-0x88");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x89,0x33}, 2, "v2-0x89");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x8A,0x00}, 2, "v2-0x8A");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x8B,0x04}, 2, "v2-0x8B");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x8C,0x09}, 2, "v2-0x8C");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x8D,0x40}, 2, "v2-0x8D");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x8E,0x40}, 2, "v2-0x8E");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x91,0x11}, 2, "v2-0x91");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x92,0x2C}, 2, "v2-0x92");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x93,0x2D}, 2, "v2-0x93");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0x94,0x03}, 2, "v2-0x94");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xA0,0x0A}, 2, "v2-0xA0");
++		if (ret < 0)
++			return ret;
++		ret = dsi_write_raw(jdi, (u8[]) {0xA2,0x13}, 2, "v2-0xA2");
++		if (ret < 0)
++			return ret;
++
++		ret = dsi_write_raw(jdi, (u8[]) {0xFF,0x00}, 2, "v2-0xFF");
++		if (ret < 0)
++			return ret;		dev_info(dev, "[display v2] sent tables OK\n");
+ 	} else {
+ 		dev_info(dev, "[display v2] not sending tables this time\n");
+ 	}
+ 
+ 	jdi->display_v2_init_count++;
+ 
+-	ret = mipi_dsi_dcs_exit_sleep_mode(dsi);
+-	if (ret < 0) {
+-		dev_err(dev, "[display v2] failed to set exit sleep mode: %d\n", ret);
+-	}
+-	mdelay(100);
+-	ret = mipi_dsi_dcs_set_display_on(dsi);
+-	if (ret < 0) {
+-		dev_err(dev, "[display v2] failed to set display on: %d\n", ret);
+-	}
++	ret = jdi_dcs_exit_sleep_mode(jdi);
++	if (ret < 0)
++		return ret;
++
++	msleep(120);
++
++	ret = jdi_dcs_set_display_on(jdi);
++	if (ret < 0)
++		return ret;
++
+ 	dev_info(dev, "[display v2] OK\n");
++	return 0;
+ }
+ 
+-static void pocket_display_v1_init(struct jdi_panel* jdi) {
++static int pocket_display_v1_init(struct jdi_panel *jdi)
++{
+ 	struct mipi_dsi_device *dsi = jdi->dsi;
+ 	struct device *dev = &jdi->dsi->dev;
+ 	int ret;
+@@ -421,6 +950,7 @@ static void pocket_display_v1_init(struct jdi_panel* jdi) {
+ 	ret = mipi_dsi_dcs_set_pixel_format(dsi, MIPI_DCS_PIXEL_FMT_24BIT << 4);
+ 	if (ret < 0) {
+ 		dev_err(dev, "[display v1] failed to set pixel format: %d\n", ret);
++		return ret;
+ 	}
+ 
+ 	// write_memory_start
+@@ -428,10 +958,9 @@ static void pocket_display_v1_init(struct jdi_panel* jdi) {
+ 	ret = mipi_dsi_generic_write(dsi, (u8[]) {0x00}, 0);
+ 
+ 	msleep(200);
+-	ret = mipi_dsi_dcs_exit_sleep_mode(dsi);
+-	if (ret < 0) {
+-		dev_err(dev, "[display v1] failed to set exit sleep mode: %d\n", ret);
+-	}
++	ret = jdi_dcs_exit_sleep_mode(jdi);
++	if (ret < 0)
++		return ret;
+ 
+ 	// required delay
+ 	msleep(800);
+@@ -440,6 +969,7 @@ static void pocket_display_v1_init(struct jdi_panel* jdi) {
+ 	ret = mipi_dsi_generic_write(dsi, (u8[]){0xB0, 0x00}, 2);
+ 	if (ret < 0) {
+ 		dev_err(dev, "[display v1] failed to set mcap: %d\n", ret);
++		return ret;
+ 	}
+ 
+ 	// required delay
+@@ -451,6 +981,7 @@ static void pocket_display_v1_init(struct jdi_panel* jdi) {
+ 	if (ret < 0) {
+ 		dev_err(dev, "[display v1] failed to set display interface setting: %d\n"
+ 			, ret);
++		return ret;
+ 	}
+ 
+ 	// interface ID setting
+@@ -459,9 +990,18 @@ static void pocket_display_v1_init(struct jdi_panel* jdi) {
+ 
+ 	// DSI control
+ 	ret = mipi_dsi_generic_write(dsi, (u8[]) {0xb6, 0x3a, 0xd3}, 3);
+-	ret = mipi_dsi_dcs_set_display_on(dsi);
++	ret = jdi_dcs_set_display_on(jdi);
++	if (ret < 0)
++		return ret;
++
++	ret = mipi_dsi_dcs_set_display_brightness(dsi, 127);
++	if (ret < 0) {
++		dev_err(dev, "[display v1] failed to set display brightness: %d\n", ret);
++		return ret;
++	}
+ 
+-	mipi_dsi_dcs_set_display_brightness(dsi, 127);
++	dev_info(dev, "[display v1] OK\n");
++	return 0;
+ }
+ 
+ static int jdi_panel_init(struct jdi_panel *jdi)
+@@ -482,8 +1022,11 @@ static int jdi_panel_init(struct jdi_panel *jdi)
+ 	msleep(20);
+ 
+ 	if (!jdi->panel_version) {
+-		mipi_dsi_dcs_read(dsi, 12, &readval, sizeof(readval));
+-		dev_err(dev, "[mnt pocket reform display] read register 12a: 0x%x\n", (int)readval);
++		ret = jdi_dcs_read_u8(jdi, 12, &readval);
++		if (ret < 0)
++			dev_warn(dev, "[mnt pocket reform display] failed to read register 12a, defaulting to v2\n");
++		else
++			dev_err(dev, "[mnt pocket reform display] read register 12a: 0x%x\n", (int)readval);
+ 
+ 		if (readval == 0x77 || readval == 0x70) {
+ 			jdi->panel_version = 1;
+@@ -500,9 +1043,13 @@ static int jdi_panel_init(struct jdi_panel *jdi)
+ 		dsi->mode_flags &= ~MIPI_DSI_MODE_VIDEO_HSE;
+ 		dsi->mode_flags &= ~(MIPI_DSI_MODE_NO_EOT_PACKET | MIPI_DSI_MODE_VIDEO_NO_HFP | MIPI_DSI_MODE_VIDEO_NO_HBP | MIPI_DSI_MODE_VIDEO_NO_HSA);
+ 
+-		pocket_display_v2_init(jdi);
++		ret = pocket_display_v2_init(jdi);
++		if (ret < 0)
++			return ret;
+ 	} else {
+-		pocket_display_v1_init(jdi);
++		ret = pocket_display_v1_init(jdi);
++		if (ret < 0)
++			return ret;
+ 		if (!jdi->backlight) {
+ 			jdi->backlight = drm_panel_create_dsi_backlight(jdi);
+ 			if (IS_ERR(jdi->backlight))
+@@ -518,14 +1065,17 @@ static int jdi_panel_init(struct jdi_panel *jdi)
+ static int jdi_panel_disable(struct drm_panel *panel)
+ {
+ 	struct jdi_panel *jdi = to_jdi_panel(panel);
++	int ret = 0;
+ 
+-	if (!jdi->enabled) return 0;
++	if (!jdi->enabled)
++		return 0;
+ 
+ 	jdi->enabled = false;
+-	mipi_dsi_dcs_set_display_off(jdi->dsi);
+-	if (jdi->backlight) backlight_disable(jdi->backlight);
++	ret = jdi_dcs_set_display_off(jdi);
++	if (jdi->backlight)
++		backlight_disable(jdi->backlight);
+ 
+-	return 0;
++	return ret < 0 ? ret : 0;
+ }
+ 
+ static int jdi_panel_unprepare(struct drm_panel *panel)
+@@ -541,11 +1091,11 @@ static int jdi_panel_unprepare(struct drm_panel *panel)
+ 	if (ret < 0)
+ 		dev_err(dev, "regulator disable failed, %d\n", ret);
+ 
+-	if (!IS_ERR(jdi->enable_gpio)) gpiod_set_value(jdi->enable_gpio, 0);
++	if (!IS_ERR(jdi->enable_gpio)) gpiod_set_value_cansleep(jdi->enable_gpio, 0);
+ 
+-	if (!IS_ERR(jdi->reset_gpio)) gpiod_set_value(jdi->reset_gpio, 1);
++	if (!IS_ERR(jdi->reset_gpio)) gpiod_set_value_cansleep(jdi->reset_gpio, 1);
+ 
+-	if (!IS_ERR(jdi->dcdc_en_gpio)) gpiod_set_value(jdi->dcdc_en_gpio, 0);
++	if (!IS_ERR(jdi->dcdc_en_gpio)) gpiod_set_value_cansleep(jdi->dcdc_en_gpio, 0);
+ 
+ 	jdi->prepared = false;
+ 
+@@ -571,13 +1121,13 @@ static int jdi_panel_prepare(struct drm_panel *panel)
+ 
+ 	msleep(20);
+ 
+-	if (!IS_ERR(jdi->dcdc_en_gpio)) gpiod_set_value(jdi->dcdc_en_gpio, 1);
++	if (!IS_ERR(jdi->dcdc_en_gpio)) gpiod_set_value_cansleep(jdi->dcdc_en_gpio, 1);
+ 	usleep_range(10, 20);
+ 
+-	if (!IS_ERR(jdi->reset_gpio)) gpiod_set_value(jdi->reset_gpio, 0);
++	if (!IS_ERR(jdi->reset_gpio)) gpiod_set_value_cansleep(jdi->reset_gpio, 0);
+ 	usleep_range(10, 20);
+ 
+-	if (!IS_ERR(jdi->enable_gpio)) gpiod_set_value(jdi->enable_gpio, 1);
++	if (!IS_ERR(jdi->enable_gpio)) gpiod_set_value_cansleep(jdi->enable_gpio, 1);
+ 	usleep_range(10, 20);
+ 
+ 	if (!of_property_present(dev->of_node, "init-in-enable")) {
+@@ -816,6 +1366,8 @@ static void jdi_panel_remove(struct mipi_dsi_device *dsi)
+ 	if (ret < 0)
+ 		dev_err(&dsi->dev, "failed to disable panel: %d\n", ret);
+ 
++	jdi_panel_unprepare(&jdi->base);
++
+ 	ret = mipi_dsi_detach(dsi);
+ 	if (ret < 0)
+ 		dev_err(&dsi->dev, "failed to detach from DSI host: %d\n",
+@@ -829,6 +1381,7 @@ static void jdi_panel_shutdown(struct mipi_dsi_device *dsi)
+ 	struct jdi_panel *jdi = mipi_dsi_get_drvdata(dsi);
+ 
+ 	jdi_panel_disable(&jdi->base);
++	jdi_panel_unprepare(&jdi->base);
+ }
+ 
+ static struct mipi_dsi_driver jdi_panel_driver = {
+@@ -846,4 +1399,3 @@ MODULE_AUTHOR("Sumit Semwal <sumit.semwal@linaro.org>");
+ MODULE_AUTHOR("Vinay Simha BN <simhavcs@gmail.com>");
+ MODULE_AUTHOR("Lukas Hartmann <lukas@mntre.com>");
+ MODULE_DESCRIPTION("MNT Pocket Reform Display WUXGA");
+-MODULE_LICENSE("GPL v2");
+-- 
+2.47.3
+
