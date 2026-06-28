@@ -83,7 +83,17 @@ jobs:
             tar \
             cpio \
             bmap-tools \
-            zstd
+            zstd \
+            uuid-dev \
+            libgnutls28-dev \
+            libssl-dev \
+            build-essential \
+            bison \
+            flex \
+            python3-dev \
+            swig \
+            gcc-aarch64-linux-gnu \
+            python3-pyelftools
 
           echo "== Versions =="
           parted --version || true

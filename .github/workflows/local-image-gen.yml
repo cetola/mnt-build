@@ -89,11 +89,22 @@ jobs:
             tar \
             cpio \
             gcc-aarch64-linux-gnu \
+            python3-pyelftools \
             binutils-aarch64-linux-gnu \
             qemu-user-static \
             binfmt-support \
             bmap-tools \
-            zstd
+            zstd \
+            uuid-dev \
+            libgnutls28-dev \
+            libssl-dev \
+            build-essential \
+            bison \
+            flex \
+            python3-dev \
+            swig \
+            gcc-aarch64-linux-gnu \
+            python3-pyelftools
 
           # Useful for debugging if anything still fails
           echo "== Versions =="
