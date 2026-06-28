@@ -106,20 +106,22 @@ jobs:
         run: |
           set -euo pipefail
           SYSIMAGE="$(printf '%s' "${{ github.event.inputs.sysimage }}" | tr -d '\r\n')"
-          MACHINES_DIR="./reform-tools/machines"
+          MACHINES_DIRS=("./local-machines" "./reform-tools/machines")
 
-          if [[ ! -d "$MACHINES_DIR" ]]; then
-            echo "ERROR: machines directory does not exist: $MACHINES_DIR" >&2
-            echo "Top-level repo entries:" >&2
-            ls -1 >&2
-            exit 1
-          fi
+          CONF=""
+          for dir in "${MACHINES_DIRS[@]}"; do
+            [[ -d "$dir" ]] || continue
+            CONF="$(grep -R -l --include='*.conf' --fixed-strings "SYSIMAGE=\"$SYSIMAGE\"" "$dir" | head -n1 || true)"
+            [[ -n "$CONF" ]] && break
+          done
 
-          CONF="$(grep -R -l --include='*.conf' --fixed-strings "SYSIMAGE=\"$SYSIMAGE\"" "$MACHINES_DIR" | head -n1 || true)"
           if [[ -z "$CONF" ]]; then
-            echo "No machine config found for $SYSIMAGE under $MACHINES_DIR" >&2
+            echo "No machine config found for $SYSIMAGE" >&2
             echo "Available SYSIMAGE values:" >&2
-            grep -R -h --include='*.conf' '^SYSIMAGE=' "$MACHINES_DIR" | sed -E 's/^SYSIMAGE=\"(.*)\"$/\1/' | sort -u >&2
+            for dir in "${MACHINES_DIRS[@]}"; do
+              [[ -d "$dir" ]] || continue
+              grep -R -h --include='*.conf' '^SYSIMAGE=' "$dir" | sed -E 's/^SYSIMAGE=\"(.*)\"$/\1/' | sort -u >&2
+            done
             exit 1
           fi
 

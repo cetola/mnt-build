@@ -211,6 +211,7 @@ configure_sysimage_fallback() {
 find_machine_conf_for_sysimage() {
   local wanted_sysimage="$1"
   local candidate_dirs=(
+    "$SCRIPT_DIR/../local-machines"
     "$SCRIPT_DIR/../reform-tools/machines"
     "$SCRIPT_DIR/../../reform-tools/machines"
   )
