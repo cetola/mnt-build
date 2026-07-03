@@ -1,0 +1,61 @@
+From 6effaf80761d802e92f1410d2bb8361223752438 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Fri, 3 Jul 2026 13:14:03 -0700
+Subject: [PATCH] exit sleep before writing vendor tables
+
+---
+ .../gpu/drm/panel/panel-mnt-pocket-reform.c   | 27 ++++++++++---------
+ 1 file changed, 14 insertions(+), 13 deletions(-)
+
+diff --git a/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c b/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
+index 4c4bb685a199..3ac195b34a19 100644
+--- a/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
++++ b/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
+@@ -436,15 +436,24 @@ static int pocket_display_v2_init(struct jdi_panel *jdi)
+ 	ret = jdi_dcs_soft_reset(jdi);
+ 	if (ret < 0)
+ 		return ret;
+-	jdi_trace(jdi, __func__, "sleeping 120ms after soft reset (IC requires >= 120ms before Sleep Out)");
++	jdi_trace(jdi, __func__, "sleeping 120ms after soft reset (panel requires >= 120ms before Sleep Out)");
+ 	msleep(120);
+-	jdi_trace(jdi, __func__, "20ms identify delay complete");
++	jdi_trace(jdi, __func__, "120ms soft-reset delay complete");
+ 	jdi_trace(jdi, __func__, "post-soft-reset delay complete");
+ 	jdi_dump_runtime_regs(jdi, __func__);
+ 
+-	// for unknown reasons, if we send all the data tables
+-	// on the first init, it takes very long (~14 seconds),
+-	// but it's quick the second time around.
++	// Exit sleep before writing vendor tables: the IC's analog circuits
++	// (gamma, gate drivers) are powered down in sleep mode.  Vendor register
++	// writes sent to a sleeping IC are not latched, which leaves the PHY in
++	// an undefined state and prevents the HS clock lane from starting when the
++	// DSI host tries to enter video mode.
++	ret = jdi_dcs_exit_sleep_mode(jdi);
++	if (ret < 0)
++		return ret;
++	msleep(120);
++	jdi_trace(jdi, __func__, "post-exit-sleep delay complete");
++	jdi_dump_runtime_regs(jdi, __func__);
++
+ 	if (force_v2_tables_first_init || jdi->display_v2_init_count > 0) {
+ 		ret = dsi_write_raw(jdi, (u8[]) {0xE0,0xAB,0xBA}, 3, "v2-0xE0");
+ 		if (ret < 0)
+@@ -1144,14 +1153,6 @@ static int pocket_display_v2_init(struct jdi_panel *jdi)
+ 	jdi->display_v2_init_count++;
+ 	jdi_trace(jdi, __func__, "display_v2_init_count incremented to %d", jdi->display_v2_init_count);
+ 
+-	ret = jdi_dcs_exit_sleep_mode(jdi);
+-	if (ret < 0)
+-		return ret;
+-
+-	msleep(120);
+-	jdi_trace(jdi, __func__, "post-exit-sleep delay complete");
+-	jdi_dump_runtime_regs(jdi, __func__);
+-
+ 	ret = jdi_dcs_set_display_on(jdi);
+ 	if (ret < 0)
+ 		return ret;
+-- 
+2.47.3
+
