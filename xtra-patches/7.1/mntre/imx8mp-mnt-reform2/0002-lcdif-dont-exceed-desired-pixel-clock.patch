@@ -1,0 +1,33 @@
+From 776721d5e1a6996054829c2b5f903a34b19a044c
+From: Lukas F. Hartmann <lukas@mntre.com>
+Subject: lcdif-dont-exceed-desired-pixel-clock
+Date:   Thu May 30 14:50:52 2024 +0200
+
+    lcdif: don't exceed desired pixel clock
+
+diff --git a/drivers/gpu/drm/mxsfb/lcdif_kms.c b/drivers/gpu/drm/mxsfb/lcdif_kms.c
+index 2541d2de..6820f3f7 100644
+--- a/drivers/gpu/drm/mxsfb/lcdif_kms.c
++++ b/drivers/gpu/drm/mxsfb/lcdif_kms.c
+@@ -537,8 +537,19 @@ static void lcdif_crtc_atomic_enable(struct drm_crtc *crtc,
+ 	struct drm_display_mode *m = &lcdif->crtc.state->adjusted_mode;
+ 	struct drm_device *drm = lcdif->drm;
+ 	dma_addr_t paddr;
+-
+-	clk_set_rate(lcdif->clk, m->clock * 1000);
++	u32 actual;
++	u32 mult = 1000;
++
++	/* Get as close to the desired pixel clock, but do not
++		 exceed it--otherwise, MIPI-DSI links fail */
++	do {
++		clk_set_rate(lcdif->clk, m->crtc_clock * mult);
++		actual = clk_get_rate(lcdif->clk);
++		if (actual / 1000 > m->crtc_clock && mult > 10)
++			mult -= 10;
++		else
++			break;
++	} while (1);
+ 
+ 	pm_runtime_get_sync(drm->dev);
+ 

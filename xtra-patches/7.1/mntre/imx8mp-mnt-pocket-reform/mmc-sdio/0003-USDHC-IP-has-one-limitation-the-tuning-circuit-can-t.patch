@@ -1,0 +1,44 @@
+From c39839e4da6c0a0f24ff2532a793b5829ce28e82 Mon Sep 17 00:00:00 2001
+From: Haibo Chen <haibo.chen@xxxxxxx>
+Date: Sun, 9 Jul 2023 22:16:02 +0200
+Subject: [PATCH 3/3] USDHC IP has one limitation: the tuning circuit can't
+ handle the async sdio device interrupt correctly. When sdio device use 4 data
+ lines, async sdio interrupt will use the shared DAT[1], if enable auto tuning
+ circuit to check these 4 data lines, include the DAT[1], this circuit will
+ detect this interrupt, take this as data on DAT[1], and adjust the delay cell
+ wrongly, finally will cause the DATA/CMD CRC error. So for SDIO device, only
+ enable DAT[0] and CMD line for auto tuning.
+
+Signed-off-by: Haibo Chen <haibo.chen@xxxxxxx>
+---
+ drivers/mmc/host/sdhci-esdhc-imx.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/drivers/mmc/host/sdhci-esdhc-imx.c b/drivers/mmc/host/sdhci-esdhc-imx.c
+index 03fe21a89021..de7030a09711 100644
+--- a/drivers/mmc/host/sdhci-esdhc-imx.c
++++ b/drivers/mmc/host/sdhci-esdhc-imx.c
+@@ -475,6 +475,20 @@ static inline void usdhc_auto_tuning_mode_sel_and_en(struct sdhci_host *host)
+ 	if (imx_data->init_card_type == MMC_TYPE_SDIO)
+ 		auto_tune_buswidth = ESDHC_VEND_SPEC2_AUTO_TUNE_1BIT_EN;
+ 
++	/*
++	 * For USDHC, auto tuning circuit can not handle the async sdio
++	 * device interrupt correctly. When sdio device use 4 data lines,
++	 * async sdio interrupt will use the shared DAT[1], if enable auto
++	 * tuning circuit check these 4 data lines, include the DAT[1],
++	 * this circuit will detect this interrupt, take this as a data on
++	 * DAT[1], and adjust the delay cell wrongly.
++	 * This is the hardware design limitation, to avoid this, for sdio
++	 * device, config the auto tuning circuit only check DAT[0] and CMD
++	 * line.
++	 */
++	if (!host->mmc->card && mmc_card_sdio(host->mmc->card))
++		auto_tune_buswidth = ESDHC_VEND_SPEC2_AUTO_TUNE_1BIT_EN;
++
+ 	esdhc_clrset_le(host, ESDHC_VEND_SPEC2_AUTO_TUNE_MODE_MASK,
+ 			auto_tune_buswidth | ESDHC_VEND_SPEC2_AUTO_TUNE_CMD_EN,
+ 			ESDHC_VEND_SPEC2);
+-- 
+2.40.0
+

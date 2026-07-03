@@ -1,0 +1,236 @@
+From 99a2b86099e7f43b55a9d07978fb54cc1a7c8a77 Mon Sep 17 00:00:00 2001
+From: Johannes Schauer Marin Rodrigues <josch@mister-muffin.de>
+Date: Mon, 17 Feb 2025 01:31:21 +0100
+Subject: [PATCH] imx8mq-mnt-reform2.dts: multiple fixes for display, wifi,
+ suspend/resume
+
+---
+ .../boot/dts/freescale/imx8mq-mnt-reform2.dts | 158 +++++++++++++++++-
+ 1 file changed, 152 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/freescale/imx8mq-mnt-reform2.dts b/arch/arm64/boot/dts/freescale/imx8mq-mnt-reform2.dts
+index 3ae3824be027..d26aa34f6c5e 100644
+--- a/arch/arm64/boot/dts/freescale/imx8mq-mnt-reform2.dts
++++ b/arch/arm64/boot/dts/freescale/imx8mq-mnt-reform2.dts
+@@ -21,8 +21,8 @@ backlight: backlight {
+ 		pwms = <&pwm2 0 10000 0>;
+ 		power-supply = <&reg_main_usb>;
+ 		enable-gpios = <&gpio1 10 GPIO_ACTIVE_HIGH>;
+-		brightness-levels = <0 32 64 128 160 200 255>;
+-		default-brightness-level = <6>;
++		brightness-levels = <0 8 16 32 64 128 160 200 255>;
++		default-brightness-level = <8>;
+ 	};
+ 
+ 	panel {
+@@ -171,17 +171,32 @@ edp_bridge_out: endpoint {
+ 	};
+ };
+ 
++// LCDIF is not used, but has to be active or DCSS won't work
+ &lcdif {
+-	assigned-clocks = <&clk IMX8MQ_CLK_LCDIF_PIXEL>;
+-	assigned-clock-parents = <&clk IMX8MQ_SYS1_PLL_800M>;
+-	/delete-property/assigned-clock-rates;
+ 	status = "okay";
++	/delete-node/ port;
+ };
+ 
+ &mipi_dsi {
+ 	status = "okay";
+ 
+ 	ports {
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		port@0 {
++		#address-cells = <1>;
++		#size-cells = <0>;
++			reg = <0>;
++
++			// We don't want input from LCDIF
++			/delete-node/ endpoint@0;
++
++			mipi_dsi_in: endpoint@1 {
++				reg = <1>;
++				remote-endpoint = <&dcss_dsi_out>;
++			};
++		};
+ 		port@1 {
+ 			reg = <1>;
+ 
+@@ -192,6 +207,39 @@ mipi_dsi_out: endpoint {
+ 	};
+ };
+ 
++&iomuxc {
++	pinctrl_pcie0: pcie0grp {
++		fsl,pins = <
++		MX8MQ_IOMUXC_ECSPI1_MOSI_GPIO5_IO7 0x16
++		>;
++	};
++};
++
++&pcie0 {
++	pinctrl-names = "default";
++	pinctrl-0 = <&pinctrl_pcie0>;
++	reset-gpio = <&gpio5 7 GPIO_ACTIVE_LOW>;
++	internal-refclk;
++
++	clocks = <&clk IMX8MQ_CLK_PCIE1_ROOT>,
++		<&clk IMX8MQ_CLK_PCIE1_AUX>,
++		<&clk IMX8MQ_CLK_PCIE1_PHY>,
++		<&clk IMX8MQ_CLK_MON_CLK2_OUT>;
++
++	clock-names = "pcie", "pcie_aux", "pcie_phy", "pcie_bus";
++
++	assigned-clocks = <&clk IMX8MQ_CLK_PCIE1_CTRL>,
++		<&clk IMX8MQ_CLK_PCIE1_PHY>,
++		<&clk IMX8MQ_CLK_MON_CLK2_OUT>;
++	assigned-clock-rates = <250000000>,
++		<100000000>,
++		<100000000>;
++	assigned-clock-parents = <&clk IMX8MQ_SYS2_PLL_250M>,
++		<&clk IMX8MQ_SYS2_PLL_100M>;
++
++	status = "okay";
++};
++
+ &pcie1 {
+ 	pinctrl-names = "default";
+ 	pinctrl-0 = <&pinctrl_pcie1>;
+@@ -236,7 +284,6 @@ &sai2 {
+ 	assigned-clock-parents = <&clk IMX8MQ_CLK_25M>;
+ 	assigned-clock-rates = <25000000>;
+ 	fsl,sai-mclk-direction-output;
+-	fsl,sai-asynchronous;
+ 	status = "okay";
+ };
+ 
+@@ -244,12 +291,20 @@ &snvs_rtc {
+ 	status = "disabled";
+ };
+ 
++// Auxiliary serial port on motherboard
+ &uart2 {
+ 	pinctrl-names = "default";
+ 	pinctrl-0 = <&pinctrl_uart2>;
+ 	status = "okay";
+ };
+ 
++// connected to LPC11U24 chip on the motherboard
++&uart3 {
++	pinctrl-names = "default";
++	pinctrl-0 = <&pinctrl_uart3>;
++	status = "okay";
++};
++
+ &usb3_phy0 {
+ 	vbus-supply = <&reg_main_usb>;
+ 	status = "okay";
+@@ -339,6 +394,13 @@ MX8MQ_IOMUXC_UART2_TXD_UART2_DCE_TX		0x45
+ 		>;
+ 	};
+ 
++	pinctrl_uart3: uart3grp {
++		fsl,pins = <
++		MX8MQ_IOMUXC_UART3_RXD_UART3_DCE_RX	     0x45
++		MX8MQ_IOMUXC_UART3_TXD_UART3_DCE_TX	     0x45
++		>;
++	};
++
+ 	pinctrl_usdhc2: usdhc2grp {
+ 		fsl,pins = <
+ 			MX8MQ_IOMUXC_SD2_CD_B_USDHC2_CD_B		0x0
+@@ -350,4 +412,88 @@ MX8MQ_IOMUXC_SD2_DATA2_USDHC2_DATA2		0xc3
+ 			MX8MQ_IOMUXC_SD2_DATA3_USDHC2_DATA3		0xc3
+ 		>;
+ 	};
++
++	pinctrl_ecspi2: ecspi2grp {
++		fsl,pins = <
++			MX8MQ_IOMUXC_ECSPI2_MOSI_ECSPI2_MOSI	    0x19
++			MX8MQ_IOMUXC_ECSPI2_MISO_ECSPI2_MISO	    0x19
++			MX8MQ_IOMUXC_ECSPI2_SCLK_ECSPI2_SCLK	    0x19
++		>;
++	};
++
++	pinctrl_ecspi2_cs: ecspi2csgrp {
++		fsl,pins = <
++			MX8MQ_IOMUXC_ECSPI2_SS0_GPIO5_IO13	      0x19
++		>;
++	};
++};
++
++/ {
++	soc@0 {
++		bus@32c00000 {
++			dcss: display-controller@32e00000 {
++				status = "okay";
++
++				compatible = "nxp,imx8mq-dcss";
++				reg = <0x32e00000 0x2d000>, <0x32e2f000 0x1000>;
++				interrupts = <6>, <8>, <9>;
++				interrupt-names = "ctxld", "ctxld_kick", "vblank";
++				interrupt-parent = <&irqsteer>;
++				clocks = <&clk IMX8MQ_CLK_DISP_APB_ROOT>,
++					<&clk IMX8MQ_CLK_DISP_AXI_ROOT>,
++					<&clk IMX8MQ_CLK_DISP_RTRM_ROOT>,
++					<&clk IMX8MQ_CLK_DC_PIXEL>,
++					<&clk IMX8MQ_CLK_DISP_DTRC>,
++					<&clk IMX8MQ_VIDEO2_PLL1_REF_SEL>,
++					<&hdmi_phy_27m>;
++				clock-names = "apb", "axi", "rtrm", "pix", "dtrc", "pll_src", "pll_phy_ref";
++				assigned-clocks = <&clk IMX8MQ_CLK_DISP_AXI>,
++					<&clk IMX8MQ_CLK_DISP_RTRM>,
++					<&clk IMX8MQ_VIDEO2_PLL1_REF_SEL>,
++					<&clk IMX8MQ_VIDEO_PLL1_REF_SEL>,
++					<&clk IMX8MQ_CLK_DC_PIXEL>;
++				assigned-clock-parents = <&clk IMX8MQ_SYS1_PLL_800M>,
++					<&clk IMX8MQ_SYS1_PLL_800M>,
++					<&clk IMX8MQ_CLK_27M>,
++					<&clk IMX8MQ_CLK_25M>,
++					<&clk IMX8MQ_VIDEO_PLL1_OUT>;
++				assigned-clock-rates = <800000000>,
++					<400000000>,
++					<27000000>,
++					<25000000>,
++					<594000000>;
++				// internal display (MIPI-DSI/eDP)
++				ports {
++					#address-cells = <1>;
++					#size-cells = <0>;
++
++					port@0 {
++						reg = <0>;
++						#address-cells = <1>;
++						#size-cells = <0>;
++						dcss_dsi_out: endpoint@0 {
++							reg = <0>;
++							remote-endpoint = <&mipi_dsi_in>;
++						};
++					};
++				};
++			};
++		};
++	};
++};
++
++&ecspi2 {
++	#address-cells = <1>;
++	#size-cells = <0>;
++	pinctrl-names = "default";
++	pinctrl-0 = <&pinctrl_ecspi2 &pinctrl_ecspi2_cs>;
++	cs-gpios = <&gpio5 13 GPIO_ACTIVE_LOW>;
++	status = "okay";
++	fsl,spi-num-chipselects = <1>;
++
++	spidev@0 {
++		compatible = "mntre,lpc11u24";
++		spi-max-frequency = <1000000>;
++		reg = <0>;
++	};
+ };
+-- 
+2.39.5
+
