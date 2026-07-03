@@ -1,0 +1,107 @@
+From: Stephano Cetola <stephanoc@gmail.com>
+Date: Sun, 29 Jun 2026 00:00:00 -0700
+Subject: [PATCH] drm/bridge: dw-mipi-dsi2: refresh mode_flags from panel
+ device at enable time
+
+Temporary hack for testing.
+
+dw_mipi_dsi2_host_attach() caches device->mode_flags into dsi2->mode_flags
+once at attach time.  Panel drivers that distinguish hardware variants at
+prepare() time (e.g. panel-mnt-pocket-reform, which detects JDI V1 vs V2
+panels via a CRI register read) update device->mode_flags after host_attach
+completes, clearing blanking-period flags such as
+MIPI_DSI_MODE_VIDEO_NO_HFP, MIPI_DSI_MODE_VIDEO_NO_HBP and
+MIPI_DSI_MODE_VIDEO_NO_HSA to suit the detected variant.
+
+These updates are invisible to the host driver.  When
+dw_mipi_dsi2_set_vid_mode() is called from bridge_atomic_enable() which
+runs after panel prepare/enable it reads the stale cached value and
+programs BLK_HFP_HS_EN / BLK_HBP_HS_EN / BLK_HSA_HS_EN based on the wrong
+flags.  The result is that the video stream is sent without the blanking
+periods that a V2 panel requires to synchronise, so no image appears.
+
+Fix this by storing a pointer to the attached DSI device in dw_mipi_dsi2
+and refreshing dsi2->mode_flags from device->mode_flags in:
+
+ - bridge_atomic_enable(): the critical call site; set_vid_mode() runs here
+   after panel init has already updated device->mode_flags.
+
+ - bridge_atomic_pre_enable(): picks up the updated flags on the second DRM
+   commit that is triggered when get_modes() returns different timings after
+   the panel version becomes known, so the DSI host is reconfigured with the
+   correct flags on that second cycle too.
+
+Add dev_info logging in the refresh function so the old and new mode_flags
+values are visible in dmesg, confirming the patch is active and showing
+what the panel driver changed.
+
+Signed-off-by: Stephano Cetola <stephanoc@gmail.com>
+---
+ drivers/gpu/drm/bridge/synopsys/dw-mipi-dsi2.c | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/drivers/gpu/drm/bridge/synopsys/dw-mipi-dsi2.c b/drivers/gpu/drm/bridge/synopsys/dw-mipi-dsi2.c
+index a4bfd3ad166d..ea865b7cbca1 100644
+--- a/drivers/gpu/drm/bridge/synopsys/dw-mipi-dsi2.c
++++ b/drivers/gpu/drm/bridge/synopsys/dw-mipi-dsi2.c
+@@ -203,6 +203,7 @@ struct dw_mipi_dsi2 {
+ 	u32 lanes;
+ 	u32 format;
+ 	unsigned long mode_flags;
++	struct mipi_dsi_device *dsi_dev;
+
+ 	struct drm_display_mode mode;
+ 	const struct dw_mipi_dsi2_plat_data *plat_data;
+@@ -234,6 +235,17 @@ static int cri_fifos_wait_avail(struct dw_mipi_dsi2 *dsi2)
+ 	return 0;
+ }
+
++static void dw_mipi_dsi2_refresh_mode_flags(struct dw_mipi_dsi2 *dsi2,
++					     const char *caller)
++{
++	if (dsi2->dsi_dev) {
++		unsigned long old = dsi2->mode_flags;
++		dsi2->mode_flags = dsi2->dsi_dev->mode_flags;
++		dev_info(dsi2->dev, "[dw-mipi-dsi2] %s: mode_flags 0x%lx -> 0x%lx\n",
++			 caller, old, dsi2->mode_flags);
++	}
++}
++
+ static void dw_mipi_dsi2_set_vid_mode(struct dw_mipi_dsi2 *dsi2)
+ {
+ 	u32 val = 0, mode;
+@@ -527,6 +539,7 @@ static int dw_mipi_dsi2_host_attach(struct mipi_dsi_host *host,
+ 	dsi2->channel = device->channel;
+ 	dsi2->format = device->format;
+ 	dsi2->mode_flags = device->mode_flags;
++	dsi2->dsi_dev = device;
+
+ 	bridge = devm_drm_of_get_bridge(dsi2->dev, dsi2->dev->of_node, 1, 0);
+ 	if (IS_ERR(bridge))
+@@ -557,6 +570,8 @@ static int dw_mipi_dsi2_host_detach(struct mipi_dsi_host *host,
+ 	const struct dw_mipi_dsi2_plat_data *pdata = dsi2->plat_data;
+ 	int ret;
+
++	dsi2->dsi_dev = NULL;
++
+ 	if (pdata->host_ops && pdata->host_ops->detach) {
+ 		ret = pdata->host_ops->detach(pdata->priv_data, device);
+ 		if (ret < 0)
+@@ -830,6 +845,7 @@ static void dw_mipi_dsi2_bridge_atomic_pre_enable(struct drm_bridge *bridge,
+ {
+ 	struct dw_mipi_dsi2 *dsi2 = bridge_to_dsi2(bridge);
+
++	dw_mipi_dsi2_refresh_mode_flags(dsi2, "pre_enable");
+ 	/* Power up the dsi ctl into a command mode */
+ 	dw_mipi_dsi2_mode_set(dsi2, &dsi2->mode);
+ }
+@@ -849,6 +865,7 @@ static void dw_mipi_dsi2_bridge_atomic_enable(struct drm_bridge *bridge,
+ {
+ 	struct dw_mipi_dsi2 *dsi2 = bridge_to_dsi2(bridge);
+
++	dw_mipi_dsi2_refresh_mode_flags(dsi2, "enable");
+ 	/* Switch to video mode for panel-bridge enable & panel enable */
+ 	if (dsi2->mode_flags & MIPI_DSI_MODE_VIDEO)
+ 		dw_mipi_dsi2_set_vid_mode(dsi2);
+--
+2.47.3

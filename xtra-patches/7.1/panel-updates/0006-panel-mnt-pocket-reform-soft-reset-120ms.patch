@@ -1,0 +1,21 @@
+From: Stephano Cetola <stephanoc@gmail.com>
+Subject: [PATCH] drm/panel: mnt-pocket-reform: increase V2 soft-reset delay to 120ms
+
+---
+ drivers/gpu/drm/panel/panel-mnt-pocket-reform.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+ 
+diff --git a/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c b/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
+--- a/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
++++ b/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
+@@ -437,9 +437,9 @@ static int pocket_display_v2_init(struct jdi_panel *jdi)
+ 	if (ret < 0)
+ 		return ret;
+-	jdi_trace(jdi, __func__, "sleeping 20ms before panel identification");
+-	msleep(20);
++	jdi_trace(jdi, __func__, "sleeping 120ms after soft reset (IC requires >= 120ms before Sleep Out)");
++	msleep(120);
+ 	jdi_trace(jdi, __func__, "20ms identify delay complete");
+ 	jdi_trace(jdi, __func__, "post-soft-reset delay complete");
+ 	jdi_dump_runtime_regs(jdi, __func__);
+ 
