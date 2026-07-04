@@ -60,7 +60,8 @@ class UBootManager:
             rel = str(Path(path_str).resolve().relative_to(self.root.resolve()))
         except ValueError:
             rel = path_str
-        return rel + (" (fallback)" if is_fallback else "")
+        folder = str(Path(rel).parent)
+        return folder + (" (fallback)" if is_fallback else "")
 
     def get_info(self, sysimage: str) -> SysimageUBootInfo:
         """Return U-Boot config for a single sysimage."""
@@ -155,7 +156,7 @@ def print_sysimage_table(infos: list[SysimageUBootInfo]) -> None:
         + "tag".ljust(col_tag)
         + "patches".ljust(col_patches)
         + "checkout".ljust(col_checkout)
-        + "config source"
+        + "config source location"
     )
     print(header)
     print("-" * len(header))
