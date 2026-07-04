@@ -24,7 +24,7 @@ from errors import BuildError
 from logging_setup import Colors, setup_logging
 from uboot import UBootManager, print_sysimage_table
 
-__version__ = "1.0.6"
+__version__ = "1.1.0"
 
 
 def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] = None,
