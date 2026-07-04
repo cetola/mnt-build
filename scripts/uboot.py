@@ -231,13 +231,12 @@ class UBootManager:
             if rc != 0:
                 return rc
 
-        image_gen_dir = self.root / "image-gen"
-        downloads_dir = image_gen_dir / "downloads"
+        downloads_dir = self.root / "image-gen" / "downloads"
         downloads_dir.mkdir(parents=True, exist_ok=True)
         output_path = downloads_dir / info.filename
 
         timestamp = time.strftime("%Y%m%d-%H%M%S")
-        log_path = image_gen_dir / f"uboot-build-{sysimage}-{timestamp}.log"
+        log_path = self.root / f"uboot-build-{sysimage}-{timestamp}.log"
         print(f"[uboot] Log: {log_path.relative_to(self.root)}")
 
         jobs = str(os.cpu_count() or 4)
