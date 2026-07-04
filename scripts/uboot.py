@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -143,8 +144,61 @@ class UBootManager:
             "Use a custom build command if the output path differs."
         )
 
+    # Build prerequisites: (kind, check_name, apt_package, description)
+    # kind: 'tool' -> shutil.which; 'python' -> importlib; 'library' -> pkg-config
+    _BUILD_PREREQS = [
+        ("tool",    "make",                    "build-essential",    "build system"),
+        ("tool",    "git",                     "git",                "version control"),
+        ("tool",    "bison",                   "bison",              "parser generator"),
+        ("tool",    "flex",                    "flex",               "lexer generator"),
+        ("tool",    "swig",                    "swig",               "Python/C bindings for U-Boot scripts"),
+        ("python",  "elftools",                "python3-pyelftools", "ELF parsing for mkimage"),
+        ("library", "gnutls",                  "libgnutls28-dev",    "TLS library headers"),
+        ("library", "openssl",                 "libssl-dev",         "SSL library headers"),
+    ]
+
+    def _check_build_prerequisites(self, cross_compile: str) -> list[tuple[str, str]]:
+        """Return list of (apt_package, description) for missing prerequisites."""
+        missing = []
+
+        for kind, name, pkg, desc in self._BUILD_PREREQS:
+            if kind == "tool":
+                if not shutil.which(name):
+                    missing.append((pkg, desc))
+            elif kind == "python":
+                if importlib.util.find_spec(name) is None:
+                    missing.append((pkg, desc))
+            elif kind == "library":
+                try:
+                    result = subprocess.run(
+                        ["pkg-config", "--exists", name],
+                        capture_output=True,
+                    )
+                    if result.returncode != 0:
+                        missing.append((pkg, desc))
+                except FileNotFoundError:
+                    # pkg-config not installed — skip library checks
+                    pass
+
+        # Cross-compiler is derived from cross_compile prefix at runtime
+        compiler = f"{cross_compile}gcc"
+        if not shutil.which(compiler):
+            missing.append((f"gcc-{cross_compile.rstrip('-')}", f"cross-compiler ({compiler})"))
+
+        return missing
+
     def build(self, sysimage: str, cross_compile: str = "aarch64-linux-gnu-") -> int:
         """Build U-Boot for a sysimage. Prepares the checkout first if needed."""
+        print(f"[uboot] Checking build prerequisites ...", flush=True)
+        missing = self._check_build_prerequisites(cross_compile)
+        if missing:
+            print(f"[uboot] Missing required packages:", file=sys.stderr)
+            for pkg, desc in missing:
+                print(f"  {pkg:<30}  # {desc}", file=sys.stderr)
+            print(f"[uboot] Install with:", file=sys.stderr)
+            print(f"  sudo apt install {' '.join(pkg for pkg, _ in missing)}", file=sys.stderr)
+            return 1
+
         info = self.get_info(sysimage)
         checkout_dir = self._uboot_root / info.project
 
