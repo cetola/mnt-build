@@ -9,7 +9,6 @@ import os
 import shutil
 import subprocess
 import sys
-import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,6 +19,7 @@ class SysimageUBootInfo:
     project: str
     tag: str
     filename: str
+    sha1: str
     patch_count: int
     has_checkout: bool
     config_source: str
@@ -84,6 +84,7 @@ class UBootManager:
             project=project,
             tag=data.get("BOOTLOADER_TAG", ""),
             filename=data.get("BOOTLOADER_FILENAME", ""),
+            sha1=data.get("BOOTLOADER_SHA1", ""),
             patch_count=self._patch_count(project),
             has_checkout=self._has_checkout(project),
             config_source=self._format_config_source(data),
@@ -259,7 +260,12 @@ class UBootManager:
         return h.hexdigest()
 
     def diff_vs_prebuilt(self, sysimage: str, cross_compile: str = "aarch64-linux-gnu-") -> int:
-        """Build (if needed) then byte-compare against the MNT prebuilt artifact."""
+        """Build (if needed) then byte-level diff against the MNT prebuilt artifact.
+
+        Downloads the prebuilt from source.mnt.re (GitLab CI artifacts) for comparison.
+        GitLab artifacts expire, so the download is best-effort — a 404 is reported
+        clearly rather than treated as an error.
+        """
         info = self.get_info(sysimage)
         downloads_dir = self.root / "image-gen" / "downloads"
         built_artifact = downloads_dir / info.filename
@@ -270,40 +276,61 @@ class UBootManager:
             if rc != 0:
                 return rc
 
-        prebuilt_url = (
-            f"https://source.mnt.re/reform/{info.project}/-/jobs/artifacts"
-            f"/{info.tag}/raw/{info.filename}?job=build"
-        )
-        prebuilt_artifact = downloads_dir / f"{info.filename}.prebuilt-{info.tag}"
+        built_sha1   = self._file_sha1(built_artifact)
+        built_sha256 = self._file_sha256(built_artifact)
+        built_size   = built_artifact.stat().st_size
 
-        print(f"[uboot] Downloading prebuilt artifact ...")
-        print(f"[uboot] URL: {prebuilt_url}")
-        try:
-            urllib.request.urlretrieve(prebuilt_url, str(prebuilt_artifact))
-        except Exception as e:
-            print(f"[uboot] ERROR: could not download prebuilt: {e}", file=sys.stderr)
+        print()
+        print("=" * 50)
+        print("U-Boot Diff Report")
+        print("=" * 50)
+        print(f"Built artifact: {built_artifact}")
+        print(f"  size:   {built_size}")
+        print(f"  SHA1:   {built_sha1}")
+        print(f"  SHA256: {built_sha256}")
+        print()
+
+        # Custom sysimages (config from local-machines/) have no CI artifact —
+        # there is no prebuilt binary to download.
+        if info.config_source.startswith("local-machines"):
+            print(
+                "This is a custom sysimage (local-machines/) — no prebuilt artifact\n"
+                "exists on source.mnt.re. Nothing to compare against."
+            )
             return 1
 
-        built_size    = built_artifact.stat().st_size
-        prebuilt_size = prebuilt_artifact.stat().st_size
-        built_sha1    = self._file_sha1(built_artifact)
-        prebuilt_sha1 = self._file_sha1(prebuilt_artifact)
-        built_sha256  = self._file_sha256(built_artifact)
-        prebuilt_sha256 = self._file_sha256(prebuilt_artifact)
+        # Download the prebuilt for byte-level comparison.
+        # Use curl directly (same URL pattern as build-fsbl.sh) — avoids build-fsbl.sh's
+        # SHA1 hard-fail which would reject any source build not matching MNT's CI binary.
+        prebuilt_downloads = downloads_dir / "prebuilt-ref"
+        prebuilt_downloads.mkdir(parents=True, exist_ok=True)
+        prebuilt_artifact = prebuilt_downloads / info.filename
 
-        print()
-        print("=" * 50)
-        print("FSBL Diff Report")
-        print("=" * 50)
-        print(f"Built:          {built_artifact}")
-        print(f"Prebuilt:       {prebuilt_artifact}")
-        print()
-        print(f"Built size:     {built_size}")
-        print(f"Prebuilt size:  {prebuilt_size}")
-        print(f"Built SHA1:     {built_sha1}")
-        print(f"Prebuilt SHA1:  {prebuilt_sha1}")
-        print(f"Built SHA256:   {built_sha256}")
-        print(f"Prebuilt SHA256:{prebuilt_sha256}")
+        if prebuilt_artifact.is_file():
+            print(f"Using cached prebuilt artifact: {prebuilt_artifact}")
+        else:
+            url = (
+                f"https://source.mnt.re/reform/{info.project}"
+                f"/-/jobs/artifacts/{info.tag}/raw/{info.filename}?job=build"
+            )
+            print(f"Downloading prebuilt artifact ...")
+            print(f"  {url}")
+            result = subprocess.run(
+                ["curl", "-fL", "--retry", "3", "--retry-delay", "2",
+                 "-o", str(prebuilt_artifact), url],
+            )
+            if result.returncode != 0:
+                print("Prebuilt artifact not available — CI artifacts may have expired.")
+                return 1
+
+        prebuilt_sha1   = self._file_sha1(prebuilt_artifact)
+        prebuilt_sha256 = self._file_sha256(prebuilt_artifact)
+        prebuilt_size   = prebuilt_artifact.stat().st_size
+
+        print(f"Prebuilt artifact: {prebuilt_artifact}")
+        print(f"  size:   {prebuilt_size}")
+        print(f"  SHA1:   {prebuilt_sha1}")
+        print(f"  SHA256: {prebuilt_sha256}")
         print()
 
         if built_sha1 == prebuilt_sha1:
@@ -311,11 +338,10 @@ class UBootManager:
             return 0
 
         print("Binary compare: differ")
-
-        cmp = shutil.which("cmp")
-        if cmp:
+        cmp_bin = shutil.which("cmp")
+        if cmp_bin:
             result = subprocess.run(
-                [cmp, "-l", str(built_artifact), str(prebuilt_artifact)],
+                [cmp_bin, "-l", str(built_artifact), str(prebuilt_artifact)],
                 capture_output=True, text=True,
             )
             lines = result.stdout.splitlines()
@@ -323,7 +349,7 @@ class UBootManager:
                 first_byte = int(lines[0].split()[0])
                 print(f"First differing byte (1-based): {first_byte}")
                 print()
-                print(f"First 20 differing bytes (byte, built-octal, prebuilt-octal):")
+                print("First 20 differing bytes (byte  built-octal  prebuilt-octal):")
                 for line in lines[:20]:
                     print(f"  {line}")
         return 1
@@ -342,6 +368,7 @@ class UBootManager:
                 project=project,
                 tag=data.get("BOOTLOADER_TAG", ""),
                 filename=data.get("BOOTLOADER_FILENAME", ""),
+                sha1=data.get("BOOTLOADER_SHA1", ""),
                 patch_count=self._patch_count(project),
                 has_checkout=self._has_checkout(project),
                 config_source=self._format_config_source(data),
