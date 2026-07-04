@@ -32,7 +32,7 @@ class UBootManager:
     def __init__(self, mnt_build_root: Path):
         self.root = mnt_build_root
         self._query_script = mnt_build_root / "scripts" / "uboot-query.sh"
-        self._patches_root = mnt_build_root / "xtra-uboot-patches"
+        self._patches_root = mnt_build_root / "xtra-patches" / "u-boot"
         self._uboot_root = mnt_build_root / "uboot"
 
     def _run_query(self, *args: str) -> str:
@@ -124,9 +124,9 @@ class UBootManager:
         # Apply patches
         patches = sorted(patches_dir.glob("*.patch")) if patches_dir.is_dir() else []
         if not patches:
-            print(f"[uboot] No patches to apply (xtra-uboot-patches/{info.project}/ is empty)")
+            print(f"[uboot] No patches to apply (xtra-patches/u-boot/{info.project}/ is empty)")
         else:
-            print(f"[uboot] Applying {len(patches)} patch(es) from xtra-uboot-patches/{info.project}/ ...")
+            print(f"[uboot] Applying {len(patches)} patch(es) from xtra-patches/u-boot/{info.project}/ ...")
             subprocess.run(
                 ["git", "-C", str(checkout_dir), "am", *[str(p) for p in patches]],
                 check=True,

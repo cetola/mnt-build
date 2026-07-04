@@ -338,7 +338,7 @@ fsbl_checkout_source_repo() {
 }
 
 fsbl_apply_xtra_patches() {
-  local patches_dir="${FSBL_SCRIPT_DIR}/../xtra-uboot-patches/${BOOTLOADER_PROJECT}"
+  local patches_dir="${FSBL_SCRIPT_DIR}/../xtra-patches/u-boot/${BOOTLOADER_PROJECT}"
   [[ -d "$patches_dir" ]] || return 0
   local patches=("$patches_dir"/*.patch)
   [[ -e "${patches[0]}" ]] || return 0
