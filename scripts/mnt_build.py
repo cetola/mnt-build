@@ -243,6 +243,20 @@ def run_uboot_build(sysimage: str) -> int:
         return 1
 
 
+def run_uboot_diff(sysimage: str) -> int:
+    """Build U-Boot (if needed) then compare against the MNT prebuilt artifact."""
+    mnt_build_root = Path(__file__).parent.parent
+    manager = UBootManager(mnt_build_root)
+    try:
+        return manager.diff_vs_prebuilt(sysimage)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
 def run_uboot_dry_run(sysimage: str) -> int:
     """Clone/fetch U-Boot for a sysimage, checkout tag, apply patches. No build."""
     mnt_build_root = Path(__file__).parent.parent
@@ -376,6 +390,11 @@ def build_parser() -> argparse.ArgumentParser:
         action='store_true',
         help='Clone/fetch U-Boot repo, checkout tag, apply patches — stop before building'
     )
+    uboot_parser.add_argument(
+        '--diff',
+        action='store_true',
+        help='Build (if needed) then byte-compare against the MNT prebuilt artifact'
+    )
 
     parser.add_argument(
         '--version',
@@ -417,6 +436,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             if not args.sysimage:
                 parser.error("mnt-build uboot --dry-run requires --sysimage <name>")
             return run_uboot_dry_run(args.sysimage)
+        if args.diff:
+            if not args.sysimage:
+                parser.error("mnt-build uboot --diff requires --sysimage <name>")
+            return run_uboot_diff(args.sysimage)
         if args.sysimage:
             return run_uboot_build(args.sysimage)
         parser.error("mnt-build uboot requires an action (e.g. --list sysimage or --sysimage <name> --dry-run)")

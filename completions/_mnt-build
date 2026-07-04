@@ -56,7 +56,8 @@ _mnt_build() {
         '--help[show uboot help]' \
         '--list[list configuration]:object:(sysimage)' \
         '--sysimage[target sysimage]:sysimage:('"${sysimages[*]}"')' \
-        '--dry-run[clone/fetch repo, checkout tag, apply patches]'
+        '--dry-run[clone/fetch repo, checkout tag, apply patches]' \
+        '--diff[build if needed, then compare against MNT prebuilt]'
       ;;
     *)
       _message 'subcommand' 'build clean uboot'
