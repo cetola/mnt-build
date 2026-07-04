@@ -6,6 +6,7 @@ build-*.log
 headers-*.log
 container*.log
 image-gen*.log
+uboot*.log
 __pycache__/
 *.pyc
 headers-extmod
