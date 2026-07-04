@@ -226,6 +226,20 @@ def run_uboot_list() -> int:
     return 0
 
 
+def run_uboot_dry_run(sysimage: str) -> int:
+    """Clone/fetch U-Boot for a sysimage, checkout tag, apply patches. No build."""
+    mnt_build_root = Path(__file__).parent.parent
+    manager = UBootManager(mnt_build_root)
+    try:
+        return manager.prepare(sysimage)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog='mnt-build',
@@ -335,6 +349,16 @@ def build_parser() -> argparse.ArgumentParser:
         metavar='sysimage',
         help='List all supported sysimages and their U-Boot configuration'
     )
+    uboot_parser.add_argument(
+        '--sysimage',
+        metavar='name',
+        help='Target sysimage (required for --dry-run and other build actions)'
+    )
+    uboot_parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Clone/fetch U-Boot repo, checkout tag, apply patches — stop before building'
+    )
 
     parser.add_argument(
         '--version',
@@ -372,7 +396,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.command == 'uboot':
         if args.list == 'sysimage':
             return run_uboot_list()
-        parser.error("mnt-build uboot requires an action (e.g. --list sysimage)")
+        if args.dry_run:
+            if not args.sysimage:
+                parser.error("mnt-build uboot --dry-run requires --sysimage <name>")
+            return run_uboot_dry_run(args.sysimage)
+        parser.error("mnt-build uboot requires an action (e.g. --list sysimage or --sysimage <name> --dry-run)")
 
     parser.error(f"Unknown command: {args.command}")
     return 2

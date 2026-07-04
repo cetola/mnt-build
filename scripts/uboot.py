@@ -62,6 +62,66 @@ class UBootManager:
             rel = path_str
         return rel + (" (fallback)" if is_fallback else "")
 
+    def get_info(self, sysimage: str) -> SysimageUBootInfo:
+        """Return U-Boot config for a single sysimage."""
+        try:
+            data = self._query_sysimage(sysimage)
+        except subprocess.CalledProcessError as e:
+            detail = e.stderr.strip() if e.stderr else str(e)
+            raise ValueError(f"Failed to query config for '{sysimage}': {detail}") from e
+        project = data.get("BOOTLOADER_PROJECT", "")
+        if not project:
+            raise ValueError(f"No BOOTLOADER_PROJECT found for sysimage '{sysimage}'")
+        return SysimageUBootInfo(
+            sysimage=sysimage,
+            project=project,
+            tag=data.get("BOOTLOADER_TAG", ""),
+            patch_count=self._patch_count(project),
+            has_checkout=self._has_checkout(project),
+            config_source=self._format_config_source(data),
+        )
+
+    def prepare(self, sysimage: str) -> int:
+        """Clone/fetch U-Boot repo, checkout tag, apply local patches. Stops before building."""
+        info = self.get_info(sysimage)
+        checkout_dir = self._uboot_root / info.project
+        repo_url = f"https://source.mnt.re/reform/{info.project}.git"
+        patches_dir = self._patches_root / info.project
+
+        print(f"[uboot] Preparing {info.project} for {sysimage}")
+        print(f"[uboot] Tag:      {info.tag}")
+        print(f"[uboot] Checkout: {checkout_dir}")
+
+        if checkout_dir.is_dir():
+            print(f"[uboot] Checkout already exists — skipping clone.")
+            print(f"[uboot] To start fresh: mnt-build uboot --sysimage {sysimage} --clean")
+            return 0
+
+        # Clone
+        print(f"[uboot] Cloning {repo_url} ...")
+        subprocess.run(["git", "clone", repo_url, str(checkout_dir)], check=True)
+
+        # Checkout tag (detached HEAD so accidental commits are obvious)
+        print(f"[uboot] Checking out {info.tag} ...")
+        subprocess.run(
+            ["git", "-C", str(checkout_dir), "checkout", "--detach", info.tag],
+            check=True,
+        )
+
+        # Apply patches
+        patches = sorted(patches_dir.glob("*.patch")) if patches_dir.is_dir() else []
+        if not patches:
+            print(f"[uboot] No patches to apply (xtra-uboot-patches/{info.project}/ is empty)")
+        else:
+            print(f"[uboot] Applying {len(patches)} patch(es) from xtra-uboot-patches/{info.project}/ ...")
+            subprocess.run(
+                ["git", "-C", str(checkout_dir), "am", *[str(p) for p in patches]],
+                check=True,
+            )
+
+        print(f"[uboot] Checkout ready at: uboot/{info.project}/")
+        return 0
+
     def list_sysimages(self) -> list[SysimageUBootInfo]:
         results = []
         for sysimage in self._supported_sysimages():
