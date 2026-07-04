@@ -11,6 +11,11 @@ on:
         description: Release Tag
         required: true
         type: string
+      label:
+        description: Optional label appended to published filenames (e.g. "beta")
+        required: false
+        type: string
+        default: ''
 
 permissions:
   actions: read
@@ -83,6 +88,39 @@ jobs:
 
           unzip -o "${publish_zips[0]}" -d artifact-dist
           find artifact-dist -maxdepth 2 -type f -ls
+
+      - name: Apply label to filenames
+        if: ${{ github.event.inputs.label != '' }}
+        env:
+          LABEL: ${{ github.event.inputs.label }}
+        run: |
+          set -euo pipefail
+          cd artifact-dist
+
+          # Rename image and bmap, then regenerate SHA to match new filename.
+          for img_zst in *.img.zst; do
+            [[ -f "$img_zst" ]] || continue
+            base="${img_zst%.img.zst}"
+            labeled="${base}-${LABEL}.img.zst"
+
+            mv -v "$img_zst" "$labeled"
+
+            bmap="${base}.img.bmap"
+            if [[ -f "$bmap" ]]; then
+              mv -v "$bmap" "${base}-${LABEL}.img.bmap"
+            fi
+
+            old_sha="${img_zst}.sha256"
+            if [[ -f "$old_sha" ]]; then
+              rm "$old_sha"
+            fi
+            sha256sum "$labeled" > "${labeled}.sha256"
+            echo "SHA256 regenerated for $labeled:"
+            cat "${labeled}.sha256"
+          done
+
+          echo "Files after label applied:"
+          ls -lh
 
       - name: Verify downloaded release files
         id: collect_release_files
