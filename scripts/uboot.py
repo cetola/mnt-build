@@ -455,6 +455,20 @@ class UBootManager:
         )
         return result.returncode
 
+    def clean(self, sysimage: str) -> int:
+        """Remove the U-Boot checkout for a sysimage."""
+        info = self.get_info(sysimage)
+        checkout_dir = self._uboot_root / info.project
+
+        if not checkout_dir.is_dir():
+            print(f"[uboot] No checkout found at uboot/{info.project}/ — nothing to clean.")
+            return 0
+
+        print(f"[uboot] Removing uboot/{info.project}/ ...")
+        shutil.rmtree(str(checkout_dir))
+        print(f"[uboot] Done.")
+        return 0
+
     def list_sysimages(self) -> list[SysimageUBootInfo]:
         results = []
         for sysimage in self._supported_sysimages():

@@ -58,7 +58,8 @@ _mnt_build() {
         '--sysimage[target sysimage]:sysimage:('"${sysimages[*]}"')' \
         '--dry-run[clone/fetch repo, checkout tag, apply patches]' \
         '--diff[build if needed, then compare against MNT prebuilt]' \
-        '--menuconfig[run make menuconfig in the U-Boot checkout]'
+        '--menuconfig[run make menuconfig in the U-Boot checkout]' \
+        '--clean[remove the U-Boot checkout entirely]'
       ;;
     *)
       _message 'subcommand' 'build clean uboot'
