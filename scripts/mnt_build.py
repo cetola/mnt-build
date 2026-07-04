@@ -22,6 +22,7 @@ from config import (
 )
 from errors import BuildError
 from logging_setup import Colors, setup_logging
+from uboot import UBootManager, print_sysimage_table
 
 __version__ = "1.0.6"
 
@@ -204,6 +205,27 @@ def run_clean(build_dir: Optional[Path] = None) -> int:
         return 1
 
 
+def run_uboot_list() -> int:
+    """List all sysimages and their U-Boot configuration."""
+    mnt_build_root = Path(__file__).parent.parent
+    manager = UBootManager(mnt_build_root)
+    try:
+        infos = manager.list_sysimages()
+    except Exception as e:
+        print(f"Error: failed to enumerate sysimage configs: {e}", file=sys.stderr)
+        return 1
+    if not infos:
+        print("No supported sysimages found.", file=sys.stderr)
+        print(f"  Looked for machine configs in:", file=sys.stderr)
+        print(f"    {mnt_build_root / 'local-machines'}", file=sys.stderr)
+        print(f"    {mnt_build_root / 'reform-tools' / 'machines'}", file=sys.stderr)
+        print(f"  Looked for sysimage list in:", file=sys.stderr)
+        print(f"    {mnt_build_root / 'scripts' / 'sysimage-config.sh'}", file=sys.stderr)
+        return 1
+    print_sysimage_table(infos)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog='mnt-build',
@@ -306,6 +328,14 @@ def build_parser() -> argparse.ArgumentParser:
         help='Build directory (default: ~/mnt-build)'
     )
 
+    uboot_parser = subparsers.add_parser('uboot', help='U-Boot development workflow')
+    uboot_parser.add_argument(
+        '--list',
+        choices=['sysimage'],
+        metavar='sysimage',
+        help='List all supported sysimages and their U-Boot configuration'
+    )
+
     parser.add_argument(
         '--version',
         action='version',
@@ -338,6 +368,11 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if args.command == 'clean':
         return run_clean(build_dir=args.build_dir)
+
+    if args.command == 'uboot':
+        if args.list == 'sysimage':
+            return run_uboot_list()
+        parser.error("mnt-build uboot requires an action (e.g. --list sysimage)")
 
     parser.error(f"Unknown command: {args.command}")
     return 2
