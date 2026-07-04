@@ -262,7 +262,7 @@ class UBootManager:
             return rc
 
         artifact = self._find_artifact(checkout_dir, info.filename)
-        shutil.copy2(str(artifact), str(output_path))
+        shutil.copy2(artifact, output_path)
 
         elapsed = time.monotonic() - start_time
         self._print_build_summary(info, output_path, elapsed, log_path)
@@ -566,7 +566,7 @@ class UBootManager:
                         print(f"[uboot]   {f.name}")
                 return 1
             print(f"[uboot] Using defconfig: {defconfig.name}")
-            shutil.copy2(str(defconfig), str(uboot_dir / "configs" / defconfig.name))
+            shutil.copy2(defconfig, uboot_dir / "configs" / defconfig.name)
             result = subprocess.run(
                 ["make", defconfig.name, f"CROSS_COMPILE={cross_compile}", "ARCH=arm64"],
                 cwd=str(uboot_dir),
@@ -591,7 +591,7 @@ class UBootManager:
             return 0
 
         print(f"[uboot] Removing uboot/{info.project}/ ...")
-        shutil.rmtree(str(checkout_dir))
+        shutil.rmtree(checkout_dir)
         print(f"[uboot] Done.")
         return 0
 
@@ -599,22 +599,9 @@ class UBootManager:
         results = []
         for sysimage in self._supported_sysimages():
             try:
-                data = self._query_sysimage(sysimage)
-            except subprocess.CalledProcessError as e:
+                results.append(self.get_info(sysimage))
+            except (ValueError, subprocess.CalledProcessError) as e:
                 print(f"WARNING: failed to query config for {sysimage}: {e}", file=sys.stderr)
-                continue
-            project = data.get("BOOTLOADER_PROJECT", "")
-            results.append(SysimageUBootInfo(
-                sysimage=sysimage,
-                project=project,
-                tag=data.get("BOOTLOADER_TAG", ""),
-                filename=data.get("BOOTLOADER_FILENAME", ""),
-                sha1=data.get("BOOTLOADER_SHA1", ""),
-                bootloader_offset=int(data.get("BOOTLOADER_OFFSET", "0") or "0"),
-                patch_count=self._patch_count(project),
-                has_checkout=self._has_checkout(project),
-                config_source=self._format_config_source(data),
-            ))
         return results
 
 
