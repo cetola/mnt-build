@@ -55,7 +55,7 @@ _mnt_build_complete() {
       COMPREPLY=( $(compgen -W "$clean_opts" -- "$cur") )
       ;;
     uboot)
-      local uboot_opts="--help --list --sysimage --dry-run --diff"
+      local uboot_opts="--help --list --sysimage --dry-run --diff --menuconfig"
       case "$prev" in
         --list)
           COMPREPLY=( $(compgen -W "sysimage" -- "$cur") )

@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -353,6 +354,106 @@ class UBootManager:
                 for line in lines[:20]:
                     print(f"  {line}")
         return 1
+
+    def _find_defconfig(self, checkout_dir: Path, filename: str) -> Path | None:
+        """Find the best matching defconfig for a BOOTLOADER_FILENAME.
+
+        The defconfig files live in the checkout root (e.g. rk3588-mnt-pocket-reform_defconfig).
+        BOOTLOADER_FILENAME may use a variant prefix (e.g. rk3588s-) that doesn't
+        match any defconfig exactly, so fall back to a machine-part match.
+        """
+        base = filename.removesuffix("-flash.bin") if filename.endswith("-flash.bin") else filename
+
+        exact = checkout_dir / f"{base}_defconfig"
+        if exact.is_file():
+            return exact
+
+        # Strip SoC prefix (first dash-separated token) and match on machine part.
+        # e.g. "rk3588s-mnt-pocket-reform" → look for "*mnt-pocket-reform_defconfig"
+        parts = base.split("-", 1)
+        if len(parts) == 2:
+            machine_part = parts[1]
+            candidates = sorted(checkout_dir.glob(f"*{machine_part}_defconfig"))
+            if candidates:
+                return candidates[0]
+
+        return None
+
+    def _init_uboot_subdir(self, checkout_dir: Path, uboot_dir: Path) -> int:
+        """Shallow-clone the u-boot sub-repo using the URL and SHA from build.sh."""
+        build_sh = checkout_dir / "build.sh"
+        if not build_sh.is_file():
+            print(f"[uboot] build.sh not found in {checkout_dir}")
+            return 1
+
+        content = build_sh.read_text()
+        m = re.search(r'git_shallow_clone\s+(\S+)\s+([0-9a-f]+)\s+u-boot', content)
+        if not m:
+            print(f"[uboot] Could not find u-boot clone parameters in build.sh")
+            return 1
+
+        url, sha = m.group(1), m.group(2)
+        print(f"[uboot] Initializing u-boot source ({sha[:12]}) from:")
+        print(f"[uboot]   {url}")
+        for cmd in [
+            ["git", "init", str(uboot_dir)],
+            ["git", "-C", str(uboot_dir), "remote", "add", "origin", url],
+            ["git", "-C", str(uboot_dir), "fetch", "--depth", "1", "origin", sha],
+            ["git", "-C", str(uboot_dir), "checkout", "FETCH_HEAD"],
+        ]:
+            result = subprocess.run(cmd)
+            if result.returncode != 0:
+                return result.returncode
+        return 0
+
+    def menuconfig(self, sysimage: str, cross_compile: str = "aarch64-linux-gnu-") -> int:
+        """Run make menuconfig in the U-Boot source tree.
+
+        The actual U-Boot source lives in uboot/<project>/u-boot/ (a sub-repo
+        managed by build.sh). If no .config exists there, the matching defconfig
+        is loaded automatically — no prior build required.
+        """
+        info = self.get_info(sysimage)
+        checkout_dir = self._uboot_root / info.project
+        uboot_dir = checkout_dir / "u-boot"
+
+        if not checkout_dir.is_dir():
+            print(f"[uboot] No checkout found — running prepare first ...")
+            rc = self.prepare(sysimage)
+            if rc != 0:
+                return rc
+
+        if not uboot_dir.is_dir():
+            rc = self._init_uboot_subdir(checkout_dir, uboot_dir)
+            if rc != 0:
+                return rc
+
+        if not (uboot_dir / ".config").is_file():
+            print(f"[uboot] No .config found — loading defconfig ...")
+            defconfig = self._find_defconfig(checkout_dir, info.filename)
+            if defconfig is None:
+                print(f"[uboot] Could not find a matching defconfig in uboot/{info.project}/")
+                available = sorted(checkout_dir.glob("*_defconfig"))
+                if available:
+                    print("[uboot] Available defconfigs:")
+                    for f in available:
+                        print(f"[uboot]   {f.name}")
+                return 1
+            print(f"[uboot] Using defconfig: {defconfig.name}")
+            shutil.copy2(str(defconfig), str(uboot_dir / "configs" / defconfig.name))
+            result = subprocess.run(
+                ["make", defconfig.name, f"CROSS_COMPILE={cross_compile}", "ARCH=arm64"],
+                cwd=str(uboot_dir),
+            )
+            if result.returncode != 0:
+                return result.returncode
+
+        print(f"[uboot] Running menuconfig for {info.project} ...")
+        result = subprocess.run(
+            ["make", "menuconfig", f"CROSS_COMPILE={cross_compile}", "ARCH=arm64"],
+            cwd=str(uboot_dir),
+        )
+        return result.returncode
 
     def list_sysimages(self) -> list[SysimageUBootInfo]:
         results = []

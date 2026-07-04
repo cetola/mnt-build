@@ -257,6 +257,20 @@ def run_uboot_diff(sysimage: str) -> int:
         return 1
 
 
+def run_uboot_menuconfig(sysimage: str) -> int:
+    """Run make menuconfig in the U-Boot checkout for a sysimage."""
+    mnt_build_root = Path(__file__).parent.parent
+    manager = UBootManager(mnt_build_root)
+    try:
+        return manager.menuconfig(sysimage)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
 def run_uboot_dry_run(sysimage: str) -> int:
     """Clone/fetch U-Boot for a sysimage, checkout tag, apply patches. No build."""
     mnt_build_root = Path(__file__).parent.parent
@@ -395,6 +409,11 @@ def build_parser() -> argparse.ArgumentParser:
         action='store_true',
         help='Build (if needed) then byte-compare against the MNT prebuilt artifact'
     )
+    uboot_parser.add_argument(
+        '--menuconfig',
+        action='store_true',
+        help='Run make menuconfig in the U-Boot checkout (builds first if no .config exists)'
+    )
 
     parser.add_argument(
         '--version',
@@ -440,6 +459,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             if not args.sysimage:
                 parser.error("mnt-build uboot --diff requires --sysimage <name>")
             return run_uboot_diff(args.sysimage)
+        if args.menuconfig:
+            if not args.sysimage:
+                parser.error("mnt-build uboot --menuconfig requires --sysimage <name>")
+            return run_uboot_menuconfig(args.sysimage)
         if args.sysimage:
             return run_uboot_build(args.sysimage)
         parser.error("mnt-build uboot requires an action (e.g. --list sysimage or --sysimage <name> --dry-run)")
