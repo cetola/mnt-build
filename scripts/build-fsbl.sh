@@ -337,6 +337,15 @@ fsbl_checkout_source_repo() {
   }
 }
 
+fsbl_apply_xtra_patches() {
+  local patches_dir="${FSBL_SCRIPT_DIR}/../xtra-uboot-patches/${BOOTLOADER_PROJECT}"
+  [[ -d "$patches_dir" ]] || return 0
+  local patches=("$patches_dir"/*.patch)
+  [[ -e "${patches[0]}" ]] || return 0
+  fsbl_log "Applying xtra patches from: $patches_dir"
+  git -C "$FSBL_SOURCE_REPO_DIR" am "${patches[@]}"
+}
+
 fsbl_run_default_build() {
   fsbl_require_tools make nproc
 
@@ -453,6 +462,7 @@ fsbl_handle_source_build() {
 
   fsbl_set_default_repo_url
   fsbl_checkout_source_repo || return 1
+  fsbl_apply_xtra_patches || return 1
   fsbl_run_source_build || return 1
 
   source_artifact="$(fsbl_resolve_source_artifact)" || return 1
