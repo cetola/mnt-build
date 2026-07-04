@@ -257,6 +257,20 @@ def run_uboot_diff(sysimage: str) -> int:
         return 1
 
 
+def run_uboot_reset(sysimage: str) -> int:
+    """Reset the inner u-boot/ sub-repo to the SHA expected by build.sh."""
+    mnt_build_root = Path(__file__).parent.parent
+    manager = UBootManager(mnt_build_root)
+    try:
+        return manager.reset(sysimage)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
 def run_uboot_clean(sysimage: str) -> int:
     """Remove the U-Boot checkout for a sysimage."""
     mnt_build_root = Path(__file__).parent.parent
@@ -433,6 +447,11 @@ def build_parser() -> argparse.ArgumentParser:
         action='store_true',
         help='Remove the U-Boot checkout entirely (uboot/<project>/)'
     )
+    uboot_parser.add_argument(
+        '--reset',
+        action='store_true',
+        help='Reset the inner u-boot/ sub-repo to the SHA expected by build.sh'
+    )
 
     parser.add_argument(
         '--version',
@@ -486,6 +505,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             if not args.sysimage:
                 parser.error("mnt-build uboot --clean requires --sysimage <name>")
             return run_uboot_clean(args.sysimage)
+        if args.reset:
+            if not args.sysimage:
+                parser.error("mnt-build uboot --reset requires --sysimage <name>")
+            return run_uboot_reset(args.sysimage)
         if args.sysimage:
             return run_uboot_build(args.sysimage)
         parser.error("mnt-build uboot requires an action (e.g. --list sysimage or --sysimage <name> --dry-run)")

@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,6 +22,7 @@ class SysimageUBootInfo:
     tag: str
     filename: str
     sha1: str
+    bootloader_offset: int
     patch_count: int
     has_checkout: bool
     config_source: str
@@ -86,6 +88,7 @@ class UBootManager:
             tag=data.get("BOOTLOADER_TAG", ""),
             filename=data.get("BOOTLOADER_FILENAME", ""),
             sha1=data.get("BOOTLOADER_SHA1", ""),
+            bootloader_offset=int(data.get("BOOTLOADER_OFFSET", "0") or "0"),
             patch_count=self._patch_count(project),
             has_checkout=self._has_checkout(project),
             config_source=self._format_config_source(data),
@@ -203,6 +206,7 @@ class UBootManager:
             print(f"  sudo apt install {' '.join(pkg for pkg, _ in missing)}", file=sys.stderr)
             return 1
 
+        start_time = time.monotonic()
         info = self.get_info(sysimage)
         checkout_dir = self._uboot_root / info.project
 
@@ -239,10 +243,57 @@ class UBootManager:
             )
 
         artifact = self._find_artifact(checkout_dir, info.filename)
-        print(f"[uboot] Found artifact: {artifact}")
         shutil.copy2(str(artifact), str(output_path))
-        print(f"[uboot] Installed to: {output_path}")
+
+        elapsed = time.monotonic() - start_time
+        self._print_build_summary(info, output_path, elapsed)
         return 0
+
+    def _print_build_summary(self, info: SysimageUBootInfo, artifact: Path, elapsed: float) -> None:
+        sha1 = self._file_sha1(artifact)
+        size = artifact.stat().st_size
+        elapsed_str = f"{int(elapsed // 60)}m {int(elapsed % 60)}s"
+
+        patches_dir = self._patches_root / info.project
+        patch_files = sorted(patches_dir.glob("*.patch")) if patches_dir.is_dir() else []
+
+        seek_blocks = info.bootloader_offset // 512 if info.bootloader_offset else 0
+
+        rel_artifact = artifact.relative_to(self.root) if artifact.is_relative_to(self.root) else artifact
+        rel_checkout = (self._uboot_root / info.project).relative_to(self.root)
+
+        print()
+        print("=" * 52)
+        print("U-Boot Build Summary")
+        print("=" * 52)
+        print(f"Sysimage:   {info.sysimage}")
+        print(f"Project:    {info.project}")
+        print(f"Tag:        {info.tag}")
+        print(f"Checkout:   {rel_checkout}/")
+        print()
+
+        if patch_files:
+            print(f"Xtra patches: {len(patch_files)} applied")
+            for p in patch_files:
+                print(f"  {p.name}")
+        else:
+            print("Xtra patches: none")
+        print()
+
+        print(f"Artifact:   {rel_artifact}")
+        print(f"  size:     {size}")
+        print(f"  SHA1:     {sha1}")
+        print()
+        print(f"Build time: {elapsed_str}")
+        print()
+
+        print("To write to SD card:")
+        if seek_blocks:
+            print(f"  dd if={rel_artifact} of=/dev/<device> bs=512 seek={seek_blocks} conv=notrunc,fsync")
+        else:
+            print(f"  dd if={rel_artifact} of=/dev/<device> conv=notrunc,fsync")
+        print("  (replace <device> with your SD card, e.g. sda or mmcblk0)")
+        print("=" * 52)
 
     @staticmethod
     def _file_sha1(path: Path) -> str:
@@ -379,20 +430,25 @@ class UBootManager:
 
         return None
 
-    def _init_uboot_subdir(self, checkout_dir: Path, uboot_dir: Path) -> int:
-        """Shallow-clone the u-boot sub-repo using the URL and SHA from build.sh."""
+    def _parse_uboot_subdir_params(self, checkout_dir: Path) -> tuple[str, str] | None:
+        """Return (url, sha) for the u-boot sub-repo from build.sh, or None."""
         build_sh = checkout_dir / "build.sh"
         if not build_sh.is_file():
-            print(f"[uboot] build.sh not found in {checkout_dir}")
-            return 1
+            return None
+        m = re.search(
+            r'git_shallow_clone\s+(\S+)\s+([0-9a-f]+)\s+u-boot',
+            build_sh.read_text(),
+        )
+        return (m.group(1), m.group(2)) if m else None
 
-        content = build_sh.read_text()
-        m = re.search(r'git_shallow_clone\s+(\S+)\s+([0-9a-f]+)\s+u-boot', content)
-        if not m:
+    def _init_uboot_subdir(self, checkout_dir: Path, uboot_dir: Path) -> int:
+        """Shallow-clone the u-boot sub-repo using the URL and SHA from build.sh."""
+        params = self._parse_uboot_subdir_params(checkout_dir)
+        if params is None:
             print(f"[uboot] Could not find u-boot clone parameters in build.sh")
             return 1
 
-        url, sha = m.group(1), m.group(2)
+        url, sha = params
         print(f"[uboot] Initializing u-boot source ({sha[:12]}) from:")
         print(f"[uboot]   {url}")
         for cmd in [
@@ -404,6 +460,41 @@ class UBootManager:
             result = subprocess.run(cmd)
             if result.returncode != 0:
                 return result.returncode
+        return 0
+
+    def reset(self, sysimage: str) -> int:
+        """Reset the inner u-boot/ sub-repo to the SHA expected by build.sh.
+
+        Use this after exporting patches from the development tree to get back
+        to a clean state so the next build succeeds.
+        """
+        info = self.get_info(sysimage)
+        checkout_dir = self._uboot_root / info.project
+        uboot_dir = checkout_dir / "u-boot"
+
+        if not checkout_dir.is_dir():
+            print(f"[uboot] No checkout found at uboot/{info.project}/ — nothing to reset.")
+            return 0
+
+        if not uboot_dir.is_dir():
+            print(f"[uboot] u-boot/ sub-repo not present — nothing to reset.")
+            return 0
+
+        params = self._parse_uboot_subdir_params(checkout_dir)
+        if params is None:
+            print(f"[uboot] Could not read expected SHA from build.sh")
+            return 1
+
+        _, sha = params
+        print(f"[uboot] Resetting uboot/{info.project}/u-boot/ to {sha[:12]} ...")
+        for cmd in [
+            ["git", "-C", str(uboot_dir), "reset", "--hard", sha],
+            ["git", "-C", str(uboot_dir), "clean", "-fdx"],
+        ]:
+            result = subprocess.run(cmd)
+            if result.returncode != 0:
+                return result.returncode
+        print(f"[uboot] Done.")
         return 0
 
     def menuconfig(self, sysimage: str, cross_compile: str = "aarch64-linux-gnu-") -> int:
@@ -484,6 +575,7 @@ class UBootManager:
                 tag=data.get("BOOTLOADER_TAG", ""),
                 filename=data.get("BOOTLOADER_FILENAME", ""),
                 sha1=data.get("BOOTLOADER_SHA1", ""),
+                bootloader_offset=int(data.get("BOOTLOADER_OFFSET", "0") or "0"),
                 patch_count=self._patch_count(project),
                 has_checkout=self._has_checkout(project),
                 config_source=self._format_config_source(data),
