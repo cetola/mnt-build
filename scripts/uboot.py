@@ -194,6 +194,21 @@ class UBootManager:
 
         return missing
 
+    @staticmethod
+    def _run_logged(cmd: list[str], cwd: str, env: dict, log_fh) -> int:
+        """Run a command, teeing stdout+stderr to the terminal and log_fh."""
+        proc = subprocess.Popen(
+            cmd, cwd=cwd, env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1,
+        )
+        for line in proc.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            log_fh.write(line)
+        proc.wait()
+        return proc.returncode
+
     def build(self, sysimage: str, cross_compile: str = "aarch64-linux-gnu-") -> int:
         """Build U-Boot for a sysimage. Prepares the checkout first if needed."""
         print(f"[uboot] Checking build prerequisites ...", flush=True)
@@ -216,40 +231,47 @@ class UBootManager:
             if rc != 0:
                 return rc
 
-        downloads_dir = self.root / "image-gen" / "downloads"
+        image_gen_dir = self.root / "image-gen"
+        downloads_dir = image_gen_dir / "downloads"
         downloads_dir.mkdir(parents=True, exist_ok=True)
         output_path = downloads_dir / info.filename
 
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        log_path = image_gen_dir / f"uboot-build-{sysimage}-{timestamp}.log"
+        print(f"[uboot] Log: {log_path.relative_to(self.root)}")
+
         jobs = str(os.cpu_count() or 4)
+        build_env = {**os.environ, "CROSS_COMPILE": cross_compile, "MAKEFLAGS": f"-j{jobs}"}
 
         print(f"[uboot] Building {info.project} ...")
         print(f"[uboot] CROSS_COMPILE: {cross_compile}")
 
         build_script = checkout_dir / "build.sh"
-        if build_script.is_file():
-            print(f"[uboot] Running build.sh ...")
-            subprocess.run(
-                ["bash", "./build.sh"],
-                cwd=str(checkout_dir),
-                env={**os.environ, "MAKEFLAGS": f"-j{jobs}"},
-                check=True,
-            )
-        else:
-            print(f"[uboot] Running make ...")
-            subprocess.run(
-                ["make", f"-j{jobs}", f"CROSS_COMPILE={cross_compile}"],
-                cwd=str(checkout_dir),
-                check=True,
-            )
+        with open(log_path, "w") as log_fh:
+            if build_script.is_file():
+                print(f"[uboot] Running build.sh ...")
+                rc = self._run_logged(["bash", "./build.sh"], str(checkout_dir), build_env, log_fh)
+            else:
+                print(f"[uboot] Running make ...")
+                rc = self._run_logged(
+                    ["make", f"-j{jobs}", f"CROSS_COMPILE={cross_compile}"],
+                    str(checkout_dir), build_env, log_fh,
+                )
+
+        if rc != 0:
+            print(f"[uboot] Build failed (exit {rc}). Log: {log_path.relative_to(self.root)}", file=sys.stderr)
+            return rc
 
         artifact = self._find_artifact(checkout_dir, info.filename)
         shutil.copy2(str(artifact), str(output_path))
 
         elapsed = time.monotonic() - start_time
-        self._print_build_summary(info, output_path, elapsed)
+        self._print_build_summary(info, output_path, elapsed, log_path)
         return 0
 
-    def _print_build_summary(self, info: SysimageUBootInfo, artifact: Path, elapsed: float) -> None:
+    def _print_build_summary(
+        self, info: SysimageUBootInfo, artifact: Path, elapsed: float, log_path: Path
+    ) -> None:
         sha1 = self._file_sha1(artifact)
         size = artifact.stat().st_size
         elapsed_str = f"{int(elapsed // 60)}m {int(elapsed % 60)}s"
@@ -261,39 +283,53 @@ class UBootManager:
 
         rel_artifact = artifact.relative_to(self.root) if artifact.is_relative_to(self.root) else artifact
         rel_checkout = (self._uboot_root / info.project).relative_to(self.root)
+        rel_log = log_path.relative_to(self.root) if log_path.is_relative_to(self.root) else log_path
 
-        print()
-        print("=" * 52)
-        print("U-Boot Build Summary")
-        print("=" * 52)
-        print(f"Sysimage:   {info.sysimage}")
-        print(f"Project:    {info.project}")
-        print(f"Tag:        {info.tag}")
-        print(f"Checkout:   {rel_checkout}/")
-        print()
+        lines = [
+            "",
+            "=" * 52,
+            "U-Boot Build Summary",
+            "=" * 52,
+            f"Sysimage:   {info.sysimage}",
+            f"Project:    {info.project}",
+            f"Tag:        {info.tag}",
+            f"Checkout:   {rel_checkout}/",
+            "",
+        ]
 
         if patch_files:
-            print(f"Xtra patches: {len(patch_files)} applied")
+            lines.append(f"Xtra patches: {len(patch_files)} applied")
             for p in patch_files:
-                print(f"  {p.name}")
+                lines.append(f"  {p.name}")
         else:
-            print("Xtra patches: none")
-        print()
+            lines.append("Xtra patches: none")
 
-        print(f"Artifact:   {rel_artifact}")
-        print(f"  size:     {size}")
-        print(f"  SHA1:     {sha1}")
-        print()
-        print(f"Build time: {elapsed_str}")
-        print()
-
-        print("To write to SD card:")
+        lines += [
+            "",
+            f"Artifact:   {rel_artifact}",
+            f"  size:     {size}",
+            f"  SHA1:     {sha1}",
+            "",
+            f"Build time: {elapsed_str}",
+            f"Log:        {rel_log}",
+            "",
+            "To write to SD card:",
+        ]
         if seek_blocks:
-            print(f"  dd if={rel_artifact} of=/dev/<device> bs=512 seek={seek_blocks} conv=notrunc,fsync")
+            lines.append(f"  dd if={rel_artifact} of=/dev/<device> bs=512 seek={seek_blocks} conv=notrunc,fsync")
         else:
-            print(f"  dd if={rel_artifact} of=/dev/<device> conv=notrunc,fsync")
-        print("  (replace <device> with your SD card, e.g. sda or mmcblk0)")
-        print("=" * 52)
+            lines.append(f"  dd if={rel_artifact} of=/dev/<device> conv=notrunc,fsync")
+        lines += [
+            "  (replace <device> with your SD card, e.g. sda or mmcblk0)",
+            "=" * 52,
+        ]
+
+        for line in lines:
+            print(line)
+
+        with open(log_path, "a") as log_fh:
+            for line in lines:
+                log_fh.write(line + "\n")
 
     @staticmethod
     def _file_sha1(path: Path) -> str:
