@@ -22,6 +22,7 @@ from config import (
 )
 from errors import BuildError
 from logging_setup import Colors, setup_logging
+from uboot import UBootManager, print_sysimage_table
 
 __version__ = "1.0.6"
 
@@ -204,6 +205,114 @@ def run_clean(build_dir: Optional[Path] = None) -> int:
         return 1
 
 
+def run_uboot_list() -> int:
+    """List all sysimages and their U-Boot configuration."""
+    mnt_build_root = Path(__file__).parent.parent
+    manager = UBootManager(mnt_build_root)
+    try:
+        infos = manager.list_sysimages()
+    except Exception as e:
+        print(f"Error: failed to enumerate sysimage configs: {e}", file=sys.stderr)
+        return 1
+    if not infos:
+        print("No supported sysimages found.", file=sys.stderr)
+        print(f"  Looked for machine configs in:", file=sys.stderr)
+        print(f"    {mnt_build_root / 'local-machines'}", file=sys.stderr)
+        print(f"    {mnt_build_root / 'reform-tools' / 'machines'}", file=sys.stderr)
+        print(f"  Looked for sysimage list in:", file=sys.stderr)
+        print(f"    {mnt_build_root / 'scripts' / 'sysimage-config.sh'}", file=sys.stderr)
+        return 1
+    print_sysimage_table(infos)
+    return 0
+
+
+def run_uboot_build(sysimage: str) -> int:
+    """Build U-Boot for a sysimage, preparing the checkout if needed."""
+    mnt_build_root = Path(__file__).parent.parent
+    manager = UBootManager(mnt_build_root)
+    try:
+        return manager.build(sysimage)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def run_uboot_diff(sysimage: str) -> int:
+    """Build U-Boot (if needed) then compare against the MNT prebuilt artifact."""
+    mnt_build_root = Path(__file__).parent.parent
+    manager = UBootManager(mnt_build_root)
+    try:
+        return manager.diff_vs_prebuilt(sysimage)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def run_uboot_reset(sysimage: str) -> int:
+    """Reset the inner u-boot/ sub-repo to the SHA expected by build.sh."""
+    mnt_build_root = Path(__file__).parent.parent
+    manager = UBootManager(mnt_build_root)
+    try:
+        return manager.reset(sysimage)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def run_uboot_clean(sysimage: str) -> int:
+    """Remove the U-Boot checkout for a sysimage."""
+    mnt_build_root = Path(__file__).parent.parent
+    manager = UBootManager(mnt_build_root)
+    try:
+        return manager.clean(sysimage)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def run_uboot_menuconfig(sysimage: str) -> int:
+    """Run make menuconfig in the U-Boot checkout for a sysimage."""
+    mnt_build_root = Path(__file__).parent.parent
+    manager = UBootManager(mnt_build_root)
+    try:
+        return manager.menuconfig(sysimage)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def run_uboot_dry_run(sysimage: str) -> int:
+    """Clone/fetch U-Boot for a sysimage, checkout tag, apply patches. No build."""
+    mnt_build_root = Path(__file__).parent.parent
+    manager = UBootManager(mnt_build_root)
+    try:
+        return manager.prepare(sysimage)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog='mnt-build',
@@ -306,6 +415,44 @@ def build_parser() -> argparse.ArgumentParser:
         help='Build directory (default: ~/mnt-build)'
     )
 
+    uboot_parser = subparsers.add_parser('uboot', help='U-Boot development workflow')
+    uboot_parser.add_argument(
+        '--list',
+        choices=['sysimage'],
+        metavar='sysimage',
+        help='List all supported sysimages and their U-Boot configuration'
+    )
+    uboot_parser.add_argument(
+        '--sysimage',
+        metavar='name',
+        help='Target sysimage (required for --dry-run and other build actions)'
+    )
+    uboot_parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Clone/fetch U-Boot repo, checkout tag, apply patches — stop before building'
+    )
+    uboot_parser.add_argument(
+        '--diff',
+        action='store_true',
+        help='Build (if needed) then byte-compare against the MNT prebuilt artifact'
+    )
+    uboot_parser.add_argument(
+        '--menuconfig',
+        action='store_true',
+        help='Run make menuconfig in the U-Boot checkout (builds first if no .config exists)'
+    )
+    uboot_parser.add_argument(
+        '--clean',
+        action='store_true',
+        help='Remove the U-Boot checkout entirely (uboot/<project>/)'
+    )
+    uboot_parser.add_argument(
+        '--reset',
+        action='store_true',
+        help='Reset the inner u-boot/ sub-repo to the SHA expected by build.sh'
+    )
+
     parser.add_argument(
         '--version',
         action='version',
@@ -338,6 +485,33 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if args.command == 'clean':
         return run_clean(build_dir=args.build_dir)
+
+    if args.command == 'uboot':
+        if args.list == 'sysimage':
+            return run_uboot_list()
+        if args.dry_run:
+            if not args.sysimage:
+                parser.error("mnt-build uboot --dry-run requires --sysimage <name>")
+            return run_uboot_dry_run(args.sysimage)
+        if args.diff:
+            if not args.sysimage:
+                parser.error("mnt-build uboot --diff requires --sysimage <name>")
+            return run_uboot_diff(args.sysimage)
+        if args.menuconfig:
+            if not args.sysimage:
+                parser.error("mnt-build uboot --menuconfig requires --sysimage <name>")
+            return run_uboot_menuconfig(args.sysimage)
+        if args.clean:
+            if not args.sysimage:
+                parser.error("mnt-build uboot --clean requires --sysimage <name>")
+            return run_uboot_clean(args.sysimage)
+        if args.reset:
+            if not args.sysimage:
+                parser.error("mnt-build uboot --reset requires --sysimage <name>")
+            return run_uboot_reset(args.sysimage)
+        if args.sysimage:
+            return run_uboot_build(args.sysimage)
+        parser.error("mnt-build uboot requires an action (e.g. --list sysimage or --sysimage <name> --dry-run)")
 
     parser.error(f"Unknown command: {args.command}")
     return 2
