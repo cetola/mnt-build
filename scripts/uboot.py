@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -14,6 +16,7 @@ class SysimageUBootInfo:
     sysimage: str
     project: str
     tag: str
+    filename: str
     patch_count: int
     has_checkout: bool
     config_source: str
@@ -77,6 +80,7 @@ class UBootManager:
             sysimage=sysimage,
             project=project,
             tag=data.get("BOOTLOADER_TAG", ""),
+            filename=data.get("BOOTLOADER_FILENAME", ""),
             patch_count=self._patch_count(project),
             has_checkout=self._has_checkout(project),
             config_source=self._format_config_source(data),
@@ -123,6 +127,65 @@ class UBootManager:
         print(f"[uboot] Checkout ready at: uboot/{info.project}/")
         return 0
 
+    def _find_artifact(self, checkout_dir: Path, filename: str) -> Path:
+        """Locate the built flash artifact, mirroring fsbl_resolve_source_artifact."""
+        candidates = [filename, "flash.bin"] if filename else ["flash.bin"]
+        for name in candidates:
+            p = checkout_dir / name
+            if p.is_file():
+                return p
+        # Glob fallback: newest *-flash.bin anywhere in the tree
+        matches = sorted(checkout_dir.rglob("*-flash.bin"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if matches:
+            return matches[0]
+        raise FileNotFoundError(
+            f"Could not find built artifact in {checkout_dir}. "
+            "Use a custom build command if the output path differs."
+        )
+
+    def build(self, sysimage: str, cross_compile: str = "aarch64-linux-gnu-") -> int:
+        """Build U-Boot for a sysimage. Prepares the checkout first if needed."""
+        info = self.get_info(sysimage)
+        checkout_dir = self._uboot_root / info.project
+
+        if not checkout_dir.is_dir():
+            print(f"[uboot] No checkout found — running prepare first ...")
+            rc = self.prepare(sysimage)
+            if rc != 0:
+                return rc
+
+        downloads_dir = self.root / "image-gen" / "downloads"
+        downloads_dir.mkdir(parents=True, exist_ok=True)
+        output_path = downloads_dir / info.filename
+
+        jobs = str(os.cpu_count() or 4)
+
+        print(f"[uboot] Building {info.project} ...")
+        print(f"[uboot] CROSS_COMPILE: {cross_compile}")
+
+        build_script = checkout_dir / "build.sh"
+        if build_script.is_file():
+            print(f"[uboot] Running build.sh ...")
+            subprocess.run(
+                ["bash", "./build.sh"],
+                cwd=str(checkout_dir),
+                env={**os.environ, "MAKEFLAGS": f"-j{jobs}"},
+                check=True,
+            )
+        else:
+            print(f"[uboot] Running make ...")
+            subprocess.run(
+                ["make", f"-j{jobs}", f"CROSS_COMPILE={cross_compile}"],
+                cwd=str(checkout_dir),
+                check=True,
+            )
+
+        artifact = self._find_artifact(checkout_dir, info.filename)
+        print(f"[uboot] Found artifact: {artifact}")
+        shutil.copy2(str(artifact), str(output_path))
+        print(f"[uboot] Installed to: {output_path}")
+        return 0
+
     def list_sysimages(self) -> list[SysimageUBootInfo]:
         results = []
         for sysimage in self._supported_sysimages():
@@ -136,6 +199,7 @@ class UBootManager:
                 sysimage=sysimage,
                 project=project,
                 tag=data.get("BOOTLOADER_TAG", ""),
+                filename=data.get("BOOTLOADER_FILENAME", ""),
                 patch_count=self._patch_count(project),
                 has_checkout=self._has_checkout(project),
                 config_source=self._format_config_source(data),

@@ -48,7 +48,8 @@ fi
 reset_sysimage_config
 configure_sysimage
 
-printf 'BOOTLOADER_PROJECT=%s\n' "$BOOTLOADER_PROJECT"
-printf 'BOOTLOADER_TAG=%s\n'     "$BOOTLOADER_TAG"
-printf 'CONFIG_SOURCE_PATH=%s\n' "$CONFIG_SOURCE_PATH"
+printf 'BOOTLOADER_PROJECT=%s\n'        "$BOOTLOADER_PROJECT"
+printf 'BOOTLOADER_TAG=%s\n'            "$BOOTLOADER_TAG"
+printf 'BOOTLOADER_FILENAME=%s\n'       "$BOOTLOADER_FILENAME"
+printf 'CONFIG_SOURCE_PATH=%s\n'        "$CONFIG_SOURCE_PATH"
 printf 'CONFIG_SOURCE_IS_FALLBACK=%s\n' "$CONFIG_SOURCE_IS_FALLBACK"

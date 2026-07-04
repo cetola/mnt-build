@@ -226,6 +226,23 @@ def run_uboot_list() -> int:
     return 0
 
 
+def run_uboot_build(sysimage: str) -> int:
+    """Build U-Boot for a sysimage, preparing the checkout if needed."""
+    mnt_build_root = Path(__file__).parent.parent
+    manager = UBootManager(mnt_build_root)
+    try:
+        return manager.build(sysimage)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
 def run_uboot_dry_run(sysimage: str) -> int:
     """Clone/fetch U-Boot for a sysimage, checkout tag, apply patches. No build."""
     mnt_build_root = Path(__file__).parent.parent
@@ -400,6 +417,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             if not args.sysimage:
                 parser.error("mnt-build uboot --dry-run requires --sysimage <name>")
             return run_uboot_dry_run(args.sysimage)
+        if args.sysimage:
+            return run_uboot_build(args.sysimage)
         parser.error("mnt-build uboot requires an action (e.g. --list sysimage or --sysimage <name> --dry-run)")
 
     parser.error(f"Unknown command: {args.command}")
