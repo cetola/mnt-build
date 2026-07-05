@@ -13,3 +13,4 @@ headers-extmod
 image-gen
 scripts/arm-libs-staging/
 uboot/
+dtbs/
