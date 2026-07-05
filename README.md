@@ -32,6 +32,7 @@ Current supported sysimage values are:
 - pocket-reform-system-a311d
 - reform-next-system-rk3588
 - pocket-reform-system-rk3588
+- pocket-reform-system-rk3588s
 - pocket-reform-system-imx8mp
 
 You'll boot into an Arch Linux ARM filesystem. Users include `root` and `alarm`. Passwords are the same as the username.
