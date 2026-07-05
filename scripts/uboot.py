@@ -240,7 +240,7 @@ class UBootManager:
         print(f"[uboot] Log: {log_path.relative_to(self.root)}")
 
         jobs = str(os.cpu_count() or 4)
-        build_env = {**os.environ, "CROSS_COMPILE": cross_compile, "MAKEFLAGS": f"-j{jobs}"}
+        build_env = {**os.environ, "MAKEFLAGS": f"-j{jobs}"}
 
         print(f"[uboot] Building {info.project} ...")
         print(f"[uboot] CROSS_COMPILE: {cross_compile}")
