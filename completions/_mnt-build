@@ -44,7 +44,9 @@ _mnt_build() {
         '--arch=[kernel ARCH]:arch:' \
         '--cross-compile=[cross compile prefix]:prefix:' \
         '--with-headers[generate extmod headers tree]' \
-        '--kernel-only[build kernel only]'
+        '(--dtbs-only --modules-only)--kernel-only[build kernel image only]' \
+        '(--kernel-only --modules-only)--dtbs-only[build DTBs only (ARM64)]' \
+        '(--kernel-only --dtbs-only)--modules-only[build and install in-tree modules only]'
       ;;
     clean)
       _arguments -s \

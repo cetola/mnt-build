@@ -32,7 +32,7 @@ _mnt_build_complete() {
 
   case "$subcmd" in
     build)
-      local build_opts="--help --kversion --build-dir -j --jobs --localversion-rev --dry-run --olddefconfig --defconfig --post-clean --skip-git-ops --arch --cross-compile --with-headers --kernel-only"
+      local build_opts="--help --kversion --build-dir -j --jobs --localversion-rev --dry-run --olddefconfig --defconfig --post-clean --skip-git-ops --arch --cross-compile --with-headers --kernel-only --dtbs-only --modules-only"
       case "$prev" in
         --build-dir)
           COMPREPLY=( $(compgen -d -- "$cur") )

@@ -36,7 +36,9 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
               arch: str = "arm64",
               cross_compile: str = DEFAULT_CROSS_COMPILE,
               with_headers: bool = False,
-              kernel_only: bool = DEFAULT_KERNEL_ONLY) -> int:
+              kernel_only: bool = DEFAULT_KERNEL_ONLY,
+              dtbs_only: bool = False,
+              modules_only: bool = False) -> int:
     """Run the kernel build process."""
     if cross_compile is None:
         cross_compile = DEFAULT_CROSS_COMPILE
@@ -61,6 +63,8 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         arch=arch,
         cross_compile=normalized_cross_compile,
         kernel_only=kernel_only,
+        dtbs_only=dtbs_only,
+        modules_only=modules_only,
     )
 
     try:
@@ -129,6 +133,11 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
 
         if kernel_only:
             logger.info("Kernel only mode - skipping module builds and tarball creation")
+        elif dtbs_only:
+            builder.log_phase("Collect DTBs")
+            dtbs_dir = builder.collect_dtbs()
+        elif modules_only:
+            logger.info("Modules only mode - skipping kernel image, DTBs, and tarball creation")
         else:
             builder.log_phase("Out-of-Tree Modules")
             builder.build_lpc_module()
@@ -147,7 +156,13 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
             logger.warning(f"No patches were found in: {config.patches_dir}")
             logger.warning("Build completed using only xtra-patches.")
             logger.warning("!" * 60)
-        if not kernel_only:
+        if kernel_only:
+            logger.info(f"Kernel image: {builder.kernel_image_path()}")
+        elif dtbs_only:
+            logger.info(f"DTBs: {dtbs_dir}")
+        elif modules_only:
+            logger.info(f"Modules: {builder.modules_install_path()}")
+        else:
             logger.info(f"Output: {config.output_tar}")
             logger.info(f"LPC module output: {config.build_dir / config.output_lpc_module_tar.name}")
             logger.info(f"WiFi module output: {config.build_dir / config.output_wifi_module_tar.name}")
@@ -398,14 +413,22 @@ def build_parser() -> argparse.ArgumentParser:
         help='Also generate an external-module headers tree using '
              'scripts/package/install-extmod-build.'
     )
-    build_parser.add_argument(
+    mode_group = build_parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
         '--kernel-only',
         action='store_true',
         default=DEFAULT_KERNEL_ONLY,
-        help='Build only the kernel. Skips dtb, modules, and out-of-tree '
-             'modules. Handy for testing a newly patched kernel without '
-             'rebuilding all the other artifacts. No tarball artifacts '
-             'are produced.'
+        help='Build kernel image only; skip DTBs, modules, and tarballs.'
+    )
+    mode_group.add_argument(
+        '--dtbs-only',
+        action='store_true',
+        help='Build DTBs only; skip kernel image, modules, and tarballs. ARM64 only.'
+    )
+    mode_group.add_argument(
+        '--modules-only',
+        action='store_true',
+        help='Build and install in-tree kernel modules only; skip kernel image, DTBs, and tarballs.'
     )
 
     clean_parser = subparsers.add_parser('clean', help='Clean local kernel git state')
@@ -480,7 +503,9 @@ def main(argv: Optional[list[str]] = None) -> int:
             arch=args.arch,
             cross_compile=args.cross_compile,
             with_headers=args.with_headers,
-            kernel_only=args.kernel_only
+            kernel_only=args.kernel_only,
+            dtbs_only=args.dtbs_only,
+            modules_only=args.modules_only,
         )
 
     if args.command == 'clean':

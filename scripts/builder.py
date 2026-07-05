@@ -17,12 +17,16 @@ class KernelBuilder:
     def __init__(self, config: BuildConfig, logger: logging.Logger,
                  arch: str = "arm64",
                  cross_compile: str = DEFAULT_CROSS_COMPILE,
-                 kernel_only: bool = DEFAULT_KERNEL_ONLY):
+                 kernel_only: bool = DEFAULT_KERNEL_ONLY,
+                 dtbs_only: bool = False,
+                 modules_only: bool = False):
         self.config = config
         self.logger = logger
         self.arch = arch
         self.cross_compile = cross_compile.strip() if cross_compile else ""
         self.kernel_only = kernel_only
+        self.dtbs_only = dtbs_only
+        self.modules_only = modules_only
         self.patch_dirs_used: List[Path] = []
         self.patch_stats: Optional[PatchStats] = None
 
@@ -40,6 +44,12 @@ class KernelBuilder:
 
     def _uses_dtbs(self) -> bool:
         return self.arch == "arm64"
+
+    def kernel_image_path(self) -> Path:
+        return self.config.linux_dir / self._kernel_image_relative_path()
+
+    def modules_install_path(self) -> Path:
+        return self.config.linux_dir / "modules" / "lib" / "modules" / self.config.kernel_release
 
     def _kernel_image_make_target(self) -> str:
         if self.arch == "x86_64":
@@ -665,9 +675,17 @@ class KernelBuilder:
         if self.kernel_only:
             self.logger.info(
                 f"Compiling kernel image only with {self.config.jobs} jobs "
-                "(kernel_only=True, skipping dtbs and modules)..."
+                "(skipping dtbs and modules)..."
             )
             make_targets = [self._kernel_image_make_target()]
+        elif self.dtbs_only:
+            if not self._uses_dtbs():
+                raise BuildError(f"--dtbs-only is not supported for ARCH={self.arch}")
+            self.logger.info(f"Compiling DTBs only with {self.config.jobs} jobs...")
+            make_targets = ['dtbs']
+        elif self.modules_only:
+            self.logger.info(f"Compiling modules only with {self.config.jobs} jobs...")
+            make_targets = ['modules']
         else:
             self.logger.info(f"Compiling kernel with {self.config.jobs} jobs (this may take a while)...")
             make_targets = [self._kernel_image_make_target(), 'modules']
@@ -686,8 +704,8 @@ class KernelBuilder:
             stream_output=True
         )
 
-        # Install modules to a temporary location if not "kernel only"
-        if not self.kernel_only:
+        # Install modules when we built them (all modes except kernel-only and dtbs-only)
+        if not self.kernel_only and not self.dtbs_only:
             modules_dir = self.config.linux_dir / "modules"
             self.logger.info(f"Installing modules to {modules_dir}...")
             if modules_dir.exists():
@@ -843,6 +861,23 @@ class KernelBuilder:
     # Tarball creation
     # ------------------------------------------------------------------
 
+    def collect_dtbs(self) -> Path:
+        """Copy built DTBs into <build_dir>/dtbs/, named with the kernel release suffix."""
+        dtbs_dir = self.config.build_dir / "dtbs"
+        if dtbs_dir.exists():
+            shutil.rmtree(dtbs_dir)
+        dtbs_dir.mkdir(parents=True)
+
+        for dtb_path in self.config.dtb_files:
+            if not dtb_path.exists():
+                raise BuildError(f"DTB not found: {dtb_path}")
+            dest_name = dtb_path.name.replace('.dtb', f'-{self.config.kernel_release}.dtb')
+            shutil.copy2(dtb_path, dtbs_dir / dest_name)
+            self.logger.info(f"  {dest_name}")
+
+        self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} DTBs collected: {dtbs_dir}")
+        return dtbs_dir
+
     def _finalize_tarball(self, output_path: Path, label: str) -> Path:
         dest_path = self.config.build_dir / output_path.name
         if dest_path.exists():
@@ -953,13 +988,15 @@ class KernelBuilder:
             'config': self.config.config_file,
             'modules': self.config.linux_dir / "modules/lib/modules"
         }
-        if self._uses_dtbs():
-            for i, dtb_path in enumerate(self.config.dtb_files):
-                required_files[f'dtb_{i}'] = dtb_path
 
         for name, path in required_files.items():
             if not path.exists():
                 raise BuildError(f"Required file missing ({name}): {path}")
+
+        dtbs_dir = None
+        if self._uses_dtbs():
+            self.log_phase("Collect DTBs")
+            dtbs_dir = self.collect_dtbs()
 
         if self.config.output_tar.exists():
             self.config.output_tar.unlink()
@@ -970,11 +1007,10 @@ class KernelBuilder:
                 arcname=str(self._kernel_image_relative_path())
             )
 
-            if self._uses_dtbs():
-                for dtb_path in self.config.dtb_files:
-                    dtb_filename = dtb_path.name.replace('.dtb', f'-{self.config.kernel_release}.dtb')
-                    tar.add(dtb_path, arcname=dtb_filename)
-                    self.logger.info(f"  Added DTB: {dtb_filename}")
+            if dtbs_dir is not None:
+                for dtb_file in sorted(dtbs_dir.iterdir()):
+                    tar.add(dtb_file, arcname=dtb_file.name)
+                    self.logger.info(f"  Added DTB: {dtb_file.name}")
 
             tar.add(
                 self.config.linux_dir / "modules/lib/modules",
