@@ -387,7 +387,7 @@
 		// dcdc en is also driven by rp2040
 		// actually backlight enable
 		enable-gpios = <&gpio1 RK_PC2 GPIO_ACTIVE_HIGH>;
-		no-eot-hfp-hbp-hsa;
+		probe-mode-lpm;
 
 		port {
 			mipi_panel_in: endpoint {
