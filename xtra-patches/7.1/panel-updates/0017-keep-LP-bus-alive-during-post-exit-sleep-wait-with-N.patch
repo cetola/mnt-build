@@ -1,0 +1,68 @@
+From da8bb0fb244a91b712d74869c00b8f031c83abdf Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Mon, 6 Jul 2026 14:20:19 -0700
+Subject: [PATCH] keep LP bus alive during post-exit-sleep wait with NOP loop
+
+---
+ .../gpu/drm/panel/panel-mnt-pocket-reform.c   | 38 +++++++++++--------
+ 1 file changed, 23 insertions(+), 15 deletions(-)
+
+diff --git a/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c b/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
+index 85803c302a15..ced82351f171 100644
+--- a/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
++++ b/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
+@@ -1191,20 +1191,28 @@ static int pocket_display_v2_init(struct jdi_panel *jdi)
+ 	if (ret < 0)
+ 		return ret;
+ 
+-	if (of_property_present(jdi->dsi->dev.of_node, "init-in-enable") &&
+-	    !jdi->skip_display_on_in_init) {
+-		/* Send display-on before the 120ms sleep: after the sleep
+-		 * the DSI2 recalibration event (INT_ST_CRI bit 9) fires
+-		 * and permanently locks CRI, blocking all LP commands. */
+-		ret = jdi_dcs_set_display_on(jdi);
+-		if (ret < 0)
+-			return ret;
+-	}
+-
+-	msleep(120);
+-	jdi_trace(jdi, __func__, "post-exit-sleep delay complete");
+-
+-	if (!of_property_present(jdi->dsi->dev.of_node, "init-in-enable")) {
++	if (of_property_present(jdi->dsi->dev.of_node, "init-in-enable")) {
++		/* Keep LP bus active during the 120ms post-exit-sleep wait.
++		 * When LP is idle >~18ms (one frame), per-frame calibration
++		 * bursts accumulate and overflow the CRI FIFO, permanently
++		 * locking CRI.  NOP writes every 10ms drain each burst via
++		 * cri_fifos_wait_avail before overflow occurs — same mechanism
++		 * that keeps CRI clean during the vendor table send. */
++		int i;
++
++		for (i = 0; i < 12; i++) {
++			msleep(10);
++			mipi_dsi_dcs_nop(jdi->dsi);
++		}
++		jdi_trace(jdi, __func__, "post-exit-sleep keep-alive complete");
++		if (!jdi->skip_display_on_in_init) {
++			ret = jdi_dcs_set_display_on(jdi);
++			if (ret < 0)
++				return ret;
++		}
++	} else {
++		msleep(120);
++		jdi_trace(jdi, __func__, "post-exit-sleep delay complete");
+ 		jdi_dump_runtime_regs(jdi, __func__);
+ 		if (!jdi->skip_display_on_in_init) {
+ 			ret = jdi_dcs_set_display_on(jdi);
+@@ -1717,7 +1725,7 @@ static int jdi_panel_probe(struct mipi_dsi_device *dsi)
+ 	mipi_dsi_set_drvdata(dsi, jdi);
+ 
+ 	jdi->dsi = dsi;
+-	dev_err(&dsi->dev, "[panel-ver] panel-mnt-pocket-reform v13: display-on-before-sleep\n");
++	dev_err(&dsi->dev, "[panel-ver] panel-mnt-pocket-reform v14: keepalive-nop-loop\n");
+ 	jdi_trace(jdi, __func__, "probe start compatible=%pOF init-in-enable=%d display-on-in-enable=%d probe-mode-lpm=%d burst-mode=%d no-eot-hfp-hbp-hsa=%d vsync-shift=%d",
+ 		dsi->dev.of_node,
+ 		of_property_present(dsi->dev.of_node, "init-in-enable"),
+-- 
+2.55.0
+

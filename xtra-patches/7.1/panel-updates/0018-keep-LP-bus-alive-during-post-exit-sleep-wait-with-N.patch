@@ -1,0 +1,97 @@
+From 44d71d80369b6b0cd1b2c9eab1e27cfba774a00d Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Mon, 6 Jul 2026 14:59:15 -0700
+Subject: [PATCH] keep LP bus alive during post-exit-sleep wait with NOP loop
+
+---
+ .../gpu/drm/panel/panel-mnt-pocket-reform.c    | 18 +++++++++++++++---
+ 1 file changed, 15 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c b/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
+index ced82351f171..d00a02c1a4d3 100644
+--- a/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
++++ b/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
+@@ -478,8 +478,13 @@ static int pocket_display_v2_init(struct jdi_panel *jdi)
+ 	bool init_in_enable = of_property_present(jdi->dsi->dev.of_node, "init-in-enable");
+ 
+ 	if (force_v2_tables_first_init || !init_in_enable || jdi->display_v2_init_count > 1) {
+-		dev_err(dev, "[v2-init] sending vendor tables (count=%d init_in_enable=%d)\n",
+-			jdi->display_v2_init_count, init_in_enable);
++		u32 page_limit_val = 7;
++		int page_limit;
++
++		of_property_read_u32(dev->of_node, "v2-debug-page-limit", &page_limit_val);
++		page_limit = (int)page_limit_val;
++		dev_err(dev, "[v2-init] sending vendor tables (count=%d init_in_enable=%d page_limit=%d)\n",
++			jdi->display_v2_init_count, init_in_enable, page_limit);
+ 		jdi->v2_table_start = ktime_get();
+ 		jdi->v2_cmd_idx = 0;
+ 		ret = dsi_write_raw(jdi, (u8[]) {0xE0,0xAB,0xBA}, 3, "v2-0xE0");
+@@ -495,6 +500,7 @@ static int pocket_display_v2_init(struct jdi_panel *jdi)
+ 		if (ret < 0)
+ 			return ret;
+ 
++		if (page_limit < 2) goto v2_tables_end;
+ 		ret = dsi_write_raw(jdi, (u8[]) {0xFF,0x02}, 2, "v2-0xFF");
+ 		if (ret < 0)
+ 			return ret;
+@@ -712,6 +718,7 @@ static int pocket_display_v2_init(struct jdi_panel *jdi)
+ 		if (ret < 0)
+ 			return ret;
+ 
++		if (page_limit < 3) goto v2_tables_end;
+ 		ret = dsi_write_raw(jdi, (u8[]) {0xFF,0x03}, 2, "v2-0xFF");
+ 		if (ret < 0)
+ 			return ret;
+@@ -719,6 +726,7 @@ static int pocket_display_v2_init(struct jdi_panel *jdi)
+ 		if (ret < 0)
+ 			return ret;
+ 
++		if (page_limit < 4) goto v2_tables_end;
+ 		ret = dsi_write_raw(jdi, (u8[]) {0xFF,0x04}, 2, "v2-0xFF");
+ 		if (ret < 0)
+ 			return ret;
+@@ -1074,6 +1082,7 @@ static int pocket_display_v2_init(struct jdi_panel *jdi)
+ 		if (ret < 0)
+ 			return ret;
+ 
++		if (page_limit < 5) goto v2_tables_end;
+ 		ret = dsi_write_raw(jdi, (u8[]) {0xFF,0x05}, 2, "v2-0xFF");
+ 		if (ret < 0)
+ 			return ret;
+@@ -1087,6 +1096,7 @@ static int pocket_display_v2_init(struct jdi_panel *jdi)
+ 		if (ret < 0)
+ 			return ret;
+ 
++		if (page_limit < 6) goto v2_tables_end;
+ 		ret = dsi_write_raw(jdi, (u8[]) {0xFF,0x06}, 2, "v2-0xFF");
+ 		if (ret < 0)
+ 			return ret;
+@@ -1103,6 +1113,7 @@ static int pocket_display_v2_init(struct jdi_panel *jdi)
+ 		if (ret < 0)
+ 			return ret;
+ 
++		if (page_limit < 7) goto v2_tables_end;
+ 		ret = dsi_write_raw(jdi, (u8[]) {0xFF,0x07}, 2, "v2-0xFF");
+ 		if (ret < 0)
+ 			return ret;
+@@ -1170,6 +1181,7 @@ static int pocket_display_v2_init(struct jdi_panel *jdi)
+ 		if (ret < 0)
+ 			return ret;
+ 
++		v2_tables_end:
+ 		ret = dsi_write_raw(jdi, (u8[]) {0xFF,0x00}, 2, "v2-0xFF");
+ 		if (ret < 0)
+ 			return ret;
+@@ -1725,7 +1737,7 @@ static int jdi_panel_probe(struct mipi_dsi_device *dsi)
+ 	mipi_dsi_set_drvdata(dsi, jdi);
+ 
+ 	jdi->dsi = dsi;
+-	dev_err(&dsi->dev, "[panel-ver] panel-mnt-pocket-reform v14: keepalive-nop-loop\n");
++	dev_err(&dsi->dev, "[panel-ver] panel-mnt-pocket-reform v15: page-limit-debug\n");
+ 	jdi_trace(jdi, __func__, "probe start compatible=%pOF init-in-enable=%d display-on-in-enable=%d probe-mode-lpm=%d burst-mode=%d no-eot-hfp-hbp-hsa=%d vsync-shift=%d",
+ 		dsi->dev.of_node,
+ 		of_property_present(dsi->dev.of_node, "init-in-enable"),
+-- 
+2.55.0
+

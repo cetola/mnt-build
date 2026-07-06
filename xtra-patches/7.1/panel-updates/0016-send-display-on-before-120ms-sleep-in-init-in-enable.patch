@@ -1,0 +1,63 @@
+From 213f79b46bdfe92058b2db30b76161ce4338a1a1 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Mon, 6 Jul 2026 13:59:49 -0700
+Subject: [PATCH] send display-on before 120ms sleep in init-in-enable path
+
+---
+ .../gpu/drm/panel/panel-mnt-pocket-reform.c   | 28 +++++++++++++------
+ 1 file changed, 20 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c b/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
+index 93ff5b4c13e5..85803c302a15 100644
+--- a/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
++++ b/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
+@@ -1191,18 +1191,30 @@ static int pocket_display_v2_init(struct jdi_panel *jdi)
+ 	if (ret < 0)
+ 		return ret;
+ 
+-	msleep(120);
+-	jdi_trace(jdi, __func__, "post-exit-sleep delay complete");
+-	jdi_dump_runtime_regs(jdi, __func__);
+-
+-	if (!jdi->skip_display_on_in_init) {
++	if (of_property_present(jdi->dsi->dev.of_node, "init-in-enable") &&
++	    !jdi->skip_display_on_in_init) {
++		/* Send display-on before the 120ms sleep: after the sleep
++		 * the DSI2 recalibration event (INT_ST_CRI bit 9) fires
++		 * and permanently locks CRI, blocking all LP commands. */
+ 		ret = jdi_dcs_set_display_on(jdi);
+ 		if (ret < 0)
+ 			return ret;
+ 	}
+ 
+-	jdi_dump_runtime_regs(jdi, __func__);
+-	jdi_dump_core_state(jdi, __func__);
++	msleep(120);
++	jdi_trace(jdi, __func__, "post-exit-sleep delay complete");
++
++	if (!of_property_present(jdi->dsi->dev.of_node, "init-in-enable")) {
++		jdi_dump_runtime_regs(jdi, __func__);
++		if (!jdi->skip_display_on_in_init) {
++			ret = jdi_dcs_set_display_on(jdi);
++			if (ret < 0)
++				return ret;
++		}
++		jdi_dump_runtime_regs(jdi, __func__);
++		jdi_dump_core_state(jdi, __func__);
++	}
++
+ 	dev_info(dev, "[display v2] OK%s\n",
+ 		 jdi->skip_display_on_in_init ? " (display-on deferred)" : "");
+ 	return 0;
+@@ -1705,7 +1717,7 @@ static int jdi_panel_probe(struct mipi_dsi_device *dsi)
+ 	mipi_dsi_set_drvdata(dsi, jdi);
+ 
+ 	jdi->dsi = dsi;
+-	dev_err(&dsi->dev, "[panel-ver] panel-mnt-pocket-reform v12b: count-at-top + skip-runtime-regs\n");
++	dev_err(&dsi->dev, "[panel-ver] panel-mnt-pocket-reform v13: display-on-before-sleep\n");
+ 	jdi_trace(jdi, __func__, "probe start compatible=%pOF init-in-enable=%d display-on-in-enable=%d probe-mode-lpm=%d burst-mode=%d no-eot-hfp-hbp-hsa=%d vsync-shift=%d",
+ 		dsi->dev.of_node,
+ 		of_property_present(dsi->dev.of_node, "init-in-enable"),
+-- 
+2.55.0
+

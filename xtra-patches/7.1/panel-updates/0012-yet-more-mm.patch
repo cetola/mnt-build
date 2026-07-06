@@ -1,0 +1,32 @@
+From 15395a78cd8ba2c5fc0def6b6f4caafe9a69319c Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Mon, 6 Jul 2026 07:58:19 -0700
+Subject: [PATCH] foobar
+
+---
+ drivers/gpu/drm/panel/panel-mnt-pocket-reform.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c b/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
+index ae46b9ae0dca..d87583dba88e 100644
+--- a/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
++++ b/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
+@@ -1346,12 +1346,14 @@ static int jdi_panel_disable(struct drm_panel *panel)
+ 
+ 	jdi->enabled = false;
+ 	ret = jdi_dcs_set_display_off(jdi);
++	if (ret < 0)
++		dev_warn(&jdi->dsi->dev, "[display] set_display_off failed: %d (ignored)\n", ret);
+ 	if (jdi->backlight)
+ 		backlight_disable(jdi->backlight);
+ 
+ 	jdi_dump_runtime_regs(jdi, __func__);
+ 	jdi_dump_core_state(jdi, __func__);
+-	return ret < 0 ? ret : 0;
++	return 0;
+ }
+ 
+ static int jdi_panel_unprepare(struct drm_panel *panel)
+-- 
+2.55.0
+

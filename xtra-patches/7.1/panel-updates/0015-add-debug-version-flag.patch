@@ -1,0 +1,90 @@
+From 665154cc43cc27fae4bb1a5e70a93c38efb9492f Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Mon, 6 Jul 2026 13:10:27 -0700
+Subject: [PATCH] add debug version flag
+
+---
+ .../gpu/drm/bridge/synopsys/dw-mipi-dsi2.c    | 27 ++++++++++++++++---
+ .../gpu/drm/panel/panel-mnt-pocket-reform.c   |  1 +
+ 2 files changed, 25 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/gpu/drm/bridge/synopsys/dw-mipi-dsi2.c b/drivers/gpu/drm/bridge/synopsys/dw-mipi-dsi2.c
+index 01b53448132a..eb87b3459b8a 100644
+--- a/drivers/gpu/drm/bridge/synopsys/dw-mipi-dsi2.c
++++ b/drivers/gpu/drm/bridge/synopsys/dw-mipi-dsi2.c
+@@ -209,6 +209,7 @@ struct dw_mipi_dsi2 {
+ 	const struct dw_mipi_dsi2_plat_data *plat_data;
+ 
+ 	ktime_t vid_mode_start; /* set when VIDEO_MODE becomes active */
++	unsigned int vid_xfer_count; /* LP transfers since VIDEO_MODE start */
+ };
+ 
+ static inline struct dw_mipi_dsi2 *host_to_dsi2(struct mipi_dsi_host *host)
+@@ -327,15 +328,17 @@ static void dw_mipi_dsi2_set_vid_mode(struct dw_mipi_dsi2 *dsi2)
+ 		dev_err(dsi2->dev, "failed to enter video mode\n");
+ 
+ 	dsi2->vid_mode_start = ktime_get();
++	dsi2->vid_xfer_count = 0;
+ 
+ 	{
+-		u32 cs, ms, vtcfg;
++		u32 cs, ms, vtcfg, intst;
+ 
+ 		regmap_read(dsi2->regmap, DSI2_CORE_STATUS, &cs);
+ 		regmap_read(dsi2->regmap, DSI2_MODE_STATUS, &ms);
+ 		regmap_read(dsi2->regmap, DSI2_DSI_VID_TX_CFG, &vtcfg);
+-		dev_err(dsi2->dev, "[dbg] set_vid_mode: post-switch CORE_STATUS=0x%08x MODE_STATUS=0x%08x VID_TX_CFG=0x%08x vid_mode_start_set\n",
+-			cs, ms, vtcfg);
++		regmap_read(dsi2->regmap, DSI2_INT_ST_CRI, &intst);
++		dev_err(dsi2->dev, "[dbg] set_vid_mode: post-switch CORE_STATUS=0x%08x MODE_STATUS=0x%08x VID_TX_CFG=0x%08x INT_ST_CRI=0x%08x vid_mode_start_set\n",
++			cs, ms, vtcfg, intst);
+ 	}
+ }
+ 
+@@ -747,6 +750,22 @@ static ssize_t dw_mipi_dsi2_host_transfer(struct mipi_dsi_host *host,
+ 		return ret;
+ 	}
+ 
++	/* Snapshot INT_ST_CRI at milestone transfer counts in VIDEO_MODE so we
++	 * can see when (if ever) CRI errors appear during the vendor table send. */
++	if (dsi2->vid_mode_start) {
++		unsigned int n = dsi2->vid_xfer_count++;
++		if (n == 0 || n == 50 || n == 100 || n == 150 || n == 200 || n == 227) {
++			u32 cs, intst;
++
++			regmap_read(dsi2->regmap, DSI2_CORE_STATUS, &cs);
++			regmap_read(dsi2->regmap, DSI2_INT_ST_CRI, &intst);
++			dev_err(dsi2->dev,
++				"[cri-snap] xfer#%u CORE_STATUS=0x%08x INT_ST_CRI=0x%08x vid_ms=%lld\n",
++				n, cs, intst,
++				ktime_ms_delta(ktime_get(), dsi2->vid_mode_start));
++		}
++	}
++
+ 	ret = cri_fifos_wait_avail(dsi2);
+ 	if (ret)
+ 		return ret;
+@@ -1008,6 +1027,8 @@ __dw_mipi_dsi2_probe(struct platform_device *pdev,
+ 	dsi2->dev = dev;
+ 	dsi2->plat_data = plat_data;
+ 
++	dev_err(dev, "[dsi2-ver] dw-mipi-dsi2 v12b: BTA_EN-clear + active-drain + cri-snap\n");
++
+ 	if (!plat_data->phy_ops->init || !plat_data->phy_ops->get_lane_mbps ||
+ 	    !plat_data->phy_ops->get_timing)
+ 		return dev_err_ptr_probe(dev, -ENODEV, "Phy not properly configured\n");
+diff --git a/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c b/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
+index 1886d8b9423b..93ff5b4c13e5 100644
+--- a/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
++++ b/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
+@@ -1705,6 +1705,7 @@ static int jdi_panel_probe(struct mipi_dsi_device *dsi)
+ 	mipi_dsi_set_drvdata(dsi, jdi);
+ 
+ 	jdi->dsi = dsi;
++	dev_err(&dsi->dev, "[panel-ver] panel-mnt-pocket-reform v12b: count-at-top + skip-runtime-regs\n");
+ 	jdi_trace(jdi, __func__, "probe start compatible=%pOF init-in-enable=%d display-on-in-enable=%d probe-mode-lpm=%d burst-mode=%d no-eot-hfp-hbp-hsa=%d vsync-shift=%d",
+ 		dsi->dev.of_node,
+ 		of_property_present(dsi->dev.of_node, "init-in-enable"),
+-- 
+2.55.0
+

@@ -1,0 +1,147 @@
+From bf306f70b26ec8415c87b36469eceaad788ffa23 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Mon, 6 Jul 2026 11:38:31 -0700
+Subject: [PATCH] BTA_EN clear
+
+---
+ .../gpu/drm/bridge/synopsys/dw-mipi-dsi2.c    | 52 ++++++++++++-------
+ .../gpu/drm/panel/panel-mnt-pocket-reform.c   | 18 +++++--
+ 2 files changed, 46 insertions(+), 24 deletions(-)
+
+diff --git a/drivers/gpu/drm/bridge/synopsys/dw-mipi-dsi2.c b/drivers/gpu/drm/bridge/synopsys/dw-mipi-dsi2.c
+index 1d88da298e6d..01b53448132a 100644
+--- a/drivers/gpu/drm/bridge/synopsys/dw-mipi-dsi2.c
++++ b/drivers/gpu/drm/bridge/synopsys/dw-mipi-dsi2.c
+@@ -248,26 +248,29 @@ static int dw_mipi_dsi2_drain_cri_rx(struct dw_mipi_dsi2 *dsi2)
+ 
+ static int cri_fifos_wait_avail(struct dw_mipi_dsi2 *dsi2)
+ {
++	ktime_t deadline = ktime_add_us(ktime_get(), CMD_PKT_STATUS_TIMEOUT_US);
+ 	u32 sts, intst;
+-	int ret;
+ 
+-	/* Drain any pending CRI RX responses to prevent CRI_BUSY from being
+-	 * held by unread ACKs (from BTA on write commands) or by calibration
+-	 * response packets that the IP queues automatically in VIDEO_MODE. */
++	/* Drain any pending CRI RX data before polling; then actively drain
++	 * during the poll so that calibration responses arriving mid-wait
++	 * are consumed promptly and don't hold CRI_BUSY. */
+ 	dw_mipi_dsi2_drain_cri_rx(dsi2);
+ 
+-	ret = regmap_read_poll_timeout(dsi2->regmap, DSI2_CORE_STATUS, sts,
+-				       !(sts & (CRI_BUSY | CRT_FIFOS_NOT_EMPTY)),
+-				       0, CMD_PKT_STATUS_TIMEOUT_US);
+-	if (ret < 0) {
+-		regmap_read(dsi2->regmap, DSI2_INT_ST_CRI, &intst);
+-		dev_err(dsi2->dev,
+-			"[cri-wait] timeout: CORE_STATUS=0x%08x INT_ST_CRI=0x%08x vid_ms=%lld\n",
+-			sts, intst,
+-			dsi2->vid_mode_start ?
+-				ktime_ms_delta(ktime_get(), dsi2->vid_mode_start) : -1LL);
+-	}
+-	return ret;
++	do {
++		regmap_read(dsi2->regmap, DSI2_CORE_STATUS, &sts);
++		if (!(sts & (CRI_BUSY | CRT_FIFOS_NOT_EMPTY)))
++			return 0;
++		if (sts & CRI_RD_DATA_AVAIL)
++			dw_mipi_dsi2_drain_cri_rx(dsi2);
++	} while (ktime_before(ktime_get(), deadline));
++
++	regmap_read(dsi2->regmap, DSI2_INT_ST_CRI, &intst);
++	dev_err(dsi2->dev,
++		"[cri-wait] timeout: CORE_STATUS=0x%08x INT_ST_CRI=0x%08x vid_ms=%lld\n",
++		sts, intst,
++		dsi2->vid_mode_start ?
++			ktime_ms_delta(ktime_get(), dsi2->vid_mode_start) : -1LL);
++	return -ETIMEDOUT;
+ }
+ 
+ static void dw_mipi_dsi2_set_vid_mode(struct dw_mipi_dsi2 *dsi2)
+@@ -300,12 +303,20 @@ static void dw_mipi_dsi2_set_vid_mode(struct dw_mipi_dsi2 *dsi2)
+ 	 * COMMAND_MODE ACKs from causing immediate CRI_BUSY after the switch. */
+ 	dw_mipi_dsi2_drain_cri_rx(dsi2);
+ 
++	/* Clear BTA_EN: in VIDEO_MODE, LP write commands must not trigger BTA.
++	 * With BTA_EN set the DSI2 IP requests the bus back after each LP write,
++	 * and the panel may be slow to release it — holding CRI_BUSY for the
++	 * entire 20ms poll timeout per command.  Without BTA, writes complete
++	 * in microseconds and all 228 vendor table commands finish in ~23ms. */
++	regmap_update_bits(dsi2->regmap, DSI2_DSI_GENERAL_CFG, BTA_EN, 0);
++
+ 	{
+-		u32 cs;
++		u32 cs, gcfg;
+ 
+ 		regmap_read(dsi2->regmap, DSI2_CORE_STATUS, &cs);
+-		dev_err(dsi2->dev, "[dbg] set_vid_mode: pre-switch CORE_STATUS=0x%08x VID_TX_CFG=0x%08x\n",
+-			cs, val);
++		regmap_read(dsi2->regmap, DSI2_DSI_GENERAL_CFG, &gcfg);
++		dev_err(dsi2->dev, "[dbg] set_vid_mode: pre-switch CORE_STATUS=0x%08x VID_TX_CFG=0x%08x GENERAL_CFG=0x%08x (BTA_EN cleared)\n",
++			cs, val, gcfg);
+ 	}
+ 
+ 	regmap_write(dsi2->regmap, DSI2_MODE_CTRL, VIDEO_MODE);
+@@ -352,6 +363,9 @@ static void dw_mipi_dsi2_set_cmd_mode(struct dw_mipi_dsi2 *dsi2)
+ 				       1000, MODE_STATUS_TIMEOUT_US);
+ 	if (ret < 0)
+ 		dev_err(dsi2->dev, "failed to enter data stream mode\n");
++
++	/* Restore BTA_EN for COMMAND_MODE: reads need BTA to receive responses */
++	regmap_update_bits(dsi2->regmap, DSI2_DSI_GENERAL_CFG, BTA_EN, BTA_EN);
+ }
+ 
+ static void dw_mipi_dsi2_host_softrst(struct dw_mipi_dsi2 *dsi2)
+diff --git a/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c b/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
+index 52280324b789..1886d8b9423b 100644
+--- a/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
++++ b/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
+@@ -448,6 +448,12 @@ static int pocket_display_v2_init(struct jdi_panel *jdi)
+ 	jdi_trace(jdi, __func__, "begin panel v2 init");
+ 	jdi_dump_core_state(jdi, __func__);
+ 
++	/* Increment at entry so that even if this call fails (early return),
++	 * the next call sees count > 1 and proceeds to send vendor tables. */
++	jdi->display_v2_init_count++;
++	jdi_trace(jdi, __func__, "display_v2_init_count incremented to %d at entry",
++		  jdi->display_v2_init_count);
++
+ 	ret = jdi_dcs_soft_reset(jdi);
+ 	if (ret < 0)
+ 		return ret;
+@@ -455,7 +461,12 @@ static int pocket_display_v2_init(struct jdi_panel *jdi)
+ 	msleep(20);
+ 	jdi_trace(jdi, __func__, "20ms identify delay complete");
+ 	jdi_trace(jdi, __func__, "post-soft-reset delay complete");
+-	jdi_dump_runtime_regs(jdi, __func__);
++	/* Skip status register reads when init-in-enable: saves ~60ms and avoids
++	 * generating BTA ACKs (which cause CRI_BUSY stalls) before vendor tables. */
++	if (!of_property_present(jdi->dsi->dev.of_node, "init-in-enable"))
++		jdi_dump_runtime_regs(jdi, __func__);
++	else
++		jdi_trace(jdi, __func__, "skipping runtime reg dump (init-in-enable, VIDEO_MODE)");
+ 
+ 	/*
+ 	 * For init-in-enable (VIDEO_MODE): skip tables on first DRM cycle to
+@@ -466,7 +477,7 @@ static int pocket_display_v2_init(struct jdi_panel *jdi)
+ 	{
+ 	bool init_in_enable = of_property_present(jdi->dsi->dev.of_node, "init-in-enable");
+ 
+-	if (force_v2_tables_first_init || !init_in_enable || jdi->display_v2_init_count > 0) {
++	if (force_v2_tables_first_init || !init_in_enable || jdi->display_v2_init_count > 1) {
+ 		dev_err(dev, "[v2-init] sending vendor tables (count=%d init_in_enable=%d)\n",
+ 			jdi->display_v2_init_count, init_in_enable);
+ 		jdi->v2_table_start = ktime_get();
+@@ -1169,9 +1180,6 @@ static int pocket_display_v2_init(struct jdi_panel *jdi)
+ 	}
+ 	} /* end init_in_enable block */
+ 
+-	jdi->display_v2_init_count++;
+-	jdi_trace(jdi, __func__, "display_v2_init_count incremented to %d", jdi->display_v2_init_count);
+-
+ 	ret = mipi_dsi_dcs_set_column_address(dsi, 0, 1199);
+ 	if (ret < 0)
+ 		dev_warn(dev, "[display v2] set_column_address failed: %d\n", ret);
+-- 
+2.55.0
+
