@@ -1,0 +1,82 @@
+From ede523320f2186370b6ed1f365e30125d87c16a6 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Sun, 5 Jul 2026 21:58:30 -0700
+Subject: [PATCH] some more debug
+
+---
+ .../gpu/drm/panel/panel-mnt-pocket-reform.c   | 35 ++++++++++++++-----
+ 1 file changed, 26 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c b/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
+index 96d80f094a59..ae46b9ae0dca 100644
+--- a/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
++++ b/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
+@@ -70,6 +70,7 @@ struct jdi_panel {
+ 
+ 	bool prepared;
+ 	bool enabled;
++	bool skip_display_on_in_init;
+ 
+ 	int panel_version;
+ 	int display_v1_init_count;
+@@ -1159,13 +1160,16 @@ static int pocket_display_v2_init(struct jdi_panel *jdi)
+ 	jdi_trace(jdi, __func__, "post-exit-sleep delay complete");
+ 	jdi_dump_runtime_regs(jdi, __func__);
+ 
+-	ret = jdi_dcs_set_display_on(jdi);
+-	if (ret < 0)
+-		return ret;
++	if (!jdi->skip_display_on_in_init) {
++		ret = jdi_dcs_set_display_on(jdi);
++		if (ret < 0)
++			return ret;
++	}
+ 
+ 	jdi_dump_runtime_regs(jdi, __func__);
+ 	jdi_dump_core_state(jdi, __func__);
+-	dev_info(dev, "[display v2] OK\n");
++	dev_info(dev, "[display v2] OK%s\n",
++		 jdi->skip_display_on_in_init ? " (display-on deferred)" : "");
+ 	return 0;
+ }
+ 
+@@ -1428,10 +1432,15 @@ static int jdi_panel_prepare(struct drm_panel *panel)
+ 	}
+ 
+ 	if (!of_property_present(dev->of_node, "init-in-enable")) {
+-		// on a311d the panels only work
+-		// if init is done in here, not in enable
+-		dev_info(dev, "[display] init in prepare...\n");
+-		ret = jdi_panel_init(jdi);
++		if (of_property_present(dev->of_node, "display-on-in-enable")) {
++			dev_info(dev, "[display] init in prepare (display-on deferred to enable)...\n");
++			jdi->skip_display_on_in_init = true;
++			ret = jdi_panel_init(jdi);
++			jdi->skip_display_on_in_init = false;
++		} else {
++			dev_info(dev, "[display] init in prepare...\n");
++			ret = jdi_panel_init(jdi);
++		}
+ 		if (ret < 0) {
+ 			dev_err(dev, "failed jdi_panel_init: %d\n", ret);
+ 			return ret;
+@@ -1453,7 +1462,15 @@ static int jdi_panel_enable(struct drm_panel *panel)
+ 	jdi_trace(jdi, __func__, "enter");
+ 	jdi_dump_core_state(jdi, __func__);
+ 
+-	if (of_property_present(dev->of_node, "init-in-enable")) {
++	if (of_property_present(dev->of_node, "display-on-in-enable")) {
++		dev_info(dev, "[display] sending display-on in enable (VIDEO_MODE)...\n");
++		jdi->dsi->mode_flags |= MIPI_DSI_MODE_LPM;
++		ret = jdi_dcs_set_display_on(jdi);
++		if (ret < 0) {
++			dev_err(dev, "[display] failed display-on in enable: %d\n", ret);
++		}
++		if (jdi->backlight) backlight_enable(jdi->backlight);
++	} else if (of_property_present(dev->of_node, "init-in-enable")) {
+ 		// on imx8mp the panels only work
+ 		// if init is done here, not in prepare
+ 		dev_info(dev, "[display] init in enable...\n");
+-- 
+2.55.0
+

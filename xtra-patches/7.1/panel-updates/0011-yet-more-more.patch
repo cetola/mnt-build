@@ -1,0 +1,28 @@
+From ed7e74239d84a6a645c77884fe3db839fcbfcc53 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Sun, 5 Jul 2026 22:26:55 -0700
+Subject: [PATCH] new fix again
+
+---
+ drivers/gpu/drm/panel/panel-mnt-pocket-reform.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c b/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
+index d657bd020490..ae46b9ae0dca 100644
+--- a/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
++++ b/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
+@@ -1668,10 +1668,9 @@ static int jdi_panel_probe(struct mipi_dsi_device *dsi)
+ 	mipi_dsi_set_drvdata(dsi, jdi);
+ 
+ 	jdi->dsi = dsi;
+-	jdi_trace(jdi, __func__, "probe start compatible=%pOF init-in-enable=%d display-on-in-enable=%d probe-mode-lpm=%d burst-mode=%d no-eot-hfp-hbp-hsa=%d vsync-shift=%d",
++	jdi_trace(jdi, __func__, "probe start compatible=%pOF init-in-enable=%d probe-mode-lpm=%d burst-mode=%d no-eot-hfp-hbp-hsa=%d vsync-shift=%d",
+ 		dsi->dev.of_node,
+ 		of_property_present(dsi->dev.of_node, "init-in-enable"),
+-		of_property_present(dsi->dev.of_node, "display-on-in-enable"),
+ 		of_property_present(dsi->dev.of_node, "probe-mode-lpm"),
+ 		of_property_present(dsi->dev.of_node, "burst-mode"),
+ 		of_property_present(dsi->dev.of_node, "no-eot-hfp-hbp-hsa"),
+-- 
+2.55.0
+

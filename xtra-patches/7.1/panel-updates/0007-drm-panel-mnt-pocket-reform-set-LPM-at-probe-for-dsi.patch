@@ -1,0 +1,25 @@
+From 8f71b493def350e3e78a4554e552e306069a94ae Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Sun, 5 Jul 2026 20:22:32 -0700
+Subject: [PATCH] drm-panel-mnt-pocket-reform-set-LPM-at-probe-for-dsi2
+
+---
+ drivers/gpu/drm/panel/panel-mnt-pocket-reform.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c b/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
+index 45e1d84ae5e2..96d80f094a59 100644
+--- a/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
++++ b/drivers/gpu/drm/panel/panel-mnt-pocket-reform.c
+@@ -1641,6 +1641,8 @@ static int jdi_panel_probe(struct mipi_dsi_device *dsi)
+ 		dsi->mode_flags |= MIPI_DSI_MODE_NO_EOT_PACKET | MIPI_DSI_MODE_VIDEO_NO_HFP | MIPI_DSI_MODE_VIDEO_NO_HBP | MIPI_DSI_MODE_VIDEO_NO_HSA;
+ 		dev_warn(&dsi->dev, "DSI eot/hfp/hbp/hsa disabled via device tree\n");
+ 	}
++	if (of_property_present(dsi->dev.of_node, "probe-mode-lpm"))
++		dsi->mode_flags |= MIPI_DSI_MODE_LPM;
+ 
+ 	jdi = devm_kzalloc(&dsi->dev, sizeof(*jdi), GFP_KERNEL);
+ 	if (!jdi)
+-- 
+2.55.0
+

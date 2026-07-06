@@ -1,0 +1,71 @@
+From cf4344436f79918b2050b3f922dc4bda3c1617a2 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Sun, 5 Jul 2026 20:58:11 -0700
+Subject: [PATCH] drm-dw-mipi-dsi2-debug-cri-busy
+
+---
+ .../gpu/drm/bridge/synopsys/dw-mipi-dsi2.c    | 28 ++++++++++++++++++-
+ 1 file changed, 27 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/bridge/synopsys/dw-mipi-dsi2.c b/drivers/gpu/drm/bridge/synopsys/dw-mipi-dsi2.c
+index 175b8a6b631a..157080a3a354 100644
+--- a/drivers/gpu/drm/bridge/synopsys/dw-mipi-dsi2.c
++++ b/drivers/gpu/drm/bridge/synopsys/dw-mipi-dsi2.c
+@@ -227,7 +227,11 @@ static int cri_fifos_wait_avail(struct dw_mipi_dsi2 *dsi2)
+ 	ret = regmap_read_poll_timeout(dsi2->regmap, DSI2_CORE_STATUS, sts,
+ 				       !(sts & mask), 0, CMD_PKT_STATUS_TIMEOUT_US);
+ 	if (ret < 0) {
+-		dev_err(dsi2->dev, "command interface is busy\n");
++		u32 mode_sts;
++
++		regmap_read(dsi2->regmap, DSI2_MODE_STATUS, &mode_sts);
++		dev_err(dsi2->dev, "command interface is busy: CORE_STATUS=0x%08x MODE_STATUS=0x%08x\n",
++			sts, mode_sts);
+ 		return ret;
+ 	}
+ 
+@@ -260,12 +264,30 @@ static void dw_mipi_dsi2_set_vid_mode(struct dw_mipi_dsi2 *dsi2)
+ 
+ 	regmap_write(dsi2->regmap, DSI2_DSI_VID_TX_CFG, val);
+ 
++	{
++		u32 cs;
++
++		regmap_read(dsi2->regmap, DSI2_CORE_STATUS, &cs);
++		dev_err(dsi2->dev, "[dbg] set_vid_mode: pre-switch CORE_STATUS=0x%08x VID_TX_CFG=0x%08x\n",
++			cs, val);
++	}
++
+ 	regmap_write(dsi2->regmap, DSI2_MODE_CTRL, VIDEO_MODE);
+ 	ret = regmap_read_poll_timeout(dsi2->regmap, DSI2_MODE_STATUS,
+ 				       mode, mode & VIDEO_MODE,
+ 				       1000, MODE_STATUS_TIMEOUT_US);
+ 	if (ret < 0)
+ 		dev_err(dsi2->dev, "failed to enter video mode\n");
++
++	{
++		u32 cs, ms, vtcfg;
++
++		regmap_read(dsi2->regmap, DSI2_CORE_STATUS, &cs);
++		regmap_read(dsi2->regmap, DSI2_MODE_STATUS, &ms);
++		regmap_read(dsi2->regmap, DSI2_DSI_VID_TX_CFG, &vtcfg);
++		dev_err(dsi2->dev, "[dbg] set_vid_mode: post-switch CORE_STATUS=0x%08x MODE_STATUS=0x%08x VID_TX_CFG=0x%08x\n",
++			cs, ms, vtcfg);
++	}
+ }
+ 
+ static void dw_mipi_dsi2_set_data_stream_mode(struct dw_mipi_dsi2 *dsi2)
+@@ -851,6 +873,10 @@ static void dw_mipi_dsi2_bridge_atomic_enable(struct drm_bridge *bridge,
+ 					      struct drm_atomic_state *state)
+ {
+ 	struct dw_mipi_dsi2 *dsi2 = bridge_to_dsi2(bridge);
++	u32 cs;
++
++	regmap_read(dsi2->regmap, DSI2_CORE_STATUS, &cs);
++	dev_err(dsi2->dev, "[dbg] atomic_enable: still COMMAND_MODE CORE_STATUS=0x%08x\n", cs);
+ 
+ 	/* Switch to video mode for panel-bridge enable & panel enable */
+ 	if (dsi2->mode_flags & MIPI_DSI_MODE_VIDEO)
+-- 
+2.55.0
+
