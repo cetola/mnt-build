@@ -22,6 +22,7 @@ from config import (
 )
 from errors import BuildError
 from logging_setup import Colors, setup_logging
+from barebox import BareboxManager, print_barebox_table
 from uboot import UBootManager, print_sysimage_table
 
 __version__ = "1.1.0"
@@ -328,6 +329,92 @@ def run_uboot_dry_run(sysimage: str) -> int:
         return 1
 
 
+def run_barebox_list() -> int:
+    """List all sysimages and their barebox configuration."""
+    mnt_build_root = Path(__file__).parent.parent
+    manager = BareboxManager(mnt_build_root)
+    try:
+        infos = manager.list_sysimages()
+    except Exception as e:
+        print(f"Error: failed to enumerate sysimage configs: {e}", file=sys.stderr)
+        return 1
+    if not infos:
+        print("No supported sysimages found.", file=sys.stderr)
+        return 1
+    print_barebox_table(infos)
+    return 0
+
+
+def run_barebox_build(sysimage: str) -> int:
+    """Build barebox for a sysimage, preparing the checkout if needed."""
+    mnt_build_root = Path(__file__).parent.parent
+    manager = BareboxManager(mnt_build_root)
+    try:
+        return manager.build(sysimage)
+    except (ValueError, FileNotFoundError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def run_barebox_diff(sysimage: str) -> int:
+    """Build barebox (if needed) then compare against the MNT CI artifact."""
+    mnt_build_root = Path(__file__).parent.parent
+    manager = BareboxManager(mnt_build_root)
+    try:
+        return manager.diff_vs_prebuilt(sysimage)
+    except (ValueError, FileNotFoundError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def run_barebox_menuconfig(sysimage: str) -> int:
+    """Run make menuconfig in the barebox checkout for a sysimage."""
+    mnt_build_root = Path(__file__).parent.parent
+    manager = BareboxManager(mnt_build_root)
+    try:
+        return manager.menuconfig(sysimage)
+    except (ValueError, FileNotFoundError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def run_barebox_dry_run(sysimage: str) -> int:
+    """Clone barebox repo, checkout tag, apply patches. No build."""
+    mnt_build_root = Path(__file__).parent.parent
+    manager = BareboxManager(mnt_build_root)
+    try:
+        return manager.prepare(sysimage)
+    except (ValueError, FileNotFoundError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def run_barebox_clean(sysimage: str) -> int:
+    """Remove the barebox checkout for a sysimage."""
+    mnt_build_root = Path(__file__).parent.parent
+    manager = BareboxManager(mnt_build_root)
+    try:
+        return manager.clean(sysimage)
+    except (ValueError, FileNotFoundError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog='mnt-build',
@@ -476,6 +563,39 @@ def build_parser() -> argparse.ArgumentParser:
         help='Reset the inner u-boot/ sub-repo to the SHA expected by build.sh'
     )
 
+    barebox_parser = subparsers.add_parser('barebox', help='Barebox development workflow')
+    barebox_parser.add_argument(
+        '--list',
+        choices=['sysimage'],
+        metavar='sysimage',
+        help='List all supported sysimages and their barebox configuration'
+    )
+    barebox_parser.add_argument(
+        '--sysimage',
+        metavar='name',
+        help='Target sysimage (required for --dry-run and other build actions)'
+    )
+    barebox_parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Clone barebox repo, checkout tag, apply patches — stop before building'
+    )
+    barebox_parser.add_argument(
+        '--diff',
+        action='store_true',
+        help='Build (if needed) then byte-compare against the MNT CI artifact'
+    )
+    barebox_parser.add_argument(
+        '--menuconfig',
+        action='store_true',
+        help='Run make menuconfig in the barebox checkout'
+    )
+    barebox_parser.add_argument(
+        '--clean',
+        action='store_true',
+        help='Remove the barebox checkout entirely (barebox/<project>/)'
+    )
+
     parser.add_argument(
         '--version',
         action='version',
@@ -537,6 +657,30 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.sysimage:
             return run_uboot_build(args.sysimage)
         parser.error("mnt-build uboot requires an action (e.g. --list sysimage or --sysimage <name> --dry-run)")
+
+    if args.command == 'barebox':
+        if args.list == 'sysimage':
+            return run_barebox_list()
+        if args.dry_run:
+            if not args.sysimage:
+                parser.error("mnt-build barebox --dry-run requires --sysimage <name>")
+            return run_barebox_dry_run(args.sysimage)
+        if args.diff:
+            if not args.sysimage:
+                parser.error("mnt-build barebox --diff requires --sysimage <name>")
+            return run_barebox_diff(args.sysimage)
+        if args.menuconfig:
+            if not args.sysimage:
+                parser.error("mnt-build barebox --menuconfig requires --sysimage <name>")
+            return run_barebox_menuconfig(args.sysimage)
+        if args.clean:
+            if not args.sysimage:
+                parser.error("mnt-build barebox --clean requires --sysimage <name>")
+            return run_barebox_clean(args.sysimage)
+        if args.sysimage:
+            return run_barebox_build(args.sysimage)
+        parser.error("mnt-build barebox requires an action "
+                     "(e.g. --list sysimage or --sysimage <name> --dry-run)")
 
     parser.error(f"Unknown command: {args.command}")
     return 2

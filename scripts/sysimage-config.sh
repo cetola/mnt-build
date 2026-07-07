@@ -19,6 +19,8 @@ reset_sysimage_config() {
   BOOTLOADER_OFFSET=0
   FLASHBIN_OFFSET=0
   SD_BOOT=false
+  BAREBOX_PROJECT=""
+  BAREBOX_TAG=""
 }
 
 set_sysimage_config() {
@@ -171,6 +173,8 @@ configure_sysimage_fallback() {
         32768 \
         0 \
         true
+      BAREBOX_PROJECT="mnt-reform-barebox"
+      BAREBOX_TAG="v2026.06.0"
       ;;
     pocket-reform-system-rk3588)
       set_sysimage_config \
@@ -181,6 +185,8 @@ configure_sysimage_fallback() {
         32768 \
         0 \
         true
+      BAREBOX_PROJECT="mnt-reform-barebox"
+      BAREBOX_TAG="v2026.06.0"
       ;;
     pocket-reform-system-rk3588s)
       set_sysimage_config \
@@ -191,6 +197,8 @@ configure_sysimage_fallback() {
         32768 \
         0 \
         true
+      BAREBOX_PROJECT="mnt-reform-barebox"
+      BAREBOX_TAG="v2026.06.0"
       ;;
     pocket-reform-system-imx8mp)
       set_sysimage_config \

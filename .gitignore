@@ -13,4 +13,6 @@ headers-extmod
 image-gen
 scripts/arm-libs-staging/
 uboot/
+barebox/
+barebox*.log
 dtbs/

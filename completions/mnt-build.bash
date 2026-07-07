@@ -10,7 +10,7 @@ _mnt_build_complete() {
   }
 
   local global_opts="--help --version"
-  local subcommands="build clean uboot"
+  local subcommands="build clean uboot barebox"
   local sysimages="pocket-reform-system-a311d reform-next-system-rk3588 pocket-reform-system-rk3588 pocket-reform-system-imx8mp pocket-reform-system-rk3588s"
 
   # Resolve subcommand, if any.
@@ -18,7 +18,7 @@ _mnt_build_complete() {
   local i
   for ((i=1; i<${#words[@]}; i++)); do
     case "${words[i]}" in
-      build|clean|uboot)
+      build|clean|uboot|barebox)
         subcmd="${words[i]}"
         break
         ;;
@@ -67,6 +67,20 @@ _mnt_build_complete() {
           ;;
       esac
       COMPREPLY=( $(compgen -W "$uboot_opts" -- "$cur") )
+      ;;
+    barebox)
+      local barebox_opts="--help --list --sysimage --dry-run --diff --menuconfig --clean"
+      case "$prev" in
+        --list)
+          COMPREPLY=( $(compgen -W "sysimage" -- "$cur") )
+          return 0
+          ;;
+        --sysimage)
+          COMPREPLY=( $(compgen -W "$sysimages" -- "$cur") )
+          return 0
+          ;;
+      esac
+      COMPREPLY=( $(compgen -W "$barebox_opts" -- "$cur") )
       ;;
   esac
 
