@@ -8,6 +8,25 @@ readonly SUPPORTED_SYSIMAGES=(
   pocket-reform-system-rk3588s
 )
 
+# Sysimages for which barebox is a supported bootloader option.
+# Add an entry here to make --bootloader barebox available for a new machine.
+# This only applies to machines loaded from reform-tools/machines/ confs (which
+# can't declare BAREBOX_PROJECT themselves); local-machines/ confs set it directly.
+readonly BAREBOX_SUPPORTED_SYSIMAGES=(
+  reform-next-system-rk3588
+  pocket-reform-system-rk3588
+  pocket-reform-system-rk3588s
+)
+
+# Default barebox repo and ref used for all supported sysimages.
+# mnt-reform-barebox layers MNT additions (build.sh, mnt-reform-defconfig, CI)
+# as commits on top of upstream barebox releases. The MNT release tags (v2026.06.0
+# etc.) track upstream and do NOT include those additions — they land on main after
+# each tag. Pin to the latest main SHA until MNT cuts a tag that includes build.sh.
+# Update this SHA when pulling in new barebox/MNT changes.
+readonly BAREBOX_DEFAULT_PROJECT="mnt-reform-barebox"
+readonly BAREBOX_DEFAULT_TAG="1cd690cc061990e2bcef2cd5b1c5aa4cfa749e09"
+
 reset_sysimage_config() {
   DTBPATH=""
   KERNEL_DTB_STEM=""
@@ -21,6 +40,7 @@ reset_sysimage_config() {
   SD_BOOT=false
   BAREBOX_PROJECT=""
   BAREBOX_TAG=""
+  BAREBOX_ARTIFACT=""
 }
 
 set_sysimage_config() {
@@ -77,6 +97,26 @@ supported_sysimages_csv() {
   printf '%s' "${SUPPORTED_SYSIMAGES[*]}"
 }
 
+apply_barebox_defaults() {
+  [[ -n "${BAREBOX_PROJECT:-}" ]] && return 0
+  local s
+  for s in "${BAREBOX_SUPPORTED_SYSIMAGES[@]}"; do
+    if [[ "$s" == "$SYSIMAGE" ]]; then
+      BAREBOX_PROJECT="$BAREBOX_DEFAULT_PROJECT"
+      BAREBOX_TAG="$BAREBOX_DEFAULT_TAG"
+      case "$SYSIMAGE" in
+        reform-next-system-rk3588)
+          BAREBOX_ARTIFACT="barebox-mnt-reform-next-rk3588.img" ;;
+        pocket-reform-system-rk3588)
+          BAREBOX_ARTIFACT="barebox-mnt-pocket-reform-rk3588.img" ;;
+        pocket-reform-system-rk3588s)
+          BAREBOX_ARTIFACT="barebox-mnt-pocket-reform-rcm5-rk3588s.img" ;;
+      esac
+      return 0
+    fi
+  done
+}
+
 configure_sysimage() {
   local machine_conf=""
 
@@ -86,6 +126,7 @@ configure_sysimage() {
       set_image_identity_for_sysimage
       set_kernel_dtb_stem_for_sysimage
       set_bootloader_filename
+      apply_barebox_defaults
       return
     fi
     log_warn "Machine config $machine_conf is missing required fields for bootloader handling."
@@ -173,8 +214,9 @@ configure_sysimage_fallback() {
         32768 \
         0 \
         true
-      BAREBOX_PROJECT="mnt-reform-barebox"
-      BAREBOX_TAG="v2026.06.0"
+      BAREBOX_PROJECT="$BAREBOX_DEFAULT_PROJECT"
+      BAREBOX_TAG="$BAREBOX_DEFAULT_TAG"
+      BAREBOX_ARTIFACT="barebox-mnt-reform-next-rk3588.img"
       ;;
     pocket-reform-system-rk3588)
       set_sysimage_config \
@@ -185,8 +227,9 @@ configure_sysimage_fallback() {
         32768 \
         0 \
         true
-      BAREBOX_PROJECT="mnt-reform-barebox"
-      BAREBOX_TAG="v2026.06.0"
+      BAREBOX_PROJECT="$BAREBOX_DEFAULT_PROJECT"
+      BAREBOX_TAG="$BAREBOX_DEFAULT_TAG"
+      BAREBOX_ARTIFACT="barebox-mnt-pocket-reform-rk3588.img"
       ;;
     pocket-reform-system-rk3588s)
       set_sysimage_config \
@@ -197,8 +240,9 @@ configure_sysimage_fallback() {
         32768 \
         0 \
         true
-      BAREBOX_PROJECT="mnt-reform-barebox"
-      BAREBOX_TAG="v2026.06.0"
+      BAREBOX_PROJECT="$BAREBOX_DEFAULT_PROJECT"
+      BAREBOX_TAG="$BAREBOX_DEFAULT_TAG"
+      BAREBOX_ARTIFACT="barebox-mnt-pocket-reform-rcm5-rk3588s.img"
       ;;
     pocket-reform-system-imx8mp)
       set_sysimage_config \

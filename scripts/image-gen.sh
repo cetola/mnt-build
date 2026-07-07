@@ -137,7 +137,7 @@ apply_barebox_bootloader() {
   log "Switching to barebox bootloader: project=${BAREBOX_PROJECT} tag=${BAREBOX_TAG}"
   BOOTLOADER_PROJECT="${BAREBOX_PROJECT}"
   BOOTLOADER_TAG="${BAREBOX_TAG}"
-  BOOTLOADER_FILENAME="barebox-mnt-reform2-rk3588.img"
+  BOOTLOADER_FILENAME="${BAREBOX_ARTIFACT}"
   UBOOT_ARTIFACT_GLOB="barebox-*.img"
   BOOTLOADER_SOURCE_MODE="source"
   FSBL_PATCHES_SUBDIR="barebox"

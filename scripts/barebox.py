@@ -18,6 +18,9 @@ class SysimageBareboxInfo:
     sysimage: str
     project: str   # empty string = barebox not supported for this sysimage
     tag: str
+    artifact: str  # expected image filename, e.g. barebox-mnt-pocket-reform-rk3588.img
+    bootloader_offset: int
+    flashbin_offset: int
     patch_count: int
     has_checkout: bool
     config_source: str
@@ -79,6 +82,9 @@ class BareboxManager:
             sysimage=sysimage,
             project=project,
             tag=data.get("BAREBOX_TAG", ""),
+            artifact=data.get("BAREBOX_ARTIFACT", ""),
+            bootloader_offset=int(data.get("BOOTLOADER_OFFSET", "0") or "0"),
+            flashbin_offset=int(data.get("FLASHBIN_OFFSET", "0") or "0"),
             patch_count=self._patch_count() if project else 0,
             has_checkout=self._has_checkout() if project else False,
             config_source=self._format_config_source(data),
@@ -93,6 +99,31 @@ class BareboxManager:
                 print(f"WARNING: failed to query config for {sysimage}: {e}", file=sys.stderr)
         return results
 
+    def _resolve_ref(self, checkout_dir: Path, ref: str) -> str | None:
+        """Resolve a git ref to a full SHA. Returns None if not found locally."""
+        result = subprocess.run(
+            ["git", "-C", str(checkout_dir), "rev-parse", "--verify",
+             f"{ref}^{{commit}}"],
+            capture_output=True, text=True,
+        )
+        return result.stdout.strip() if result.returncode == 0 else None
+
+    def _apply_patches(self, checkout_dir: Path) -> int:
+        patches = sorted(self._patches_root.glob("*.patch")) \
+            if self._patches_root.is_dir() else []
+        if not patches:
+            print("[barebox] No patches to apply (xtra-patches/barebox/ is empty)")
+        else:
+            print(f"[barebox] Applying {len(patches)} patch(es) from "
+                  "xtra-patches/barebox/ ...")
+            subprocess.run(
+                ["git", "-C", str(checkout_dir), "am",
+                 *[str(p) for p in patches]],
+                check=True,
+            )
+        print("[barebox] Checkout ready at: barebox/")
+        return 0
+
     def prepare(self, sysimage: str) -> int:
         """Clone barebox repo, checkout tag, apply local patches. Stops before building."""
         info = self.get_info(sysimage)
@@ -103,16 +134,51 @@ class BareboxManager:
 
         checkout_dir = self._barebox_root
         repo_url = f"https://source.mnt.re/reform/{info.project}.git"
-        patches_dir = self._patches_root
 
         print(f"[barebox] Preparing {info.project} for {sysimage}")
-        print(f"[barebox] Tag:      {info.tag}")
+        print(f"[barebox] Ref:      {info.tag}")
         print(f"[barebox] Checkout: {checkout_dir}")
 
         if checkout_dir.is_dir():
-            print(f"[barebox] Checkout already exists — skipping clone.")
-            print(f"[barebox] To start fresh: mnt-build barebox --sysimage {sysimage} --clean")
-            return 0
+            current = subprocess.run(
+                ["git", "-C", str(checkout_dir), "rev-parse", "HEAD"],
+                capture_output=True, text=True, check=True,
+            ).stdout.strip()
+
+            expected = self._resolve_ref(checkout_dir, info.tag)
+            if expected is None:
+                print(f"[barebox] Ref {info.tag!r} not found locally — fetching ...")
+                subprocess.run(
+                    ["git", "-C", str(checkout_dir), "fetch", "--tags", "origin"],
+                    check=True,
+                )
+                expected = self._resolve_ref(checkout_dir, info.tag)
+                if expected is None:
+                    print(f"[barebox] ERROR: ref {info.tag!r} not found even after fetch",
+                          file=sys.stderr)
+                    return 1
+
+            if current == expected:
+                # At the base ref — patches not yet applied.
+                return self._apply_patches(checkout_dir)
+
+            # Check if current is already ahead of expected (patches applied).
+            is_ahead = subprocess.run(
+                ["git", "-C", str(checkout_dir), "merge-base", "--is-ancestor",
+                 expected, current],
+                capture_output=True,
+            ).returncode == 0
+            if is_ahead:
+                print(f"[barebox] Checkout already patched ({current[:12]}) — skipping.")
+                return 0
+
+            print(f"[barebox] Ref changed: {current[:12]} → {expected[:12]}")
+            print(f"[barebox] Updating checkout ...")
+            subprocess.run(
+                ["git", "-C", str(checkout_dir), "checkout", "--detach", info.tag],
+                check=True,
+            )
+            return self._apply_patches(checkout_dir)
 
         print(f"[barebox] Cloning {repo_url} ...")
         subprocess.run(["git", "clone", repo_url, str(checkout_dir)], check=True)
@@ -122,20 +188,7 @@ class BareboxManager:
             ["git", "-C", str(checkout_dir), "checkout", "--detach", info.tag],
             check=True,
         )
-
-        patches = sorted(patches_dir.glob("*.patch")) if patches_dir.is_dir() else []
-        if not patches:
-            print(f"[barebox] No patches to apply (xtra-patches/barebox/ is empty)")
-        else:
-            print(f"[barebox] Applying {len(patches)} patch(es) from "
-                  f"xtra-patches/barebox/ ...")
-            subprocess.run(
-                ["git", "-C", str(checkout_dir), "am", *[str(p) for p in patches]],
-                check=True,
-            )
-
-        print(f"[barebox] Checkout ready at: barebox/")
-        return 0
+        return self._apply_patches(checkout_dir)
 
     # Build prerequisites: (kind, check_name, apt_package, description)
     _BUILD_PREREQS = [
@@ -184,15 +237,23 @@ class BareboxManager:
         proc.wait()
         return proc.returncode
 
-    def _find_artifact(self, checkout_dir: Path) -> Path:
+    def _find_artifact(self, checkout_dir: Path, artifact_name: str) -> Path:
         """Locate the built barebox image inside the checkout."""
         images_dir = checkout_dir / "images"
+        if artifact_name:
+            candidate = images_dir / artifact_name
+            if candidate.is_file():
+                return candidate
+            raise FileNotFoundError(
+                f"Expected artifact '{artifact_name}' not found in {images_dir}. "
+                "Has the build completed successfully?"
+            )
+        # No artifact name configured — fall back to newest barebox-*.img.
         if images_dir.is_dir():
             matches = sorted(images_dir.glob("barebox-*.img"),
                              key=lambda p: p.stat().st_mtime, reverse=True)
             if matches:
                 return matches[0]
-        # Fallback: search the whole tree
         matches = sorted(checkout_dir.rglob("barebox-*.img"),
                          key=lambda p: p.stat().st_mtime, reverse=True)
         if matches:
@@ -224,11 +285,9 @@ class BareboxManager:
         start_time = time.monotonic()
         checkout_dir = self._barebox_root
 
-        if not checkout_dir.is_dir():
-            print(f"[barebox] No checkout found — running prepare first ...")
-            rc = self.prepare(sysimage)
-            if rc != 0:
-                return rc
+        rc = self.prepare(sysimage)
+        if rc != 0:
+            return rc
 
         downloads_dir = self.root / "image-gen" / "downloads"
         downloads_dir.mkdir(parents=True, exist_ok=True)
@@ -253,7 +312,7 @@ class BareboxManager:
                   f"Log: {log_path.relative_to(self.root)}", file=sys.stderr)
             return rc
 
-        artifact = self._find_artifact(checkout_dir)
+        artifact = self._find_artifact(checkout_dir, info.artifact)
         output_path = downloads_dir / artifact.name
         shutil.copy2(artifact, output_path)
 
@@ -301,6 +360,14 @@ class BareboxManager:
         else:
             lines.append("Xtra patches: none")
 
+        seek_blocks = info.bootloader_offset // 512 if info.bootloader_offset else 0
+        skip_blocks = info.flashbin_offset // 512 if info.flashbin_offset else 0
+
+        dd_args = f"seek={seek_blocks}"
+        if skip_blocks:
+            dd_args += f" skip={skip_blocks}"
+        dd_args += " conv=notrunc,fsync"
+
         lines += [
             "",
             f"Artifact:   {rel_artifact}",
@@ -309,15 +376,20 @@ class BareboxManager:
             "",
             f"Build time: {elapsed_str}",
             f"Log:        {rel_log}",
-            "",
-            "To write to SD card (seek=64 → offset 32768):",
-            f"  dd if={rel_artifact} of=/dev/<device> seek=64 conv=notrunc,fsync",
-            "  (replace <device> with your SD card, e.g. mmcblk1 or sda)",
-            "",
-            "To test from SD before flashing eMMC, erase eMMC bootloader first:",
-            "  dd if=/dev/zero of=/dev/mmcblk0 bs=512 seek=64 count=2",
-            "=" * 52,
         ]
+
+        if seek_blocks:
+            lines += [
+                "",
+                f"To write to SD card (seek={seek_blocks} → offset {info.bootloader_offset}):",
+                f"  dd if={rel_artifact} of=/dev/<device> bs=512 {dd_args}",
+                "  (replace <device> with your SD card, e.g. mmcblk1 or sda)",
+                "",
+                f"To test from SD before flashing eMMC, erase eMMC bootloader first:",
+                f"  dd if=/dev/zero bs=512 seek={seek_blocks} of=/dev/mmcblk0 count=2",
+            ]
+
+        lines.append("=" * 52)
 
         for line in lines:
             print(line)
@@ -427,11 +499,9 @@ class BareboxManager:
 
         checkout_dir = self._barebox_root
 
-        if not checkout_dir.is_dir():
-            print(f"[barebox] No checkout found — running prepare first ...")
-            rc = self.prepare(sysimage)
-            if rc != 0:
-                return rc
+        rc = self.prepare(sysimage)
+        if rc != 0:
+            return rc
 
         if not (checkout_dir / ".config").is_file():
             defconfig = checkout_dir / "mnt-reform-defconfig"
