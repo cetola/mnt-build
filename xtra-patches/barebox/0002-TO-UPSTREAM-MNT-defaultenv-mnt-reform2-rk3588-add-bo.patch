@@ -1,0 +1,57 @@
+From 8d4d973e6a81c33b39092d34d0e3a8c9a921160b Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Tue, 7 Jul 2026 18:00:00 -0800
+Subject: [PATCH 2/4] [TO-UPSTREAM-MNT] defaultenv: mnt-reform2-rk3588: add
+ bootsource fallback boot script
+
+barebox's extlinux scanner has no scan_disk handler and cannot scan an
+MBR disk cdev directly; it only works when given a filesystem partition
+cdev. bootsource_of_cdev_find() returns the disk cdev (e.g. mmc1) and
+the extlinux provider finds zero entries, leaving auto-boot stuck.
+
+Add /env/boot/bootsource to the mnt-reform2-rk3588 default environment.
+This script is the fallback for the "bootsource" boot target. The DTS
+chosen node maps barebox,bootsource-mmc0/1 to &sdhci/&sdmmc, enabling
+bootsource_of_alias_xlate() to translate the BROM hardware instance to
+the correct barebox device number ($bootsource_instance). The script
+then boots mmc${bootsource_instance}.0 directly, bypassing the extlinux
+scan_disk limitation.
+
+Use [ ] || exit 1 instead of if/then to avoid the barebox hush
+false-condition bug: run_list_real returns 0 when an if-condition is
+false, causing bootscript_boot to report success even though nothing
+was booted.
+---
+ .../boot/bootsource                           | 20 +++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+ create mode 100644 arch/arm/boards/mnt-reform2-rk3588/defaultenv-mnt-reform2-rk3588/boot/bootsource
+
+diff --git a/arch/arm/boards/mnt-reform2-rk3588/defaultenv-mnt-reform2-rk3588/boot/bootsource b/arch/arm/boards/mnt-reform2-rk3588/defaultenv-mnt-reform2-rk3588/boot/bootsource
+new file mode 100644
+index 0000000000..c01862b47a
+--- /dev/null
++++ b/arch/arm/boards/mnt-reform2-rk3588/defaultenv-mnt-reform2-rk3588/boot/bootsource
+@@ -0,0 +1,20 @@
++#!/bin/sh
++# Boot from the first partition of the bootsource MMC device.
++#
++# barebox's extlinux scanner has no scan_disk handler, so it cannot scan an
++# MBR disk cdev directly — it only works when given a filesystem partition
++# cdev.  bootsource_of_cdev_find() returns the disk cdev (e.g. mmc1), and
++# the extlinux provider returns zero entries, leaving auto-boot stuck.
++#
++# This script is the /env/boot/bootsource fallback: barebox tries it when
++# no bootentry provider finds entries for the "bootsource" boot target.
++# $bootsource_instance is resolved via barebox,bootsource-mmc0/1 phandles in
++# the DTS chosen node.
++#
++# On RCM5, barebox is loaded by the Rockchip miniloader + TF-A and enters at
++# EL2. rk3588_barebox_entry() only captures iRAM (0xff000000) when current_el
++# == 3, so the EL2 path leaves scratch uninitialized and $bootsource = "unknown".
++# Try the detected device first if bootsource worked, then fall back to
++# mmc1.0 (SD) and mmc0.0 (eMMC) unconditionally.
++[ "$bootsource" = "mmc" ] && boot mmc${bootsource_instance}.0
++boot mmc1.0 || boot mmc0.0
+-- 
+2.43.0
+

@@ -1,0 +1,45 @@
+From 6d65dd855af731a9ccb4fcefa9a0452e5fc34868 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Tue, 7 Jul 2026 18:00:00 -0800
+Subject: [PATCH 4/4] [H4N] mnt-reform-defconfig: prep PCIe/NVMe debug; enable
+ BLK_DEV_NVME, increase stack
+
+These changes are not required for SD boot but are needed when pcie2x1l2
+is added to the DTS for NVMe bring-up:
+
+- CONFIG_BLK_DEV_NVME=y: PCIe driver is already enabled in the defconfig;
+  the NVMe driver was missing. Enable it so NVMe devices are enumerated
+  once PCIe is active.
+- STACK_SIZE=0x10000 (64KB): the PCIe+NVMe probe call chain is ~35 frames
+  deep and overflows the default 32KB stack (observed: abort at guard page
+  0xeff8f000). Doubling the stack prevents Crash 1; a separate DMA/MMU
+  issue (Crash 2) is tracked in barebox-pcie-crash.md.
+---
+ mnt-reform-defconfig | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/mnt-reform-defconfig b/mnt-reform-defconfig
+index 045856e980..c886d2b82e 100644
+--- a/mnt-reform-defconfig
++++ b/mnt-reform-defconfig
+@@ -173,7 +173,7 @@ CONFIG_MMU=y
+ CONFIG_BAREBOX_MAX_IMAGE_SIZE=0xffffffff
+ CONFIG_BAREBOX_MAX_PBL_SIZE=0xffffffff
+ CONFIG_BAREBOX_MAX_BARE_INIT_SIZE=0xffffffff
+-CONFIG_STACK_SIZE=0x8000
++CONFIG_STACK_SIZE=0x10000
+ CONFIG_MALLOC_SIZE=0
+ CONFIG_BAREBOX_MEMORY_OFFSET=0x0
+ CONFIG_SCRATCH_SIZE=0x68000
+@@ -1071,7 +1071,7 @@ CONFIG_ROCKCHIP_PM_DOMAINS=y
+ #
+ # NVME Support
+ #
+-# CONFIG_BLK_DEV_NVME is not set
++CONFIG_BLK_DEV_NVME=y
+ # end of NVME Support
+ 
+ CONFIG_REBOOT_MODE=y
+-- 
+2.43.0
+

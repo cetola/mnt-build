@@ -1,0 +1,247 @@
+From c45faf10228747142f7e376c19029884fb107190 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Tue, 7 Jul 2026 18:00:00 -0800
+Subject: [PATCH 1/4] [TO-UPSTREAM-BAREBOX] arm: rk3588s: add MNT Pocket Reform
+ RCM5 board support
+
+Add barebox board support for the Radxa CM5 (RK3588S2) in the MNT
+Pocket Reform CM4 carrier:
+
+- New DTS rk3588s-mnt-pocket-reform-rcm5.dts using rk3588s.dtsi
+  (excludes RK3588-only combphy1/usbdp_phy1 to avoid deep-probe hang).
+  Includes rk3588s-radxa-cm5.dtsi for CM5 PMIC/power tree.
+  Enables uart2, gmac1, sdhci, sdmmc, USB. PCIe omitted pending
+  investigation of NVMe DMA probe crash.
+- Extend arch/arm/dts/Makefile to build the new DTB.
+- Add ENTRY_FUNCTION start_rk3588s_mnt_pocket_reform_rcm5 in lowlevel.c.
+- Wire build_rockchip_image in images/Makefile.rockchip to produce
+  barebox-mnt-pocket-reform-rcm5-rk3588s.img.
+---
+ arch/arm/boards/mnt-reform2-rk3588/lowlevel.c |   6 +-
+ arch/arm/dts/Makefile                         |   3 +-
+ .../dts/rk3588s-mnt-pocket-reform-rcm5.dts    | 168 ++++++++++++++++++
+ images/Makefile.rockchip                      |   1 +
+ 4 files changed, 176 insertions(+), 2 deletions(-)
+ create mode 100644 arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
+
+diff --git a/arch/arm/boards/mnt-reform2-rk3588/lowlevel.c b/arch/arm/boards/mnt-reform2-rk3588/lowlevel.c
+index bc70d49bfa..f54178f962 100644
+--- a/arch/arm/boards/mnt-reform2-rk3588/lowlevel.c
++++ b/arch/arm/boards/mnt-reform2-rk3588/lowlevel.c
+@@ -128,6 +128,7 @@ extern char __dtb_rk3588_mnt_reform2_start[];
+ extern char __dtb_rk3588_mnt_reform2_dsi_start[];
+ extern char __dtb_rk3588_mnt_pocket_reform_start[];
+ extern char __dtb_rk3588_mnt_reform_next_start[];
++extern char __dtb_rk3588s_mnt_pocket_reform_rcm5_start[];
+ 
+ ENTRY_FUNCTION(start_rk3588_mnt_reform2, r0, r1, r2)
+ {
+@@ -149,4 +150,7 @@ ENTRY_FUNCTION(start_rk3588_mnt_reform_next, r0, r1, r2)
+ 	start_rk3588_mnt_reform_common(__dtb_rk3588_mnt_reform_next_start);
+ }
+ 
+-
++ENTRY_FUNCTION(start_rk3588s_mnt_pocket_reform_rcm5, r0, r1, r2)
++{
++	start_rk3588_mnt_reform_common(__dtb_rk3588s_mnt_pocket_reform_rcm5_start);
++}
+diff --git a/arch/arm/dts/Makefile b/arch/arm/dts/Makefile
+index 6d86fb9b87..a31fcfcda1 100644
+--- a/arch/arm/dts/Makefile
++++ b/arch/arm/dts/Makefile
+@@ -266,7 +266,8 @@ lwl-$(CONFIG_MACH_MNT_REFORM2_RK3588) += \
+ 	rk3588-mnt-reform2.dtb.o \
+ 	rk3588-mnt-reform2-dsi.dtb.o \
+ 	rk3588-mnt-reform-next.dtb.o \
+-	rk3588-mnt-pocket-reform.dtb.o
++	rk3588-mnt-pocket-reform.dtb.o \
++	rk3588s-mnt-pocket-reform-rcm5.dtb.o
+ lwl-$(CONFIG_MACH_VARISCITE_DT8MCUSTOMBOARD_IMX8MP) += imx8mp-var-dart-dt8mcustomboard.dtb.o
+ lwl-$(CONFIG_MACH_TQMA93XX) += imx93-tqma9352-mba93xxca.dtb.o \
+ 			       imx93-tqma9352-mba93xxla.dtb.o
+diff --git a/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts b/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
+new file mode 100644
+index 0000000000..d07ca945ce
+--- /dev/null
++++ b/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
+@@ -0,0 +1,168 @@
++// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
++/*
++ * Copyright (c) 2021 Rockchip Electronics Co., Ltd.
++ * Copyright (c) 2024-2026 MNT Research GmbH
++ */
++
++/dts-v1/;
++
++#include <dt-bindings/gpio/gpio.h>
++#include <dt-bindings/pinctrl/rockchip.h>
++#include "arm64/rockchip/rk3588s.dtsi"
++#include "arm64/rockchip/rk3588s-radxa-cm5.dtsi"
++#include "rk3588.dtsi"
++
++/ {
++	model = "MNT Pocket Reform with Radxa CM5 RK3588S2 Module";
++	compatible = "mntre,pocket-reform-rcore", "radxa,cm5", "rockchip,rk3588s";
++
++	aliases {
++		ethernet0 = &gmac1;
++		serial2 = &uart2;
++		mmc0 = &sdhci;
++		mmc1 = &sdmmc;
++	};
++
++	chosen {
++		stdout-path = "serial2:1500000n8";
++
++		barebox,bootsource-mmc0 = &sdhci;
++		barebox,bootsource-mmc1 = &sdmmc;
++
++		environment-sd {
++			compatible = "barebox,environment";
++			device-path = &sdmmc;
++			status = "disabled";
++		};
++
++		environment-emmc {
++			compatible = "barebox,environment";
++			device-path = &sdhci;
++			status = "disabled";
++		};
++	};
++
++	vcc5v0_sys: vcc5v0-sys {
++		compatible = "regulator-fixed";
++		regulator-name = "vcc5v0_sys";
++		regulator-always-on;
++		regulator-boot-on;
++		regulator-min-microvolt = <5000000>;
++		regulator-max-microvolt = <5000000>;
++	};
++
++	vcc5v0_host: vcc5v0-host {
++		compatible = "regulator-fixed";
++		regulator-name = "vcc5v0_host";
++		regulator-boot-on;
++		regulator-always-on;
++		regulator-min-microvolt = <5000000>;
++		regulator-max-microvolt = <5000000>;
++	};
++
++	/*
++	 * SD card power. GPIO1_D3 enables this 3.3 V rail on the CM4 carrier.
++	 * Also used for VMMC and VQMMC of the SD card slot.
++	 */
++	vcc3v3_pcie: regulator-3v3-vcc-pcie {
++		compatible = "regulator-fixed";
++		regulator-name = "vcc3v3_pcie";
++		regulator-min-microvolt = <3300000>;
++		regulator-max-microvolt = <3300000>;
++		enable-active-high;
++		gpios = <&gpio1 RK_PD3 GPIO_ACTIVE_HIGH>;
++		startup-delay-us = <50000>;
++		vin-supply = <&vcc5v0_sys>;
++	};
++
++	/* Alias for gmac1 phy-supply; mirrors rk3588s-radxa-cm5-io.dts */
++	vcc_3v3_s0: pldo-reg4 {
++		compatible = "regulator-fixed";
++		regulator-name = "vcc_3v3_s0";
++		regulator-always-on;
++		regulator-boot-on;
++		regulator-min-microvolt = <3300000>;
++		regulator-max-microvolt = <3300000>;
++	};
++};
++
++
++&gmac1 {
++	status = "okay";
++};
++
++&sdmmc {
++	bus-width = <4>;
++	max-frequency = <20000000>;
++	no-sdio;
++	no-mmc;
++	no-1-8-v;
++	cap-sd-highspeed;
++	vqmmc-supply = <&vcc3v3_pcie>;
++	vmmc-supply = <&vcc3v3_pcie>;
++	cd-gpios = <&gpio0 RK_PA4 GPIO_ACTIVE_LOW>;
++	disable-wp;
++	status = "okay";
++};
++
++&uart2 {
++	pinctrl-0 = <&uart2m0_xfer>;
++	status = "okay";
++};
++
++&u2phy0 {
++	status = "okay";
++};
++
++&u2phy0_otg {
++	status = "okay";
++};
++
++&u2phy2 {
++	status = "okay";
++};
++
++&u2phy2_host {
++	phy-supply = <&vcc5v0_host>;
++	status = "okay";
++};
++
++&u2phy3 {
++	status = "okay";
++};
++
++&u2phy3_host {
++	phy-supply = <&vcc5v0_host>;
++	status = "okay";
++};
++
++&usb_host0_ehci {
++	status = "okay";
++};
++
++&usb_host0_ohci {
++	status = "okay";
++};
++
++&usb_host1_ehci {
++	status = "okay";
++};
++
++&usb_host1_ohci {
++	status = "okay";
++};
++
++/* Override the barebox rk3588.dtsi SCMI rates to also set SPLL to 702 MHz,
++ * matching what lowlevel.c's rk3588_spll_set_rate() configures at PBL time. */
++&scmi_clk {
++	assigned-clocks =
++		<&scmi_clk SCMI_CLK_CPUL>,
++		<&scmi_clk SCMI_CLK_CPUB01>,
++		<&scmi_clk SCMI_CLK_CPUB23>,
++		<&scmi_clk SCMI_SPLL>;
++	assigned-clock-rates =
++		<1200000000>,
++		<1200000000>,
++		<1200000000>,
++		<702000000>;
++};
+diff --git a/images/Makefile.rockchip b/images/Makefile.rockchip
+index a79145be9e..ec936915d1 100644
+--- a/images/Makefile.rockchip
++++ b/images/Makefile.rockchip
+@@ -58,3 +58,4 @@ $(call build_rockchip_image, CONFIG_MACH_MNT_REFORM2_RK3588, start_rk3588_mnt_re
+ $(call build_rockchip_image, CONFIG_MACH_MNT_REFORM2_RK3588, start_rk3588_mnt_reform2_dsi, mnt-reform2-rk3588/sdram-init.bin, mnt-reform2-dsi-rk3588)
+ $(call build_rockchip_image, CONFIG_MACH_MNT_REFORM2_RK3588, start_rk3588_mnt_pocket_reform, mnt-reform2-rk3588/sdram-init.bin, mnt-pocket-reform-rk3588)
+ $(call build_rockchip_image, CONFIG_MACH_MNT_REFORM2_RK3588, start_rk3588_mnt_reform_next, mnt-reform2-rk3588/sdram-init.bin, mnt-reform-next-rk3588)
++$(call build_rockchip_image, CONFIG_MACH_MNT_REFORM2_RK3588, start_rk3588s_mnt_pocket_reform_rcm5, mnt-reform2-rk3588/sdram-init.bin, mnt-pocket-reform-rcm5-rk3588s)
+-- 
+2.43.0
+
