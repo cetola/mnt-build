@@ -1,0 +1,66 @@
+From 6ddb9f901032e673e2e556041a58f46c3c9932e9 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Wed, 8 Jul 2026 17:30:00 -0800
+Subject: [PATCH] [MNT] arm: rk3588s: pocket-reform-rcm5: enable PCIe2x1l2 for NVMe
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Enable the PCIe 2.0 x1 lane 2 controller (pcie@fe190000) and its
+combphy (combphy0_ps) on the MNT Pocket Reform RCM5 board. This is
+the PCIe lane connected to the M.2 NVMe slot on the Pocket Reform
+CM4 carrier.
+
+- &combphy0_ps: status = "okay": combo PHY used by pcie2x1l2
+- &pcie2x1l2: reset-gpios = GPIO3_PD1 (ACTIVE_HIGH), pcie2_0_rst
+  pinctrl group, status = "okay"
+- pcie2_0_rst pinctrl: sets GPIO3_PD1 to GPIO function (RK_FUNC_GPIO)
+
+GPIO and pinctrl match the Linux DTS for this board
+(rk3588s-mnt-pocket-reform.dts).  CONFIG_BLK_DEV_NVME=y and
+STACK_SIZE=0x10000 (64KB) are already set in the defconfig (patch 0007),
+the 64KB stack is required for the deep PCIe→NVMe probe call chain.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts b/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
+index 942916e46a..a3c5d20bd9 100644
+--- a/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
++++ b/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
+@@ -153,6 +153,17 @@ &usb_host1_ohci {
+ 	status = "okay";
+ };
+ 
++&combphy0_ps {
++	status = "okay";
++};
++
++&pcie2x1l2 {
++	reset-gpios = <&gpio3 RK_PD1 GPIO_ACTIVE_HIGH>;
++	pinctrl-names = "default";
++	pinctrl-0 = <&pcie2_0_rst>;
++	status = "okay";
++};
++
+ /*
+  * GPIO SPI master for the RP2040 system controller (LPC / reform2_lpc protocol).
+  * The SoM-to-RP2040 SPI lines are on general GPIOs, not a hardware SPI controller,
+@@ -185,6 +196,12 @@ spi_lpc: spi {
+ };
+ 
+ &pinctrl {
++	pcie2 {
++		pcie2_0_rst: pcie2-0-rst {
++			rockchip,pins = <3 RK_PD1 RK_FUNC_GPIO &pcfg_pull_none>;
++		};
++	};
++
+ 	spipins {
+ 		spi_lpc_pins: spi-lpc-pins {
+ 			rockchip,pins =
+-- 
+2.43.0
+

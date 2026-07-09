@@ -1,11 +1,10 @@
-From 8d4d973e6a81c33b39092d34d0e3a8c9a921160b Mon Sep 17 00:00:00 2001
+From a8f0030ccb380e50e649ea815b1203f6e5ca8bf3 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
-Date: Tue, 7 Jul 2026 18:00:00 -0800
-Subject: [PATCH 2/4] [TO-UPSTREAM-MNT] defaultenv: mnt-reform2-rk3588: add
- bootsource fallback boot script
+Date: Wed, 8 Jul 2026 17:30:00 -0800
+Subject: [PATCH] [MNT] defaultenv: mnt-reform2-rk3588: add bootsource fallback boot script
 
 barebox's extlinux scanner has no scan_disk handler and cannot scan an
-MBR disk cdev directly; it only works when given a filesystem partition
+MBR disk cdev directly. It only works when given a filesystem partition
 cdev. bootsource_of_cdev_find() returns the disk cdev (e.g. mmc1) and
 the extlinux provider finds zero entries, leaving auto-boot stuck.
 

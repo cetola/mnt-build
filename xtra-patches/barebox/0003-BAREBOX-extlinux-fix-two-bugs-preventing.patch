@@ -1,12 +1,11 @@
-From c18d8ceb37fc6643e38635bda4df2455b90b5859 Mon Sep 17 00:00:00 2001
+From 0eb431dae8764b04cdf6f2babd4d252366c0031a Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
-Date: Tue, 7 Jul 2026 18:00:00 -0800
-Subject: [PATCH 3/4] [TO-UPSTREAM-BAREBOX] extlinux: fix two bugs preventing
- boot from syslinux-style extlinux.conf
+Date: Wed, 8 Jul 2026 17:30:00 -0800
+Subject: [PATCH] [BAREBOX] extlinux: fix two bugs preventing boot from syslinux-style extlinux.conf
 
 Bug 1: LINUX keyword not recognised.
 The extlinux spec (syslinux heritage) uses LINUX as the primary keyword
-for a Linux kernel image; KERNEL is a generic keyword for any bootable
+for a Linux kernel image. KERNEL is a generic keyword for any bootable
 image. barebox's parser only matched KERNEL, following U-Boot's non-standard
 convention. extlinux.conf files written by Debian, Arch, and MNT's own
 linux-mnt-reform-bin all use the linux keyword, so entry->kernel was never

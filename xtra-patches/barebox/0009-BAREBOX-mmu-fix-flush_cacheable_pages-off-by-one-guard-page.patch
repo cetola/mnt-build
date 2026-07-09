@@ -1,0 +1,67 @@
+From ba70d42dcaa65a25b526f48f5f0432a027263243 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Wed, 8 Jul 2026 17:30:00 -0800
+Subject: [PATCH] [BAREBOX] mmu: fix flush_cacheable_pages off-by-one touching guard page
+
+flush_cacheable_pages() accumulates contiguous cacheable page ranges and
+tracks flush_end as the exclusive end of each range (i.e. the address
+of the first page BEYOND the last cacheable block, which equals the start
+address of the next block: the flush_end == addr extension test relies
+on this).
+
+When a non-cacheable page (e.g. the stack guard page) creates a gap in
+the middle of a flush region followed by more cacheable pages, the code
+calls dma_flush_range_end(flush_start, flush_end) just before starting a
+new range.  dma_flush_range_end() treats its second argument as an
+inclusive end and calls v8_flush_dcache_range(start, end + 1), so the
+exclusive flush_end becomes an exclusive bound of end+1.  This causes
+dc civac to execute at flush_end itself: the first address of the gap.
+
+On ARMv8 (Cortex-A55/A76), dc civac requires write permission to the VA.
+When flush_end equals the guard-page address (MAP_FAULT, no access), the
+instruction raises a synchronous Data Abort that barebox's fault handler
+reports as "stack overflow" because FAR matches the guard page.
+
+Fix: subtract 1 at both dma_flush_range_end call sites to convert the
+exclusive flush_end to the inclusive end that dma_flush_range_end expects.
+This keeps the b.lo loop in v8_flush_dcache_range from iterating into the
+guard page.
+
+Observed on RK3588S (Radxa CM5) during NVMe/PCIe bring-up.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ arch/arm/cpu/flush_cacheable_pages.h | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/cpu/flush_cacheable_pages.h b/arch/arm/cpu/flush_cacheable_pages.h
+index a03e10810d..c46a60071a 100644
+--- a/arch/arm/cpu/flush_cacheable_pages.h
++++ b/arch/arm/cpu/flush_cacheable_pages.h
+@@ -61,10 +61,14 @@ static void flush_cacheable_pages(void *start, size_t size)
+ 
+ 		/*
+ 		 * We don't have a previous contiguous flush area to append to.
+-		 * If we recorded any area before, let's flush it now
++		 * If we recorded any area before, let's flush it now.
++		 * flush_end is the exclusive end of the cacheable range. Subtract
++		 * 1 to convert to the inclusive end expected by dma_flush_range_end,
++		 * preventing dc civac from stepping into the next (possibly fault-mapped)
++		 * page when a non-cacheable page (e.g. the stack guard) follows.
+ 		 */
+ 		if (flush_start != ~0UL)
+-			dma_flush_range_end(flush_start, flush_end);
++			dma_flush_range_end(flush_start, flush_end - 1);
+ 
+ 		/* and start the new contiguous flush area with this page */
+ 		flush_start = addr;
+@@ -73,5 +77,5 @@ static void flush_cacheable_pages(void *start, size_t size)
+ 
+ 	/* The previous loop won't flush the last cached range, so do it here */
+ 	if (flush_start != ~0UL)
+-		dma_flush_range_end(flush_start, flush_end);
++		dma_flush_range_end(flush_start, flush_end - 1);
+ }
+-- 
+2.43.0
+

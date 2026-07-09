@@ -1,21 +1,13 @@
-From c45faf10228747142f7e376c19029884fb107190 Mon Sep 17 00:00:00 2001
+From d62dc52173585e71496302039c500eff0e90aa21 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
-Date: Tue, 7 Jul 2026 18:00:00 -0800
-Subject: [PATCH 1/4] [TO-UPSTREAM-BAREBOX] arm: rk3588s: add MNT Pocket Reform
- RCM5 board support
+Date: Wed, 8 Jul 2026 17:30:00 -0800
+Subject: [PATCH] [MNT] arm: rk3588s: add MNT Pocket Reform RCM5 board support
 
 Add barebox board support for the Radxa CM5 (RK3588S2) in the MNT
 Pocket Reform CM4 carrier:
 
 - New DTS rk3588s-mnt-pocket-reform-rcm5.dts using rk3588s.dtsi
-  (excludes RK3588-only combphy1/usbdp_phy1 to avoid deep-probe hang).
-  Includes rk3588s-radxa-cm5.dtsi for CM5 PMIC/power tree.
-  Enables uart2, gmac1, sdhci, sdmmc, USB. PCIe omitted pending
-  investigation of NVMe DMA probe crash.
-- Extend arch/arm/dts/Makefile to build the new DTB.
 - Add ENTRY_FUNCTION start_rk3588s_mnt_pocket_reform_rcm5 in lowlevel.c.
-- Wire build_rockchip_image in images/Makefile.rockchip to produce
-  barebox-mnt-pocket-reform-rcm5-rk3588s.img.
 ---
  arch/arm/boards/mnt-reform2-rk3588/lowlevel.c |   6 +-
  arch/arm/dts/Makefile                         |   3 +-
