@@ -27,10 +27,10 @@ Signed-off-by: Stephano Cetola <stephano@cetola.net>
  1 file changed, 10 insertions(+), 2 deletions(-)
 
 diff --git a/drivers/usb/host/xhci-ring.c b/drivers/usb/host/xhci-ring.c
-index f12790308c..855ae1f308 100644
+index 61f32c0ada..4f805677dc 100644
 --- a/drivers/usb/host/xhci-ring.c
 +++ b/drivers/usb/host/xhci-ring.c
-@@ -531,8 +531,16 @@ static void reset_ep(struct usb_device *udev, int ep_index, unsigned int timeout
+@@ -525,8 +525,16 @@ static void reset_ep(struct usb_device *udev, int ep_index)
  	BUG_ON(TRB_TO_SLOT_ID(field) != udev->slot_id);
  	xhci_acknowledge_event(ctrl);
  
@@ -51,4 +51,3 @@ index f12790308c..855ae1f308 100644
  	if (!event)
 -- 
 2.43.0
-

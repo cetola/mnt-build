@@ -5,15 +5,23 @@ Subject: [PATCH] input: usb_kbd_hid: keep polling after a transient poll error
 
 usb_kbd_poll() returned early on any poll error other than -EAGAIN.
 This skipped the poller_call_async() reschedule at exit, so the
-keyboard poller died permanently after a single transient error.
+keyboard poller died permanently after a single non-EAGAIN error.
 
-A control endpoint stall self-clears on the next SETUP packet. The
-poller does not need to do anything special to recover. It just
-needs to keep running.
+A poller should never die on a recoverable error: a control endpoint
+stall clears on the next SETUP packet, and the poller only needs to
+keep running for that recovery to happen.
 
-Observed on hardware: kbd-hid poll failed once with -EPIPE right
-after reaching the barebox prompt. The keyboard then stopped
-responding for the rest of the boot.
+Observed on hardware: kbd-hid poll failed with -EPIPE right after
+reaching the barebox prompt, then stopped responding for the rest of
+boot. At this point in the driver's fallback logic, an -EAGAIN from
+the interrupt-endpoint probe test routes to the control-endpoint
+GET_REPORT path (usb_kbd_cnt_poll), and the keyboard firmware's
+GET_REPORT handler is an unimplemented stub that always STALLs. This
+patch alone does not make the control-endpoint path work; that
+request keeps failing on every poll regardless. It only stops the
+poller from dying, which matters because the real fix (routing around
+this fallback and using interrupt-endpoint polling instead) depends
+on the poller still being alive to retry.
 
 Fix: goto exit instead of returning, so the poller reschedules
 itself like the -EAGAIN case already does.

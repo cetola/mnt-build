@@ -20,6 +20,15 @@ call was doomed to time out regardless of actual device state.
 Fix: wait the endpoint's own service interval instead of a fixed 0,
 giving the hardware's autonomous polling a real chance to succeed.
 
+Known limitation: interval is a raw copy of bInterval
+(usb_kbd_hid.c), which is only a literal millisecond count for
+Full-Speed/Low-Speed devices. High-Speed and SuperSpeed devices
+encode bInterval as a microframe exponent instead, as
+xhci_microframes_to_exponent() already accounts for elsewhere in this
+file. This keyboard's MCU is Full-Speed-only, so the raw value is
+correct here, but a High-Speed or SuperSpeed interrupt device on this
+same code path would get an incorrectly short wait.
+
 Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---
  drivers/usb/host/xhci.c | 8 +++++++-

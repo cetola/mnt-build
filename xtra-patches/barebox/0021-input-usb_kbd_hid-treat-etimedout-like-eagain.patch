@@ -1,0 +1,54 @@
+From c9e3e2fe884cc5bda0a367d2cae83de588fe2143 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Fri, 10 Jul 2026 01:05:40 +0000
+Subject: [PATCH] input: usb_kbd_hid: treat -ETIMEDOUT like -EAGAIN during
+ steady-state polling
+
+usb_kbd_poll() called usb_kbd_release_all_keys() for any negative
+do_poll() result, before checking whether that result was -EAGAIN.
+-ETIMEDOUT got no such exemption at all: it fell through past the
+-EAGAIN check into the generic error path.
+
+-EAGAIN and -ETIMEDOUT both just mean no report was pending at this
+instant, the normal steady state for an idle interrupt endpoint, not
+a real error. Releasing all keys on every idle poll meant a key that
+was still physically held could get force-released the moment any
+single poll happened to time out, and an -ETIMEDOUT result additionally
+logged disconnect noise and (before a separate fix) killed the poller
+outright.
+
+Fix: check for -EAGAIN/-ETIMEDOUT first and exit quietly without
+releasing keys or logging, so only a genuine error reaches the
+release-and-log path.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/input/usb_kbd_hid.c | 11 +++++++----
+ 1 file changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/input/usb_kbd_hid.c b/drivers/input/usb_kbd_hid.c
+index 332368d518..b8119e09f4 100644
+--- a/drivers/input/usb_kbd_hid.c
++++ b/drivers/input/usb_kbd_hid.c
+@@ -100,12 +100,15 @@ static void usb_kbd_poll(void *arg)
+ 	int ret, i;
+ 
+ 	ret = data->do_poll(data);
+-	if (ret < 0)
+-		usb_kbd_release_all_keys(data);
+-	if (ret == -EAGAIN)
++	/*
++	 * -EAGAIN / -ETIMEDOUT just mean no report was pending at this
++	 * instant, the normal steady state for an idle interrupt endpoint.
++	 * Do not release keys or log noise on every idle poll interval.
++	 */
++	if (ret == -EAGAIN || ret == -ETIMEDOUT)
+ 		goto exit;
+ 	if (ret < 0) {
+-		/* exit with noreturn */
++		usb_kbd_release_all_keys(data);
+ 		dev_err(&usbdev->dev,
+ 			"usb_submit_int_msg() failed. Keyboard disconnect?\n");
+ 		goto exit;
+-- 
+2.43.0

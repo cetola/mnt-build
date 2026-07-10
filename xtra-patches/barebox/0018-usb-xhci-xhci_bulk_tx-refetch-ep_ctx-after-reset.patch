@@ -26,16 +26,16 @@ Signed-off-by: Stephano Cetola <stephano@cetola.net>
  1 file changed, 11 insertions(+), 1 deletion(-)
 
 diff --git a/drivers/usb/host/xhci-ring.c b/drivers/usb/host/xhci-ring.c
-index 855ae1f308..a814618955 100644
+index 4f805677dc..c8673c01ef 100644
 --- a/drivers/usb/host/xhci-ring.c
 +++ b/drivers/usb/host/xhci-ring.c
-@@ -716,8 +716,18 @@ int xhci_bulk_tx(struct usb_device *udev, unsigned long pipe,
+@@ -710,8 +710,18 @@ int xhci_bulk_tx(struct usb_device *udev, unsigned long pipe,
  	 * the next transfer. It is the responsibility of the upper layer to
  	 * have dealt with whatever caused the error.
  	 */
 -	if ((le32_to_cpu(ep_ctx->ep_info) & EP_STATE_MASK) == EP_STATE_HALTED)
 +	if ((le32_to_cpu(ep_ctx->ep_info) & EP_STATE_MASK) == EP_STATE_HALTED) {
- 		reset_ep(udev, ep_index, timeout_ms);
+ 		reset_ep(udev, ep_index);
 +		/*
 +		 * reset_ep() updates the endpoint's output context via DMA.
 +		 * Re-invalidate and re-fetch it, otherwise prepare_ring()
@@ -51,4 +51,3 @@ index 855ae1f308..a814618955 100644
  	/*
 -- 
 2.43.0
-

@@ -19,6 +19,14 @@ this same abort path successfully.
 Fix: apply the same tolerance already used for the earlier check in
 this function.
 
+Known limitation: this does not verify the dequeue pointer actually
+moved to ring->enqueue on a COMP_CTX_STATE completion. Linux's
+xhci-hcd only commits its dequeue tracking after confirming the
+endpoint context's deq pointer matches what was queued, and warns
+instead of assuming success otherwise. This driver has no equivalent
+tracked state for a transfer ring to check against, so CTX_STATE is
+currently treated as an unconditional pass-through.
+
 Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---
  drivers/usb/host/xhci-ring.c | 5 +++--

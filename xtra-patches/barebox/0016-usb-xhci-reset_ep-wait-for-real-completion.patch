@@ -20,34 +20,38 @@ Recovering from a halt is a command completion wait, not a data
 transfer wait, and should not inherit the transfer's timeout.
 abort_td() in this same file already waits on XHCI_TIMEOUT_DEFAULT
 for its own command completions rather than trusting a caller-supplied
-value. Make reset_ep() do the same.
+value. Make reset_ep() do the same, and drop the now-unused timeout_ms
+parameter so a future caller can't reintroduce this bug by wiring a
+transfer timeout back into these waits.
 
 Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---
- drivers/usb/host/xhci-ring.c | 10 ++++++++--
- 1 file changed, 8 insertions(+), 2 deletions(-)
+ drivers/usb/host/xhci-ring.c | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
 
 diff --git a/drivers/usb/host/xhci-ring.c b/drivers/usb/host/xhci-ring.c
-index d53c0b2306..f12790308c 100644
+index d53c0b2306..61f32c0ada 100644
 --- a/drivers/usb/host/xhci-ring.c
 +++ b/drivers/usb/host/xhci-ring.c
-@@ -516,8 +516,14 @@ static void reset_ep(struct usb_device *udev, int ep_index, unsigned int timeout
- 
+@@ -506,7 +506,7 @@ union xhci_trb *xhci_wait_for_event(struct xhci_ctrl *ctrl, trb_type expected,
+  * Send reset endpoint command for given endpoint. This recovers from a
+  * halted endpoint (e.g. due to a stall error).
+  */
+-static void reset_ep(struct usb_device *udev, int ep_index, unsigned int timeout_ms)
++static void reset_ep(struct usb_device *udev, int ep_index)
+ {
+ 	struct xhci_ctrl *ctrl = xhci_get_ctrl(udev);
+ 	struct xhci_ring *ring =  ctrl->devs[udev->slot_id]->eps[ep_index].ring;
+@@ -517,7 +517,7 @@ static void reset_ep(struct usb_device *udev, int ep_index, unsigned int timeout
  	dev_info(&udev->dev, "Resetting EP %d...\n", ep_index);
  
-+	/*
-+	 * Recovering from a halt is a command completion wait, not a data
-+	 * transfer wait, so it should not inherit the caller's data-transfer
-+	 * timeout_ms (which can be 0 for a non-blocking interrupt poll).
-+	 * abort_td() below already follows this pattern for its own waits.
-+	 */
  	xhci_queue_command(ctrl, 0, udev->slot_id, ep_index, TRB_RESET_EP);
 -	event = xhci_wait_for_event(ctrl, TRB_COMPLETION, timeout_ms);
 +	event = xhci_wait_for_event(ctrl, TRB_COMPLETION, XHCI_TIMEOUT_DEFAULT);
  	if (!event)
  		return;
  
-@@ -528,7 +534,7 @@ static void reset_ep(struct usb_device *udev, int ep_index, unsigned int timeout
+@@ -528,7 +528,7 @@ static void reset_ep(struct usb_device *udev, int ep_index, unsigned int timeout
  	addr = xhci_trb_virt_to_dma(ring->enq_seg,
  		(void *)((uintptr_t)ring->enqueue | ring->cycle_state));
  	xhci_queue_command(ctrl, addr, udev->slot_id, ep_index, TRB_SET_DEQ);
@@ -56,6 +60,23 @@ index d53c0b2306..f12790308c 100644
  	if (!event)
  		return;
  
+@@ -703,7 +703,7 @@ int xhci_bulk_tx(struct usb_device *udev, unsigned long pipe,
+ 	 * have dealt with whatever caused the error.
+ 	 */
+ 	if ((le32_to_cpu(ep_ctx->ep_info) & EP_STATE_MASK) == EP_STATE_HALTED)
+-		reset_ep(udev, ep_index, timeout_ms);
++		reset_ep(udev, ep_index);
+ 
+ 	ring = virt_dev->eps[ep_index].ring;
+ 	/*
+@@ -1052,7 +1052,7 @@ int xhci_ctrl_tx(struct usb_device *udev, unsigned long pipe,
+ 		dma_unmap_single(ctrl->host.hw_dev, map, length, direction);
+ 
+ 	if (udev->status == USB_ST_STALLED) {
+-		reset_ep(udev, ep_index, timeout_ms);
++		reset_ep(udev, ep_index);
+ 		return -EPIPE;
+ 	}
+ 
 -- 
 2.43.0
-
