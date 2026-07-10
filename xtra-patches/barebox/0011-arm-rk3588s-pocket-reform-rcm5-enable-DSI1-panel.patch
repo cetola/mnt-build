@@ -1,42 +1,36 @@
 From d58a1a1fd812df24c0ff8d844daabba754cded2b Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Thu, 9 Jul 2026 18:14:31 +0000
-Subject: [PATCH 11/14] arm: rk3588s: pocket-reform-rcm5: enable DSI1 panel and
- xHCI keyboard
+Subject: [PATCH 11/20] arm: rk3588s: pocket-reform-rcm5: enable DSI1 panel
 
-Enable the MIPI DSI1 display pipeline and the xHCI USB host controller
-in barebox for the Radxa CM5 (RK3588S2) board.
+Enable the MIPI DSI1 display pipeline in barebox for the Radxa CM5
+(RK3588S2) board.
 
-Display: add hdptxphy0 + display_subsystem clock, vop, vop_mmu,
-mipidcphy1, dsi1 (with JDI panel), the VOP2 viewport endpoint
-(vp2 -> MIPI1 -> dsi1), and the backlight-enable pinctrl group.
-VOP2 lists hdptxphy0 as clock pll_hdmiphy0 (index 7); without the PHY
-enabled barebox permanently defers VOP2 probe. RK3588S has only
-hdptxphy0 (no hdptxphy1 as on the full RK3588).
+Add hdptxphy0 + display_subsystem clock, vop, vop_mmu, mipidcphy1,
+dsi1 (with JDI panel), the VOP2 viewport endpoint (vp2 -> MIPI1 ->
+dsi1), and the backlight-enable pinctrl group. VOP2 lists hdptxphy0
+as clock pll_hdmiphy0 (index 7). Without the PHY enabled barebox
+permanently defers VOP2 probe. RK3588S has only hdptxphy0 (no
+hdptxphy1 as on the full RK3588).
 
-USB/keyboard: add usbdp_phy0 and usb_host0_xhci. The keyboard
-(1209:6d06, Pocket Reform Input 1.0) sits behind two USB hubs on the
-xhci-hcd bus. Without usbdp_phy0 + usb_host0_xhci, barebox has no
-xHCI controller and the entire hub chain is unreachable.
-
-Signed-off-by: Stephano Cetola <stephanoc@gmail.com>
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---
- .../dts/rk3588s-mnt-pocket-reform-rcm5.dts    | 79 +++++++++++++++++++
- 1 file changed, 79 insertions(+)
+ .../dts/rk3588s-mnt-pocket-reform-rcm5.dts   | 70 +++++++++++++++++++
+ 1 file changed, 70 insertions(+)
 
 diff --git a/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts b/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
-index a3c5d20bd9..42975b598e 100644
+index a3c5d20bd9..8c4ea52d63 100644
 --- a/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
 +++ b/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
 @@ -8,6 +8,7 @@
- 
+
  #include <dt-bindings/gpio/gpio.h>
  #include <dt-bindings/pinctrl/rockchip.h>
 +#include <dt-bindings/soc/rockchip,vop2.h>
  #include "arm64/rockchip/rk3588s.dtsi"
  #include "arm64/rockchip/rk3588s-radxa-cm5.dtsi"
  #include "rk3588.dtsi"
-@@ -211,6 +212,84 @@ spi_lpc_pins: spi-lpc-pins {
+@@ -211,6 +212,75 @@
  				<1 RK_PD4 RK_FUNC_GPIO &pcfg_pull_none>;
  		};
  	};
@@ -46,15 +40,6 @@ index a3c5d20bd9..42975b598e 100644
 +			rockchip,pins = <1 RK_PC2 RK_FUNC_GPIO &pcfg_pull_none>;
 +		};
 +	};
-+};
-+
-+&usbdp_phy0 {
-+	status = "okay";
-+};
-+
-+&usb_host0_xhci {
-+	dr_mode = "host";
-+	status = "okay";
 +};
 +
 +&hdptxphy0 {
@@ -119,8 +104,7 @@ index a3c5d20bd9..42975b598e 100644
 +		remote-endpoint = <&dsi1_in_vp2>;
 +	};
  };
- 
- /* Override the barebox rk3588.dtsi SCMI rates to also set SPLL to 702 MHz,
--- 
-2.43.0
 
+ /* Override the barebox rk3588.dtsi SCMI rates to also set SPLL to 702 MHz,
+--
+2.43.0

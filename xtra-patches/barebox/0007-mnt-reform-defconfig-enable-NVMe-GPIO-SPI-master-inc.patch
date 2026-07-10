@@ -1,8 +1,7 @@
 From 083414497af5e733dcdb8b7d3b638b5514cc9242 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Wed, 8 Jul 2026 17:30:00 -0800
-Subject: [PATCH 07/14] mnt-reform-defconfig: enable NVMe, GPIO SPI master,
- increase stack
+Subject: [PATCH 07/14] mnt-reform-defconfig: enable NVMe, GPIO SPI master
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -15,26 +14,15 @@ Enable CONFIG_DRIVER_SPI_GPIO=y: GPIO bitbang SPI master required
 for the RP2040 system controller connection on the MNT CM4 carrier.
 The spi-gpio DTS node (separate patch) depends on this driver.
 
-Increase STACK_SIZE to 0x10000 (64 KB, double the default) to prevent
-stack overflow on the ~35-frame deep call chain that occurs during
-PCIe → NVMe probe.
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---
- mnt-reform-defconfig | 6 +++---
- 1 file changed, 3 insertions(+), 3 deletions(-)
+ mnt-reform-defconfig | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/mnt-reform-defconfig b/mnt-reform-defconfig
 index 045856e980..bc9d0626c8 100644
 --- a/mnt-reform-defconfig
 +++ b/mnt-reform-defconfig
-@@ -173,7 +173,7 @@ CONFIG_MMU=y
- CONFIG_BAREBOX_MAX_IMAGE_SIZE=0xffffffff
- CONFIG_BAREBOX_MAX_PBL_SIZE=0xffffffff
- CONFIG_BAREBOX_MAX_BARE_INIT_SIZE=0xffffffff
--CONFIG_STACK_SIZE=0x8000
-+CONFIG_STACK_SIZE=0x10000
- CONFIG_MALLOC_SIZE=0
- CONFIG_BAREBOX_MEMORY_OFFSET=0x0
- CONFIG_SCRATCH_SIZE=0x68000
 @@ -685,7 +685,7 @@ CONFIG_NET_USB_RTL8152=y
  #
  CONFIG_SPI=y
@@ -51,8 +39,8 @@ index 045856e980..bc9d0626c8 100644
 -# CONFIG_BLK_DEV_NVME is not set
 +CONFIG_BLK_DEV_NVME=y
  # end of NVME Support
- 
+
  CONFIG_REBOOT_MODE=y
--- 
+--
 2.43.0
 

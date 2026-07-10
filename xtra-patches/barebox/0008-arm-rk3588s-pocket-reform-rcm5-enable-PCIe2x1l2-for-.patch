@@ -18,9 +18,8 @@ CM4 carrier.
 - pcie2_0_rst pinctrl: sets GPIO3_PD1 to GPIO function (RK_FUNC_GPIO)
 
 GPIO and pinctrl match the Linux DTS for this board
-(rk3588s-mnt-pocket-reform.dts).  CONFIG_BLK_DEV_NVME=y and
-STACK_SIZE=0x10000 (64KB) are already set in the defconfig (patch 0007),
-the 64KB stack is required for the deep PCIe→NVMe probe call chain.
+(rk3588s-mnt-pocket-reform.dts), marked "checked, correct" there.
+CONFIG_BLK_DEV_NVME=y is already set in the defconfig (patch 0007).
 
 Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---

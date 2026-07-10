@@ -4,23 +4,11 @@ Date: Wed, 8 Jul 2026 17:30:00 -0800
 Subject: [PATCH 03/14] extlinux: fix two bugs preventing boot from
  syslinux-style extlinux.conf
 
-Bug 1: LINUX keyword not recognised.
-The extlinux spec (syslinux heritage) uses LINUX as the primary keyword
-for a Linux kernel image. KERNEL is a generic keyword for any bootable
-image. barebox's parser only matched KERNEL, following U-Boot's non-standard
-convention. extlinux.conf files written by Debian, Arch, and MNT's own
-linux-mnt-reform-bin all use the linux keyword, so entry->kernel was never
-set and parse_extlinux_conf returned -EINVAL.
-Fix: accept LINUX as an alias for KERNEL (case-insensitively), so both
-the syslinux standard and the U-Boot convention work.
+Allow for KERNEL or LINUX keywords.
 
-Bug 2: Absolute paths resolved relative to extlinux.conf directory.
-entry->rootpath was set from dirname(abspath) (the directory containing
-extlinux.conf, e.g. /mnt/boot/extlinux), not from the partition mount
-root passed in as rootpath (e.g. /mnt). Absolute paths like /Image were
-then built as /mnt/boot/extlinux//Image instead of /mnt/Image.
-Fix: store rootpath (partition root) in entry->rootpath; introduce
-extlinux_make_abs() to handle both leading-slash and relative paths.
+Also allow for absolute paths. Not sure the correct way to do this. Should
+probably allow both but will save that for another day.
+
 ---
  common/extlinux.c | 17 ++++++++++++-----
  1 file changed, 12 insertions(+), 5 deletions(-)

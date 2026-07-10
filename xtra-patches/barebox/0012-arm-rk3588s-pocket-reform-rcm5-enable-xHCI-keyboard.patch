@@ -1,0 +1,40 @@
+From d58a1a1fd812df24c0ff8d844daabba754cded2b Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Thu, 9 Jul 2026 18:15:31 +0000
+Subject: [PATCH 12/20] arm: rk3588s: pocket-reform-rcm5: enable xHCI keyboard
+
+Enable the xHCI USB host controller in barebox for the Radxa CM5
+(RK3588S2) board.
+
+Add usbdp_phy0 and usb_host0_xhci. The keyboard (1209:6d06, Pocket
+Reform Input 1.0) sits behind two USB hubs on the xhci-hcd bus.
+Without usbdp_phy0 + usb_host0_xhci, barebox has no xHCI controller
+and the entire hub chain is unreachable.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ .../dts/rk3588s-mnt-pocket-reform-rcm5.dts    | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts b/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
+index 8c4ea52d63..42975b598e 100644
+--- a/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
++++ b/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
+@@ -220,6 +220,15 @@
+ 	};
+ };
+
++&usbdp_phy0 {
++	status = "okay";
++};
++
++&usb_host0_xhci {
++	dr_mode = "host";
++	status = "okay";
++};
++
+ &hdptxphy0 {
+ 	status = "okay";
+ };
+--
+2.43.0

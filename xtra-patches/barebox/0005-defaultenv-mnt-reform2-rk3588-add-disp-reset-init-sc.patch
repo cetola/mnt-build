@@ -14,31 +14,35 @@ init races against an uninitialized panel. The JDI V1 panel may also
 benefit from a clean reset on warm reboot.
 
 The reform2_lpc protocol (matching the Linux reform2_lpc.c driver) requires
-two separate SPI transactions with a 50ms gap between them. The RP2040
-processes commands in a timer interrupt after the first transaction's CS
-deasserts, then fills its TX FIFO before the second transaction clocks out
-the response. A combined write+read in one transaction gives the RP2040 no
-time to respond and produces all-zero reads.
+two separate SPI transactions with a 50ms gap between them: one to write
+the command, one to read the response. The RP2040 processes the command in
+a timer interrupt after the first transaction's CS deasserts, then fills
+its TX FIFO before the second transaction clocks out the response. Skipping
+the read transaction, or combining write and read into one transaction,
+gives the RP2040 no time to respond and the read (if attempted at all)
+comes back all zeros.
 
 Command bytes: { 0xb5, 0x72, 0x01, 0xc6 }
   0xb5 = LPC magic, 0x72 = 'r' (display reset), 0x01 = trigger,
   0xc6 = XOR checksum. Response is 8 bytes (ignored); RESX pulse occurs
-  after the response is sent, so the trailing 50ms covers both the 20ms
-  pulse and panel stabilization time.
+  after the response is sent, so the trailing 50ms after each transaction
+  covers both the 20ms pulse and panel stabilization time.
 
 Depends on: RP2040 firmware with 'r' command support
             spi-gpio node in DTS (patch 0004)
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---
- .../init/disp-reset                           | 19 +++++++++++++++++++
- 1 file changed, 19 insertions(+)
+ .../init/disp-reset                           | 21 +++++++++++++++++++++
+ 1 file changed, 21 insertions(+)
  create mode 100644 arch/arm/boards/mnt-reform2-rk3588/defaultenv-mnt-reform2-rk3588/init/disp-reset
 
 diff --git a/arch/arm/boards/mnt-reform2-rk3588/defaultenv-mnt-reform2-rk3588/init/disp-reset b/arch/arm/boards/mnt-reform2-rk3588/defaultenv-mnt-reform2-rk3588/init/disp-reset
 new file mode 100644
-index 0000000000..e7b1fc79d7
+index 0000000000..314cb76f18
 --- /dev/null
 +++ b/arch/arm/boards/mnt-reform2-rk3588/defaultenv-mnt-reform2-rk3588/init/disp-reset
-@@ -0,0 +1,19 @@
+@@ -0,0 +1,21 @@
 +#!/bin/sh
 +# Pulse panel hardware RESX via the RP2040 system controller before autoboot.
 +#
@@ -58,6 +62,8 @@ index 0000000000..e7b1fc79d7
 +# Response: 8 bytes (ignored); RESX pulse occurs after the response is sent.
 +spi -b 0 -c 0 -m 1 -f 1000000 0xb5 0x72 0x01 0xc6
 +msleep 50
--- 
++spi -b 0 -c 0 -m 1 -f 1000000 -r 8
++msleep 50
+--
 2.43.0
 

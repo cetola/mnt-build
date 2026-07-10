@@ -21,7 +21,6 @@ arch/arm/dts/stm32mp133c-mect1s.dtsi which uses spi-gpio with no children.
 
 Add spi0 alias so barebox assigns bus number 0 deterministically.
 
-Should probably test this at some point.
 ---
  .../dts/rk3588s-mnt-pocket-reform-rcm5.dts    | 44 +++++++++++++++++++
  1 file changed, 44 insertions(+)
