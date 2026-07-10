@@ -1,7 +1,8 @@
-From ba70d42dcaa65a25b526f48f5f0432a027263243 Mon Sep 17 00:00:00 2001
+From d1625d1b384a5ea5ec044be7a53d334c6745394f Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Wed, 8 Jul 2026 17:30:00 -0800
-Subject: [PATCH] [BAREBOX] mmu: fix flush_cacheable_pages off-by-one touching guard page
+Subject: [PATCH 09/14] mmu: fix flush_cacheable_pages off-by-one touching
+ guard page
 
 flush_cacheable_pages() accumulates contiguous cacheable page ranges and
 tracks flush_end as the exclusive end of each range (i.e. the address
@@ -35,7 +36,7 @@ Signed-off-by: Stephano Cetola <stephano@cetola.net>
  1 file changed, 7 insertions(+), 3 deletions(-)
 
 diff --git a/arch/arm/cpu/flush_cacheable_pages.h b/arch/arm/cpu/flush_cacheable_pages.h
-index a03e10810d..c46a60071a 100644
+index a03e10810d..14cb0b431a 100644
 --- a/arch/arm/cpu/flush_cacheable_pages.h
 +++ b/arch/arm/cpu/flush_cacheable_pages.h
 @@ -61,10 +61,14 @@ static void flush_cacheable_pages(void *start, size_t size)

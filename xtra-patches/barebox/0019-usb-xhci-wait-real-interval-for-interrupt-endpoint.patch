@@ -1,0 +1,50 @@
+From f12bcf25246e92ffc5f26fd42e45e6d713d7b5d0 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Fri, 10 Jul 2026 00:42:50 +0000
+Subject: [PATCH 5/6] usb: xhci: wait a real interval for interrupt endpoint
+ transfers
+
+_xhci_submit_int_msg() ignored its interval parameter and always
+waited 0ms for the transfer to complete. With a 0ms wait,
+xhci_wait_for_event() does essentially a single instant check of the
+event ring and gives up if nothing is pending yet, then abort_td()
+cancels the just-queued transfer.
+
+The xHC polls the device autonomously at the endpoint's bInterval
+once a TRB is queued and the doorbell is rung, entirely in hardware,
+independent of how long the driver waits. A 0ms wait cancels that
+transfer before the hardware's own polling cycle ever gets a chance
+to complete, even when the device has real data ready to send. Every
+call was doomed to time out regardless of actual device state.
+
+Fix: wait the endpoint's own service interval instead of a fixed 0,
+giving the hardware's autonomous polling a real chance to succeed.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/usb/host/xhci.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/usb/host/xhci.c b/drivers/usb/host/xhci.c
+index 27d4353597..cb8bf0eac3 100644
+--- a/drivers/usb/host/xhci.c
++++ b/drivers/usb/host/xhci.c
+@@ -1109,8 +1109,14 @@ static int _xhci_submit_int_msg(struct usb_device *udev, unsigned long pipe,
+ 	 * interrupt endpoint is to be serviced, the xHC will consume
+ 	 * (at most) one TD. A TD (comprised of sg list entries) can
+ 	 * take several service intervals to transmit.
++	 *
++	 * Passing timeout_ms=0 here defeats that: the xHC polls the device
++	 * autonomously at its bInterval once the TRB is queued, but a 0ms
++	 * wait aborts the transfer via abort_td() before that polling ever
++	 * gets a chance to complete, even when the device has real data to
++	 * send. Wait at least one service interval instead.
+ 	 */
+-	return xhci_bulk_tx(udev, pipe, length, buffer, 0);
++	return xhci_bulk_tx(udev, pipe, length, buffer, interval);
+ }
+ 
+ /**
+-- 
+2.43.0
+

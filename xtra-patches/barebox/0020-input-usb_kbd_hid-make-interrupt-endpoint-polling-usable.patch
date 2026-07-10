@@ -1,0 +1,121 @@
+From c9e3e2fe884cc5bda0a367d2cae83de588fe2142 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Fri, 10 Jul 2026 01:05:27 +0000
+Subject: [PATCH 6/6] input: usb_kbd_hid: make interrupt endpoint polling
+ actually usable
+
+Three related problems were keeping the keyboard from working at all:
+
+usb_kbd_poll() treated any poll error other than -EAGAIN as fatal and
+returned without rescheduling itself, permanently killing the poller
+after a single transient error (observed: one -EPIPE control endpoint
+stall was enough to kill it for the rest of boot). -ETIMEDOUT needs
+the same treatment as -EAGAIN: both just mean no report was pending
+at this instant, the normal state for an idle interrupt endpoint, not
+a real error.
+
+usb_kbd_probe() treated the same -EAGAIN / -ETIMEDOUT result from its
+one-shot interrupt endpoint test poll as proof the endpoint was
+broken, permanently falling back to control endpoint polling. That
+fallback path cannot work on this device: the keyboard firmware's
+GET_REPORT handler (pocket-reform-keyboard-fw) is an unimplemented
+stub that always returns 0, so control endpoint polling can never see
+live data. Only a genuine error should trigger that fallback.
+
+This is a composite HID device: keyboard, mouse, consumer control,
+and gamepad are all multiplexed over the same interrupt endpoint via
+Report ID. usb_kbd_poll() never checked the Report ID before scanning
+bytes [3:7] as keycodes, so a mouse-idle report interleaved with a
+real keypress read as "no keys pressed", releasing the key almost
+immediately after it was detected. Ignore any report that isn't
+Report ID 1 (keyboard).
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/input/usb_kbd_hid.c | 52 +++++++++++++++++++++++++++++++--------------
+ 1 file changed, 36 insertions(+), 16 deletions(-)
+
+diff --git a/drivers/input/usb_kbd_hid.c b/drivers/input/usb_kbd_hid.c
+index 0c183d2f5c..2238a10925 100644
+--- a/drivers/input/usb_kbd_hid.c
++++ b/drivers/input/usb_kbd_hid.c
+@@ -100,30 +100,44 @@ static void usb_kbd_poll(void *arg)
+ 	int ret, i;
+
+ 	ret = data->do_poll(data);
+-	if (ret < 0)
+-		usb_kbd_release_all_keys(data);
+-	if (ret == -EAGAIN)
++	/*
++	 * -EAGAIN / -ETIMEDOUT just mean no report was pending at this
++	 * instant, the normal steady state for an idle interrupt endpoint.
++	 * Do not release keys or log noise on every idle poll interval.
++	 */
++	if (ret == -EAGAIN || ret == -ETIMEDOUT)
+ 		goto exit;
+ 	if (ret < 0) {
+-		/* exit with noreturn */
++		usb_kbd_release_all_keys(data);
+ 		dev_err(&usbdev->dev,
+ 			"usb_submit_int_msg() failed. Keyboard disconnect?\n");
+ 		goto exit;
+ 	}
+
++	/*
++	 * This is a composite HID device: keyboard (Report ID 1), mouse (2),
++	 * consumer control (3), and gamepad (4) are all multiplexed over
++	 * this same interrupt endpoint (pocket-reform-keyboard-fw
++	 * usb_descriptors.h). A non-keyboard report interleaved with a real
++	 * keypress would otherwise get scanned as if it were keyboard data,
++	 * reading zeros at [3:7] and looking like every key just released.
++	 * Ignore anything that isn't Report ID 1 entirely.
++	 */
++	if (data->new[0] != 1)
++		goto exit;
++
++	/*
++	 * usb_set_idle() makes the device auto-resend its current report
++	 * every ~4ms even when nothing changed. Only scan on a real change,
++	 * otherwise this fires nonstop at idle.
++	 */
+ 	if (!memcmp(data->old, data->new, USB_KBD_BOOT_REPORT_SIZE))
+ 		goto exit;
+
+-	/*printk(KERN_ALERT "%s: %02x %02x %02x %02x %02x %02x %02x %02x\n", __func__,
+-				 data->new[0], // 0x01
+-				 data->new[1],
+-				 data->new[2],
+-				 data->new[3], // first key
+-				 data->new[4],
+-				 data->new[5],
+-				 data->new[6],
+-				 data->new[7]
+-				 );*/
++	dev_dbg(&usbdev->dev, "ret=%d change: %02x %02x %02x %02x %02x %02x %02x %02x\n",
++		ret,
++		data->new[0], data->new[1], data->new[2], data->new[3],
++		data->new[4], data->new[5], data->new[6], data->new[7]);
+
+ 	for (i = 3; i <= 7; i++) {
+ 		uint8_t pressed_new = data->new[i];
+@@ -196,10 +210,16 @@ static int usb_kbd_probe(struct usb_device *usbdev,
+ 	data->intpktsize = min(usb_maxpacket(usbdev, data->intpipe),
+ 			       USB_KBD_BOOT_REPORT_SIZE);
+ 	data->intinterval = data->ep->bInterval;
+-	/* test polling via interrupt endpoint */
++	/*
++	 * Test polling via interrupt endpoint. -EAGAIN / -ETIMEDOUT here just
++	 * mean no report was pending at this instant (normal at probe time,
++	 * before any key has been touched) and does not indicate the
++	 * interrupt endpoint is broken. Only a genuine error should trigger
++	 * the control endpoint fallback.
++	 */
+ 	data->do_poll = usb_kbd_int_poll;
+ 	ret = data->do_poll(data);
+-	if (ret < 0) {
++	if (ret < 0 && ret != -EAGAIN && ret != -ETIMEDOUT) {
+ 		/* fall back to polling via control enpoint */
+ 		data->do_poll = usb_kbd_cnt_poll;
+ 		usb_set_idle(usbdev,
+--
+2.43.0

@@ -1,0 +1,46 @@
+From 982db9a0552978132caf38360276c4b08ce73e06 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Fri, 10 Jul 2026 00:41:01 +0000
+Subject: [PATCH 1/6] usb: xhci: tolerate COMP_CTX_STATE in abort_td's final
+ completion check
+
+abort_td() issues a Stop Ring command followed by a Set TR Dequeue
+Pointer command to cancel a pending transfer. The completion check
+for the Stop Ring command already tolerates COMP_CTX_STATE as an
+acceptable outcome alongside COMP_SUCCESS. The completion check for
+the following Set TR Dequeue Pointer command did not, and hit its
+BUG_ON when the endpoint had transitioned to a state where that
+command legitimately returns COMP_CTX_STATE instead.
+
+Observed on hardware: this panicked during normal interrupt endpoint
+polling, on the second poll after the first one's timeout triggered
+this same abort path successfully.
+
+Fix: apply the same tolerance already used for the earlier check in
+this function.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/usb/host/xhci-ring.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/usb/host/xhci-ring.c b/drivers/usb/host/xhci-ring.c
+index 00344e8074..d53c0b2306 100644
+--- a/drivers/usb/host/xhci-ring.c
++++ b/drivers/usb/host/xhci-ring.c
+@@ -594,9 +594,10 @@ static void abort_td(struct usb_device *udev, int ep_index)
+ 	if (!event)
+ 		return;
+ 
++	comp = GET_COMP_CODE(le32_to_cpu(event->event_cmd.status));
+ 	BUG_ON(TRB_TO_SLOT_ID(le32_to_cpu(event->event_cmd.flags))
+-		!= udev->slot_id || GET_COMP_CODE(le32_to_cpu(
+-		event->event_cmd.status)) != COMP_SUCCESS);
++		!= udev->slot_id || (comp != COMP_SUCCESS && comp
++		!= COMP_CTX_STATE));
+ 	xhci_acknowledge_event(ctrl);
+ }
+ 
+-- 
+2.43.0
+

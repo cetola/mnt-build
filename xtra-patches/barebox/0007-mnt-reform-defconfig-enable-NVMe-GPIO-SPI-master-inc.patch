@@ -1,7 +1,8 @@
-From 5770e8b68363cee212a1351369178eb5897fcaab Mon Sep 17 00:00:00 2001
+From 083414497af5e733dcdb8b7d3b638b5514cc9242 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Wed, 8 Jul 2026 17:30:00 -0800
-Subject: [PATCH] [MNT] mnt-reform-defconfig: enable NVMe, GPIO SPI master, increase stack
+Subject: [PATCH 07/14] mnt-reform-defconfig: enable NVMe, GPIO SPI master,
+ increase stack
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

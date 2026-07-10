@@ -1,0 +1,39 @@
+From a51970cdb94fa4a8d8577613fe5bae870bf0dc20 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Thu, 9 Jul 2026 22:48:40 +0000
+Subject: [PATCH] input: usb_kbd_hid: keep polling after a transient poll error
+
+usb_kbd_poll() returned early on any poll error other than -EAGAIN.
+This skipped the poller_call_async() reschedule at exit, so the
+keyboard poller died permanently after a single transient error.
+
+A control endpoint stall self-clears on the next SETUP packet. The
+poller does not need to do anything special to recover. It just
+needs to keep running.
+
+Observed on hardware: kbd-hid poll failed once with -EPIPE right
+after reaching the barebox prompt. The keyboard then stopped
+responding for the rest of the boot.
+
+Fix: goto exit instead of returning, so the poller reschedules
+itself like the -EAGAIN case already does.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/input/usb_kbd_hid.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/input/usb_kbd_hid.c b/drivers/input/usb_kbd_hid.c
+index 4649e13cf9..28cd7075da 100644
+--- a/drivers/input/usb_kbd_hid.c
++++ b/drivers/input/usb_kbd_hid.c
+@@ -111,5 +111,5 @@ static void usb_kbd_poll(void *arg)
+ 		dev_err(&usbdev->dev,
+ 			"usb_submit_int_msg() failed. Keyboard disconnect?\n");
+-		return;
++		goto exit;
+ 	}
+ 
+-- 
+2.43.0
+

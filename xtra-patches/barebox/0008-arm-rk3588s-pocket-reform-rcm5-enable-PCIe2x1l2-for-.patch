@@ -1,7 +1,8 @@
-From 6ddb9f901032e673e2e556041a58f46c3c9932e9 Mon Sep 17 00:00:00 2001
+From a65776f88fcb18215ae80417191703e8ad1b733c Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Wed, 8 Jul 2026 17:30:00 -0800
-Subject: [PATCH] [MNT] arm: rk3588s: pocket-reform-rcm5: enable PCIe2x1l2 for NVMe
+Subject: [PATCH 08/14] arm: rk3588s: pocket-reform-rcm5: enable PCIe2x1l2 for
+ NVMe
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

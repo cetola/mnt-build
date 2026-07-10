@@ -1,0 +1,68 @@
+From d48b4f281221f7e9ffb7354eb83963b7a1284c49 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Thu, 9 Jul 2026 18:47:57 +0000
+Subject: [PATCH 13/14] input: usb_kbd_hid: fix SET_PROTOCOL to request report
+ protocol
+
+The driver scans keycodes at bytes [3:7], expecting report protocol format:
+  [0]=ReportID [1]=modifier [2]=reserved [3:7]=keycodes
+
+Calling usb_set_protocol(0) requests boot protocol where the ReportID prefix
+is absent and keycodes shift to [2:7]. The keyboard continuously sent:
+  01 03 44 00 45 00 36 00
+which in boot protocol places 0x36 (HID comma) at byte [6], making the driver
+report KEY_COMMA permanently pressed and triggering auto-repeat flooding at
+the barebox prompt.
+
+Request report protocol (1) instead so the keyboard sends the standard
+no-key-pressed state 01 00 00 00 00 00 00 00 when idle.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/input/usb_kbd_hid.c | 16 +++++++++++++---
+ 1 file changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/input/usb_kbd_hid.c b/drivers/input/usb_kbd_hid.c
+index 52c11b61bf..ee6cb4e960 100644
+--- a/drivers/input/usb_kbd_hid.c
++++ b/drivers/input/usb_kbd_hid.c
+@@ -157,8 +157,6 @@ static void usb_kbd_poll(void *arg)
+ 			if (gone) {
+ 				input_report_key_event(&data->input, usb_kbd_keycode[pressed_old], 0);
+ 			}
+-		} else {
+-			break;
+ 		}
+ 	}
+ 
+@@ -176,7 +174,10 @@ static int usb_kbd_probe(struct usb_device *usbdev,
+ 	struct usb_kbd_pdata *data;
+ 
+ 	dev_info(&usbdev->dev, "USB HID keyboard found\n");
+-	ret = usb_set_protocol(usbdev, iface->desc.bInterfaceNumber, 0);
++	/* Keep report protocol (1): driver scans keycodes at [3:7] assuming
++	 * [0]=ReportID [1]=modifier [2]=reserved [3:7]=keys. Boot protocol (0)
++	 * omits the ReportID prefix and shifts keycodes to [2:7], breaking the scan. */
++	ret = usb_set_protocol(usbdev, iface->desc.bInterfaceNumber, 1);
+ 	if (ret < 0)
+ 		return ret;
+ 
+@@ -214,6 +215,15 @@ static int usb_kbd_probe(struct usb_device *usbdev,
+ 	} else
+ 		dev_info(&usbdev->dev, "poll keyboard via int ep\n");
+ 
++	/* Snapshot the actual keyboard idle state as baseline.  data->old is
++	 * zeroed by xzalloc, but this keyboard sends non-zero bytes even when
++	 * no key is pressed (observed: 01 03 44 00 45 00 36 00).  Without this
++	 * copy the first poller call sees a state change and fires spurious key
++	 * events including KEY_COMMA, causing auto-repeat flooding at the prompt.
++	 * After this copy, only actual transitions from this idle state trigger
++	 * events. */
++	memcpy(data->old, data->new, USB_KBD_BOOT_REPORT_SIZE);
++
+ 	data->input.parent = &usbdev->dev;
+ 	ret = input_device_register(&data->input);
+ 	if (ret) {
+-- 
+2.43.0
+

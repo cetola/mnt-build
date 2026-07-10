@@ -1,7 +1,8 @@
-From 0eb431dae8764b04cdf6f2babd4d252366c0031a Mon Sep 17 00:00:00 2001
+From a30a2258d57daed7db487a9a74d8f549bf42a7a2 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Wed, 8 Jul 2026 17:30:00 -0800
-Subject: [PATCH] [BAREBOX] extlinux: fix two bugs preventing boot from syslinux-style extlinux.conf
+Subject: [PATCH 03/14] extlinux: fix two bugs preventing boot from
+ syslinux-style extlinux.conf
 
 Bug 1: LINUX keyword not recognised.
 The extlinux spec (syslinux heritage) uses LINUX as the primary keyword

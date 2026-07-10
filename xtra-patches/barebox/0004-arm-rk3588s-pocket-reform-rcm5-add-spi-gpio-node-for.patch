@@ -1,7 +1,8 @@
-From 31355b9dd6c16f701ca1ce5b254f7069e0099d8b Mon Sep 17 00:00:00 2001
+From 3fa420171e7eb4260d9a6773e680dd5cc9c1c22c Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Wed, 8 Jul 2026 17:30:00 -0800
-Subject: [PATCH] [MNT] arm: rk3588s: pocket-reform-rcm5: add spi-gpio node for RP2040
+Subject: [PATCH 04/14] arm: rk3588s: pocket-reform-rcm5: add spi-gpio node for
+ RP2040
 
 The SoM-to-RP2040 SPI lines on the CM4 carrier are general GPIO pins, not
 connected to any hardware Rockchip SPI controller. Add a spi-gpio (bitbang)

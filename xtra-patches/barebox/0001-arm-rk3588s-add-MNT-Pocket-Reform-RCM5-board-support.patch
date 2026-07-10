@@ -1,7 +1,7 @@
-From d62dc52173585e71496302039c500eff0e90aa21 Mon Sep 17 00:00:00 2001
+From 864349fc586030ff59c817689e55379c321511b8 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Wed, 8 Jul 2026 17:30:00 -0800
-Subject: [PATCH] [MNT] arm: rk3588s: add MNT Pocket Reform RCM5 board support
+Subject: [PATCH 01/14] arm: rk3588s: add MNT Pocket Reform RCM5 board support
 
 Add barebox board support for the Radxa CM5 (RK3588S2) in the MNT
 Pocket Reform CM4 carrier:

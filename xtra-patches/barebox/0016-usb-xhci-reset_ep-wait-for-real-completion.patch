@@ -1,0 +1,61 @@
+From ac20b0c8d0f1e85837d74089d151a69f1c30a216 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Fri, 10 Jul 2026 00:41:27 +0000
+Subject: [PATCH 2/6] usb: xhci: reset_ep: wait for real completion, not the
+ caller's timeout
+
+reset_ep() recovers a halted endpoint by issuing a Reset Endpoint
+command followed by a Set TR Dequeue Pointer command, each followed
+by a wait for the command's completion event. It waited using the
+caller's timeout_ms.
+
+For an interrupt endpoint poll, timeout_ms is 0 (a non-blocking
+check for pending data). Passed through to reset_ep(), that same 0ms
+value gives the actual recovery commands almost no time to complete.
+xhci_wait_for_event() gives up immediately, reset_ep() returns before
+the halt is ever cleared, and the endpoint stays halted forever no
+matter how many times the caller retries.
+
+Recovering from a halt is a command completion wait, not a data
+transfer wait, and should not inherit the transfer's timeout.
+abort_td() in this same file already waits on XHCI_TIMEOUT_DEFAULT
+for its own command completions rather than trusting a caller-supplied
+value. Make reset_ep() do the same.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/usb/host/xhci-ring.c | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/usb/host/xhci-ring.c b/drivers/usb/host/xhci-ring.c
+index d53c0b2306..f12790308c 100644
+--- a/drivers/usb/host/xhci-ring.c
++++ b/drivers/usb/host/xhci-ring.c
+@@ -516,8 +516,14 @@ static void reset_ep(struct usb_device *udev, int ep_index, unsigned int timeout
+ 
+ 	dev_info(&udev->dev, "Resetting EP %d...\n", ep_index);
+ 
++	/*
++	 * Recovering from a halt is a command completion wait, not a data
++	 * transfer wait, so it should not inherit the caller's data-transfer
++	 * timeout_ms (which can be 0 for a non-blocking interrupt poll).
++	 * abort_td() below already follows this pattern for its own waits.
++	 */
+ 	xhci_queue_command(ctrl, 0, udev->slot_id, ep_index, TRB_RESET_EP);
+-	event = xhci_wait_for_event(ctrl, TRB_COMPLETION, timeout_ms);
++	event = xhci_wait_for_event(ctrl, TRB_COMPLETION, XHCI_TIMEOUT_DEFAULT);
+ 	if (!event)
+ 		return;
+ 
+@@ -528,7 +534,7 @@ static void reset_ep(struct usb_device *udev, int ep_index, unsigned int timeout
+ 	addr = xhci_trb_virt_to_dma(ring->enq_seg,
+ 		(void *)((uintptr_t)ring->enqueue | ring->cycle_state));
+ 	xhci_queue_command(ctrl, addr, udev->slot_id, ep_index, TRB_SET_DEQ);
+-	event = xhci_wait_for_event(ctrl, TRB_COMPLETION, timeout_ms);
++	event = xhci_wait_for_event(ctrl, TRB_COMPLETION, XHCI_TIMEOUT_DEFAULT);
+ 	if (!event)
+ 		return;
+ 
+-- 
+2.43.0
+

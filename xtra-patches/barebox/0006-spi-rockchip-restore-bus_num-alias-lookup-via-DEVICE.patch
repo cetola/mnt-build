@@ -1,7 +1,8 @@
-From d63e22efe0b71d89f804fba2d37345193c1eba62 Mon Sep 17 00:00:00 2001
+From a6d303df1cf68305205a6cbf65fea5cd68b0d4be Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Wed, 8 Jul 2026 17:30:00 -0800
-Subject: [PATCH] [MNT] spi: rockchip: restore bus_num alias lookup via DEVICE_ID_SINGLE
+Subject: [PATCH 06/14] spi: rockchip: restore bus_num alias lookup via
+ DEVICE_ID_SINGLE
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -40,12 +41,12 @@ index 1e81e9393f..e65a2d2e44 100644
 @@ -514,7 +514,7 @@ static int rockchip_spi_probe(struct device *dev)
  		goto err_put_ctlr;
  	}
-
+ 
 -//	ctlr->bus_num = pdev->id;
 +	ctlr->bus_num = DEVICE_ID_SINGLE;
  //	ctlr->mode_bits = SPI_CPOL | SPI_CPHA | SPI_LOOP | SPI_LSB_FIRST;
-
+ 
  	/*
---
+-- 
 2.43.0
 
