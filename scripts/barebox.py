@@ -158,26 +158,12 @@ class BareboxManager:
                           file=sys.stderr)
                     return 1
 
-            if current == expected:
-                # At the base ref — patches not yet applied.
-                return self._apply_patches(checkout_dir)
-
-            # Check if current is already ahead of expected (patches applied).
-            is_ahead = subprocess.run(
-                ["git", "-C", str(checkout_dir), "merge-base", "--is-ancestor",
-                 expected, current],
-                capture_output=True,
-            ).returncode == 0
-            if is_ahead:
-                print(f"[barebox] Checkout already patched ({current[:12]}) — skipping.")
-                return 0
-
-            print(f"[barebox] Ref changed: {current[:12]} → {expected[:12]}")
-            print(f"[barebox] Updating checkout ...")
-            subprocess.run(
-                ["git", "-C", str(checkout_dir), "checkout", "--detach", info.tag],
-                check=True,
-            )
+            if current != expected:
+                print(f"[barebox] Resetting checkout to {info.tag} ...")
+                subprocess.run(
+                    ["git", "-C", str(checkout_dir), "checkout", "--detach", info.tag],
+                    check=True,
+                )
             return self._apply_patches(checkout_dir)
 
         print(f"[barebox] Cloning {repo_url} ...")
