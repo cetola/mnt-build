@@ -17,7 +17,7 @@ Signed-off-by: Stephano Cetola <stephano@cetola.net>
  1 file changed, 9 insertions(+)
 
 diff --git a/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts b/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
-index 8c4ea52d63..42975b598e 100644
+index ee496819e0..28791fa5ef 100644
 --- a/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
 +++ b/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
 @@ -220,6 +220,15 @@
