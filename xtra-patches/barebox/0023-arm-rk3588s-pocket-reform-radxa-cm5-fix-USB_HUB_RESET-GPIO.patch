@@ -1,6 +1,6 @@
-From ddcb7ab8328d9a63e23c65ee778ada26a98abf6e Mon Sep 17 00:00:00 2001
+From c585dbf73b9a3ff1b3c041494932325d1245f9a5 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
-Date: Sat, 11 Jul 2026 19:04:11 +0000
+Date: Sat, 11 Jul 2026 21:28:08 +0000
 Subject: arm: rk3588s: pocket-reform-radxa-cm5: fix USB_HUB_RESET GPIO
 
 reform2_rk3588_probe() used a single hardcoded USB_HUB_RESET GPIO
@@ -46,13 +46,13 @@ Signed-off-by: Stephano Cetola <stephano@cetola.net>
  1 file changed, 17 insertions(+), 5 deletions(-)
 
 diff --git a/arch/arm/boards/mnt-reform2-rk3588/board.c b/arch/arm/boards/mnt-reform2-rk3588/board.c
-index 69b73faeb7..9c8bee59c3 100644
+index f58e275a04..e63470c0bd 100644
 --- a/arch/arm/boards/mnt-reform2-rk3588/board.c
 +++ b/arch/arm/boards/mnt-reform2-rk3588/board.c
-@@ -10,10 +10,17 @@
- struct reform2_model {
+@@ -11,10 +11,17 @@ struct reform2_model {
  	const char *name;
  	const char *shortname;
+ 	bool has_disp_reset_env;
 +	int usb_hub_reset_gpio;
  };
  
@@ -69,7 +69,7 @@ index 69b73faeb7..9c8bee59c3 100644
  
  static int reform2_rk3588_probe(struct device *dev)
  {
-@@ -37,10 +44,10 @@ static int reform2_rk3588_probe(struct device *dev)
+@@ -38,10 +45,10 @@ static int reform2_rk3588_probe(struct device *dev)
  	rockchip_bbu_mmc_register("sd", bbu_flags_sd, "/dev/mmc1");
  
  	printf("[mnt-reform-series-rk3588] setup_usb()\n");
@@ -82,8 +82,8 @@ index 69b73faeb7..9c8bee59c3 100644
 +	gpio_set_value(model->usb_hub_reset_gpio, 1);
  
  	defaultenv_append_directory(defaultenv_mnt_reform2_rk3588);
- 
-@@ -50,26 +57,31 @@ static int reform2_rk3588_probe(struct device *dev)
+ 	if (model->has_disp_reset_env)
+@@ -53,27 +60,32 @@ static int reform2_rk3588_probe(struct device *dev)
  static const struct reform2_model reform2_rk3588 = {
  	.name = "MNT Reform 2 with RCORE-RK3588 Module",
  	.shortname = "reform2_rk3588",
@@ -111,6 +111,7 @@ index 69b73faeb7..9c8bee59c3 100644
  static const struct reform2_model pocket_reform_radxa_cm5_rk3588s = {
  	.name = "MNT Pocket Reform with Radxa CM5 RK3588S2 Module",
  	.shortname = "pocket_reform_radxa_cm5_rk3588s",
+ 	.has_disp_reset_env = true,
 +	.usb_hub_reset_gpio = USB_HUB_RESET_RADXA_CM5,
  };
  
