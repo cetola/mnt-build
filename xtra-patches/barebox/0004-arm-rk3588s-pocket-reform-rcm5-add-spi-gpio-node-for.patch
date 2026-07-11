@@ -21,9 +21,15 @@ arch/arm/dts/stm32mp133c-mect1s.dtsi which uses spi-gpio with no children.
 
 Add spi0 alias so barebox assigns bus number 0 deterministically.
 
+Also enable CONFIG_DRIVER_SPI_GPIO=y in mnt-reform-defconfig: the DTS
+node above is inert without the driver it binds to, and the driver
+with no matching node does nothing either, so both halves belong in
+one patch.
+
 ---
  .../dts/rk3588s-mnt-pocket-reform-rcm5.dts    | 44 +++++++++++++++++++
- 1 file changed, 44 insertions(+)
+ mnt-reform-defconfig                          |  2 +-
+ 2 files changed, 45 insertions(+), 1 deletion(-)
 
 diff --git a/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts b/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
 index d07ca945ce..942916e46a 100644
@@ -87,6 +93,18 @@ index d07ca945ce..942916e46a 100644
  /* Override the barebox rk3588.dtsi SCMI rates to also set SPLL to 702 MHz,
   * matching what lowlevel.c's rk3588_spll_set_rate() configures at PBL time. */
  &scmi_clk {
+diff --git a/mnt-reform-defconfig b/mnt-reform-defconfig
+index 045856e980..27542a90af 100644
+--- a/mnt-reform-defconfig
++++ b/mnt-reform-defconfig
+@@ -685,7 +685,7 @@ CONFIG_NET_USB_RTL8152=y
+ #
+ CONFIG_SPI=y
+ # CONFIG_SPI_MEM is not set
+-# CONFIG_DRIVER_SPI_GPIO is not set
++CONFIG_DRIVER_SPI_GPIO=y
+ # CONFIG_DRIVER_SPI_LITEX_SPIFLASH is not set
+ CONFIG_SPI_ROCKCHIP=y
+ # end of SPI drivers
 -- 
 2.43.0
-
