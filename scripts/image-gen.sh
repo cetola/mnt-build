@@ -48,7 +48,7 @@ FLASHBIN_OFFSET=0
 SD_BOOT=false
 BOOTLOADER_FILENAME=""
 INSTALLED_KERNEL_VERSION=""
-SELECTED_BOOTLOADER="uboot"
+SELECTED_BOOTLOADER="uboot-prebuilt"
 BAREBOX_PROJECT=""
 BAREBOX_TAG=""
 
@@ -80,7 +80,7 @@ die() {
 usage() {
   cat <<'EOF'
 Usage:
-  image-gen.sh --sysimage <name> [--bootloader uboot|barebox]
+  image-gen.sh --sysimage <name> [--bootloader <choice>]
 
 Options:
   --sysimage <name>         Target platform sysimage. Supported values:
@@ -89,8 +89,13 @@ Options:
                             - pocket-reform-system-rk3588
                             - pocket-reform-system-imx8mp
                             - pocket-reform-system-rk3588s
-  --bootloader <loader>     Bootloader to use: uboot (default) or barebox.
-                            barebox is only supported for RK3588/S sysimages.
+  --bootloader <choice>     Bootloader to use. One of:
+                              uboot-prebuilt  (default) fetch MNT's prebuilt U-Boot
+                              uboot-source    build U-Boot from source
+                              barebox-source  build barebox from source
+                            barebox-source is only available for RK3588/S sysimages
+                            (reform-next-system-rk3588, pocket-reform-system-rk3588,
+                            pocket-reform-system-rk3588s).
   -h, --help                Show this help.
 EOF
 }
@@ -109,8 +114,8 @@ parse_args() {
       --bootloader)
         [[ $# -lt 2 ]] && die "--bootloader requires an argument"
         case "$2" in
-          uboot|barebox) SELECTED_BOOTLOADER="$2" ;;
-          *) die "--bootloader must be 'uboot' or 'barebox', got: $2" ;;
+          uboot-prebuilt|uboot-source|barebox-source) SELECTED_BOOTLOADER="$2" ;;
+          *) die "--bootloader must be one of: uboot-prebuilt, uboot-source, barebox-source (got: $2)" ;;
         esac
         shift 2
         ;;
@@ -132,7 +137,7 @@ parse_args() {
 
 apply_barebox_bootloader() {
   if [[ -z "${BAREBOX_PROJECT:-}" ]]; then
-    die "--bootloader barebox: this sysimage does not support barebox (BAREBOX_PROJECT is unset)"
+    die "--bootloader barebox-source: this sysimage does not support barebox (BAREBOX_PROJECT is unset)"
   fi
   log "Switching to barebox bootloader: project=${BAREBOX_PROJECT} tag=${BAREBOX_TAG}"
   BOOTLOADER_PROJECT="${BAREBOX_PROJECT}"
@@ -142,6 +147,24 @@ apply_barebox_bootloader() {
   BOOTLOADER_SOURCE_MODE="source"
   FSBL_PATCHES_SUBDIR="barebox"
   BOOTLOADER_SHA1=""
+}
+
+apply_bootloader_choice() {
+  case "${SELECTED_BOOTLOADER}" in
+    barebox-source)
+      apply_barebox_bootloader
+      ;;
+    uboot-source)
+      log "Building U-Boot from source"
+      BOOTLOADER_SOURCE_MODE="source"
+      ;;
+    uboot-prebuilt)
+      BOOTLOADER_SOURCE_MODE="prebuilt"
+      ;;
+    *)
+      die "Internal error: unknown SELECTED_BOOTLOADER='${SELECTED_BOOTLOADER}'"
+      ;;
+  esac
 }
 
 source "$SCRIPT_DIR/sysimage-config.sh"
@@ -691,8 +714,7 @@ print_summary() {
 main() {
   parse_args "$@"
   configure_sysimage
-
-  [[ "${SELECTED_BOOTLOADER}" == "barebox" ]] && apply_barebox_bootloader
+  apply_bootloader_choice
 
   # Create working directories before opening the logfile in downloads/.
   mkdir -p "$DOWNLOADS_DIR" "$BOOT_MNT" "$ROOT_MNT"

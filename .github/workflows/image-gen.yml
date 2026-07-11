@@ -13,16 +13,17 @@ on:
           - pocket-reform-system-rk3588
           - pocket-reform-system-rk3588s
           - pocket-reform-system-imx8mp
-      bootloader_mode:
-        description: Bootloader artifact source mode
+      bootloader:
+        description: Bootloader to build. barebox-source only works for RK3588/S sysimages.
         required: true
-        default: prebuilt
+        default: uboot-prebuilt
         type: choice
         options:
-          - prebuilt
-          - source
+          - uboot-prebuilt
+          - uboot-source
+          - barebox-source
       uboot_sha:
-        description: Optional U-Boot commit SHA (used in source mode)
+        description: Optional U-Boot commit SHA (used with uboot-source)
         required: false
         type: string
       zero_fill_max_mb:
@@ -171,7 +172,7 @@ jobs:
           PUBLIC_IP="${{ steps.launch-instance.outputs.public_ip }}"
           SSH_OPTS="-T -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes -o ConnectTimeout=15"
           SYSIMAGE="$(printf '%s' "${{ github.event.inputs.sysimage }}" | tr -d '\r\n')"
-          BOOTLOADER_SOURCE_MODE="$(printf '%s' "${{ github.event.inputs.bootloader_mode }}" | tr -d '\r\n')"
+          BOOTLOADER="$(printf '%s' "${{ github.event.inputs.bootloader }}" | tr -d '\r\n')"
           UBOOT_SHA="$(printf '%s' "${{ github.event.inputs.uboot_sha }}" | tr -d '\r\n')"
           ZERO_FILL_MAX_MB="$(printf '%s' "${{ github.event.inputs.zero_fill_max_mb }}" | tr -d '\r\n')"
           REMOTE_STATE_DIR="~/mnt-build/.gha-image-gen"
@@ -179,11 +180,11 @@ jobs:
           REMOTE_PID_FILE="${REMOTE_STATE_DIR}/pid"
           REMOTE_LOG="~/mnt-build/image-gen-remote-run.log"
 
-          q_bootloader_mode="$(printf '%q' "$BOOTLOADER_SOURCE_MODE")"
+          q_bootloader="$(printf '%q' "$BOOTLOADER")"
           q_uboot_sha="$(printf '%q' "$UBOOT_SHA")"
           q_zero_fill="$(printf '%q' "$ZERO_FILL_MAX_MB")"
           q_sysimage="$(printf '%q' "$SYSIMAGE")"
-          remote_payload="cd ~/mnt-build || exit 97; chmod +x ./scripts/image-gen.sh; export BOOTLOADER_SOURCE_MODE=${q_bootloader_mode}; export UBOOT_SHA=${q_uboot_sha}; export ZERO_FILL_MAX_MB=${q_zero_fill}; sudo --preserve-env=BOOTLOADER_SOURCE_MODE,UBOOT_SHA,ZERO_FILL_MAX_MB ./scripts/image-gen.sh --sysimage ${q_sysimage}; rc=\$?; echo \$rc > ${REMOTE_EXIT_CODE}; exit \$rc"
+          remote_payload="cd ~/mnt-build || exit 97; chmod +x ./scripts/image-gen.sh; export UBOOT_SHA=${q_uboot_sha}; export ZERO_FILL_MAX_MB=${q_zero_fill}; sudo --preserve-env=UBOOT_SHA,ZERO_FILL_MAX_MB ./scripts/image-gen.sh --sysimage ${q_sysimage} --bootloader ${q_bootloader}; rc=\$?; echo \$rc > ${REMOTE_EXIT_CODE}; exit \$rc"
           q_remote_payload="$(printf '%q' "$remote_payload")"
 
           ssh $SSH_OPTS "ubuntu@$PUBLIC_IP" "set -euo pipefail; \
@@ -303,7 +304,7 @@ jobs:
             {
               echo "Build date (UTC): $(date -u +%Y-%m-%dT%H:%M:%SZ)"
               echo "Sysimage: ${{ github.event.inputs.sysimage }}"
-              echo "Bootloader mode: ${{ github.event.inputs.bootloader_mode }}"
+              echo "Bootloader: ${{ github.event.inputs.bootloader }}"
               if [[ -n "${{ github.event.inputs.uboot_sha }}" ]]; then
                 echo "U-Boot SHA: ${{ github.event.inputs.uboot_sha }}"
               fi

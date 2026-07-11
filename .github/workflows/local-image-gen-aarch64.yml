@@ -13,16 +13,17 @@ on:
           - pocket-reform-system-rk3588
           - pocket-reform-system-rk3588s
           - pocket-reform-system-imx8mp
-      bootloader_mode:
-        description: Bootloader artifact source mode
+      bootloader:
+        description: Bootloader to build. barebox-source only works for RK3588/S sysimages.
         required: true
-        default: prebuilt
+        default: uboot-prebuilt
         type: choice
         options:
-          - prebuilt
-          - source
+          - uboot-prebuilt
+          - uboot-source
+          - barebox-source
       uboot_sha:
-        description: Optional U-Boot commit SHA (used in source mode)
+        description: Optional U-Boot commit SHA (used with uboot-source)
         required: false
         type: string
       zero_fill_max_mb:
@@ -130,13 +131,13 @@ jobs:
         run: |
           set -euo pipefail
           SYSIMAGE="$(printf '%s' "${{ github.event.inputs.sysimage }}" | tr -d '\r\n')"
-          BOOTLOADER_MODE="$(printf '%s' "${{ github.event.inputs.bootloader_mode }}" | tr -d '\r\n')"
+          BOOTLOADER="$(printf '%s' "${{ github.event.inputs.bootloader }}" | tr -d '\r\n')"
           UBOOT_SHA="$(printf '%s' "${{ github.event.inputs.uboot_sha }}" | tr -d '\r\n')"
           ZERO_FILL_MAX_MB="$(printf '%s' "${{ github.event.inputs.zero_fill_max_mb }}" | tr -d '\r\n')"
 
           echo "Selected inputs:"
           echo "  sysimage=$SYSIMAGE"
-          echo "  bootloader_mode=$BOOTLOADER_MODE"
+          echo "  bootloader=$BOOTLOADER"
           if [[ -n "$UBOOT_SHA" ]]; then
             echo "  uboot_sha=$UBOOT_SHA"
           else
@@ -148,7 +149,7 @@ jobs:
             echo "### Selected Workflow Inputs"
             echo ""
             echo "- sysimage: \`$SYSIMAGE\`"
-            echo "- bootloader_mode: \`$BOOTLOADER_MODE\`"
+            echo "- bootloader: \`$BOOTLOADER\`"
             if [[ -n "$UBOOT_SHA" ]]; then
               echo "- uboot_sha: \`$UBOOT_SHA\`"
             else
@@ -161,17 +162,17 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x ./scripts/image-gen-aarch64.sh
-          BOOTLOADER_SOURCE_MODE="$(printf '%s' "${{ github.event.inputs.bootloader_mode }}" | tr -d '\r\n')"
+          BOOTLOADER="$(printf '%s' "${{ github.event.inputs.bootloader }}" | tr -d '\r\n')"
           UBOOT_SHA="$(printf '%s' "${{ github.event.inputs.uboot_sha }}" | tr -d '\r\n')"
           ZERO_FILL_MAX_MB="$(printf '%s' "${{ github.event.inputs.zero_fill_max_mb }}" | tr -d '\r\n')"
-          echo "Using BOOTLOADER_SOURCE_MODE=${BOOTLOADER_SOURCE_MODE}"
+          echo "Using bootloader=${BOOTLOADER}"
           if [[ -n "${UBOOT_SHA}" ]]; then
             echo "Using UBOOT_SHA=${UBOOT_SHA}"
           fi
           echo "Using ZERO_FILL_MAX_MB=${ZERO_FILL_MAX_MB}"
-          export BOOTLOADER_SOURCE_MODE UBOOT_SHA ZERO_FILL_MAX_MB
-          sudo --preserve-env=BOOTLOADER_SOURCE_MODE,UBOOT_SHA,ZERO_FILL_MAX_MB \
-            ./scripts/image-gen-aarch64.sh --sysimage "${{ github.event.inputs.sysimage }}"
+          export UBOOT_SHA ZERO_FILL_MAX_MB
+          sudo --preserve-env=UBOOT_SHA,ZERO_FILL_MAX_MB \
+            ./scripts/image-gen-aarch64.sh --sysimage "${{ github.event.inputs.sysimage }}" --bootloader "${BOOTLOADER}"
 
       - name: Package outputs (zstd, bmap, logs, sha256)
         run: |
@@ -204,7 +205,7 @@ jobs:
           {
             echo "Build date (UTC): $(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "Sysimage: ${{ github.event.inputs.sysimage }}"
-            echo "Bootloader mode: ${{ github.event.inputs.bootloader_mode }}"
+            echo "Bootloader: ${{ github.event.inputs.bootloader }}"
             if [[ -n "${{ github.event.inputs.uboot_sha }}" ]]; then
               echo "U-Boot SHA: ${{ github.event.inputs.uboot_sha }}"
             fi
