@@ -7,15 +7,69 @@ Add barebox board support for the Radxa CM5 (RK3588S2) in the MNT
 Pocket Reform CM4 carrier:
 
 - New DTS rk3588s-mnt-pocket-reform-rcm5.dts using rk3588s.dtsi
-- Add ENTRY_FUNCTION start_rk3588s_mnt_pocket_reform_rcm5 in lowlevel.c.
+- Add ENTRY_FUNCTION start_rk3588s_mnt_pocket_reform_rcm5 in lowlevel.c
+- New compatible string "mntre,pocket-reform-rcm5" and a board.c match
+  entry for it
+
+The Radxa CM5 is a third-party module, not MNT's own RCORE module, and
+it is built around RK3588S, not the RK3588 the real RCORE-based Pocket
+Reform (rk3588-mnt-pocket-reform.dts) uses. Give it its own compatible
+string instead of reusing "mntre,pocket-reform-rcore" so this board
+isn't conflated with a different board built around a different SoC
+variant.
+
+It still shares reform2_rk3588_probe() with the RCORE boards,
+including the hardcoded USB_HUB_RESET GPIO toggle, on the unverified
+assumption that the carrier wires this up identically for both
+modules. Runtime behavior is unchanged by this: the probe function's
+model data is currently unused, so the RCORE boards and this one all
+ran identical probe logic before this change too.
 ---
+ arch/arm/boards/mnt-reform2-rk3588/board.c    |  19 +++
  arch/arm/boards/mnt-reform2-rk3588/lowlevel.c |   6 +-
  arch/arm/dts/Makefile                         |   3 +-
  .../dts/rk3588s-mnt-pocket-reform-rcm5.dts    | 168 ++++++++++++++++++
  images/Makefile.rockchip                      |   1 +
- 4 files changed, 176 insertions(+), 2 deletions(-)
+ 5 files changed, 195 insertions(+), 2 deletions(-)
  create mode 100644 arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
 
+diff --git a/arch/arm/boards/mnt-reform2-rk3588/board.c b/arch/arm/boards/mnt-reform2-rk3588/board.c
+index eeacf51eb0..cfe9f69e76 100644
+--- a/arch/arm/boards/mnt-reform2-rk3588/board.c
++++ b/arch/arm/boards/mnt-reform2-rk3588/board.c
+@@ -67,6 +67,21 @@ static const struct reform2_model reform_next_rk3588 = {
+ 	.shortname = "reform_next_rk3588",
+ };
+ 
++/*
++ * The Radxa CM5 (RK3588S) is a third-party module, not MNT's own RCORE
++ * (RK3588) module, wired onto the Pocket Reform's CM4-footprint carrier
++ * through an adapter. It gets its own compatible string and match entry
++ * rather than reusing "mntre,pocket-reform-rcore" so it isn't conflated
++ * with a different board built around a different SoC variant. It still
++ * shares reform2_rk3588_probe() with the RCORE boards below, including
++ * the hardcoded USB_HUB_RESET GPIO, on the unverified assumption that the
++ * carrier wires this up identically for both modules.
++ */
++static const struct reform2_model pocket_reform_rcm5_rk3588s = {
++	.name = "MNT Pocket Reform with Radxa CM5 RK3588S2 Module",
++	.shortname = "pocket_reform_rcm5_rk3588s",
++};
++
+ static const struct of_device_id reform2_rk3588_of_match[] = {
+ 	{
+ 		.compatible = "mntre,reform2-rcore",
+@@ -84,6 +99,10 @@ static const struct of_device_id reform2_rk3588_of_match[] = {
+ 		.compatible = "mntre,reform-next-rcore",
+ 		.data = &reform_next_rk3588,
+ 	},
++	{
++		.compatible = "mntre,pocket-reform-rcm5",
++		.data = &pocket_reform_rcm5_rk3588s,
++	},
+ 	{ /* sentinel */ },
+ };
+ 
 diff --git a/arch/arm/boards/mnt-reform2-rk3588/lowlevel.c b/arch/arm/boards/mnt-reform2-rk3588/lowlevel.c
 index bc70d49bfa..f54178f962 100644
 --- a/arch/arm/boards/mnt-reform2-rk3588/lowlevel.c
@@ -73,7 +127,7 @@ index 0000000000..d07ca945ce
 +
 +/ {
 +	model = "MNT Pocket Reform with Radxa CM5 RK3588S2 Module";
-+	compatible = "mntre,pocket-reform-rcore", "radxa,cm5", "rockchip,rk3588s";
++	compatible = "mntre,pocket-reform-rcm5", "radxa,cm5", "rockchip,rk3588s";
 +
 +	aliases {
 +		ethernet0 = &gmac1;
