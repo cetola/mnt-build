@@ -110,7 +110,7 @@ apply_barebox_defaults() {
         pocket-reform-system-rk3588)
           BAREBOX_ARTIFACT="barebox-mnt-pocket-reform-rk3588.img" ;;
         pocket-reform-system-rk3588s)
-          BAREBOX_ARTIFACT="barebox-mnt-pocket-reform-rcm5-rk3588s.img" ;;
+          BAREBOX_ARTIFACT="barebox-mnt-pocket-reform-radxa-cm5-rk3588s.img" ;;
       esac
       return 0
     fi
@@ -242,7 +242,7 @@ configure_sysimage_fallback() {
         true
       BAREBOX_PROJECT="$BAREBOX_DEFAULT_PROJECT"
       BAREBOX_TAG="$BAREBOX_DEFAULT_TAG"
-      BAREBOX_ARTIFACT="barebox-mnt-pocket-reform-rcm5-rk3588s.img"
+      BAREBOX_ARTIFACT="barebox-mnt-pocket-reform-radxa-cm5-rk3588s.img"
       ;;
     pocket-reform-system-imx8mp)
       set_sysimage_config \

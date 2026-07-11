@@ -1,8 +1,8 @@
-From d19f5444f8a6919336a7a5f650bc45f38d863324 Mon Sep 17 00:00:00 2001
+From 7e4a85e30c25f0b0e2b9dfd1b78a14402d24d302 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Sat, 11 Jul 2026 15:16:52 +0000
-Subject: [PATCH 21/22] input: usb_kbd_hid: treat -ETIMEDOUT like -EAGAIN
- during steady-state polling
+Subject: input: usb_kbd_hid: treat -ETIMEDOUT like -EAGAIN during steady-state
+ polling
 
 usb_kbd_poll() called usb_kbd_release_all_keys() for any negative
 do_poll() result, before checking whether that result was -EAGAIN.

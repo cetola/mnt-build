@@ -1,8 +1,7 @@
-From 3fa420171e7eb4260d9a6773e680dd5cc9c1c22c Mon Sep 17 00:00:00 2001
+From 41e928337f22c13417b11c6cc910f0139430d1f5 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
-Date: Wed, 8 Jul 2026 17:30:00 -0800
-Subject: [PATCH 04/14] arm: rk3588s: pocket-reform-rcm5: add spi-gpio node for
- RP2040
+Date: Sat, 11 Jul 2026 19:01:20 +0000
+Subject: arm: rk3588s: pocket-reform-radxa-cm5: add spi-gpio node for RP2040
 
 The SoM-to-RP2040 SPI lines on the CM4 carrier are general GPIO pins, not
 connected to any hardware Rockchip SPI controller. Add a spi-gpio (bitbang)
@@ -33,17 +32,16 @@ Also enable CONFIG_DRIVER_SPI_GPIO=y in mnt-reform-defconfig: the DTS
 node above is inert without the driver it binds to, and the driver
 with no matching node does nothing either, so both halves belong in
 one patch.
-
 ---
- .../dts/rk3588s-mnt-pocket-reform-rcm5.dts    | 32 ++++++++++++++++++
+ .../rk3588s-mnt-pocket-reform-radxa-cm5.dts   | 32 +++++++++++++++++++
  mnt-reform-defconfig                          |  2 +-
  2 files changed, 33 insertions(+), 1 deletion(-)
 
-diff --git a/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts b/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
-index d07ca945ce..7e1368ade2 100644
---- a/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
-+++ b/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
-@@ -21,6 +21,7 @@
+diff --git a/arch/arm/dts/rk3588s-mnt-pocket-reform-radxa-cm5.dts b/arch/arm/dts/rk3588s-mnt-pocket-reform-radxa-cm5.dts
+index 219034f457..242664b26a 100644
+--- a/arch/arm/dts/rk3588s-mnt-pocket-reform-radxa-cm5.dts
++++ b/arch/arm/dts/rk3588s-mnt-pocket-reform-radxa-cm5.dts
+@@ -21,6 +21,7 @@ aliases {
  		serial2 = &uart2;
  		mmc0 = &sdhci;
  		mmc1 = &sdmmc;
@@ -51,7 +49,7 @@ index d07ca945ce..7e1368ade2 100644
  	};
  
  	chosen {
-@@ -152,6 +153,37 @@
+@@ -152,6 +153,37 @@ &usb_host1_ohci {
  	status = "okay";
  };
  
@@ -89,7 +87,6 @@ index d07ca945ce..7e1368ade2 100644
  /* Override the barebox rk3588.dtsi SCMI rates to also set SPLL to 702 MHz,
   * matching what lowlevel.c's rk3588_spll_set_rate() configures at PBL time. */
  &scmi_clk {
-
 diff --git a/mnt-reform-defconfig b/mnt-reform-defconfig
 index 045856e980..27542a90af 100644
 --- a/mnt-reform-defconfig
@@ -105,3 +102,4 @@ index 045856e980..27542a90af 100644
  # end of SPI drivers
 -- 
 2.43.0
+

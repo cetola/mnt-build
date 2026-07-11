@@ -1,8 +1,7 @@
-From 4283bc426fad385bea0658261b34d1ad9181d63f Mon Sep 17 00:00:00 2001
+From 161868f2595a63ccc1dfe93af7658033d53d165c Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Sat, 11 Jul 2026 15:15:29 +0000
-Subject: [PATCH 17/22] usb: xhci: reset_ep: fix misaligned pointer in Set TR
- Dequeue Pointer
+Subject: usb: xhci: reset_ep: fix misaligned pointer in Set TR Dequeue Pointer
 
 reset_ep() computed the Set TR Dequeue Pointer command's address by
 ORing the ring's cycle bit into ring->enqueue before passing it to

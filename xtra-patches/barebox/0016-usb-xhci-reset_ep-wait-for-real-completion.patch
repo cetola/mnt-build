@@ -1,8 +1,8 @@
-From ac20b0c8d0f1e85837d74089d151a69f1c30a216 Mon Sep 17 00:00:00 2001
+From fce0b1c9abd0ea1375a8bdf08ff6a72d42bf8ae6 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Fri, 10 Jul 2026 00:41:27 +0000
-Subject: [PATCH 2/6] usb: xhci: reset_ep: wait for real completion, not the
- caller's timeout
+Subject: usb: xhci: reset_ep: wait for real completion, not the caller's
+ timeout
 
 reset_ep() recovers a halted endpoint by issuing a Reset Endpoint
 command followed by a Set TR Dequeue Pointer command, each followed
@@ -80,3 +80,4 @@ index d53c0b2306..61f32c0ada 100644
  
 -- 
 2.43.0
+

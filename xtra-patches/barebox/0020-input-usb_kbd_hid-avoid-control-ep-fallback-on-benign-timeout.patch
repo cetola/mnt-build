@@ -1,8 +1,8 @@
-From d079391b8ec8c85d8632495f5a1318a916f42b53 Mon Sep 17 00:00:00 2001
+From 6a3748c1df5e2f178deee1441186a1f368cfd1f0 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Sat, 11 Jul 2026 15:16:36 +0000
-Subject: [PATCH 20/22] input: usb_kbd_hid: don't fall back to control endpoint
- on a benign interrupt poll timeout
+Subject: input: usb_kbd_hid: don't fall back to control endpoint on a benign
+ interrupt poll timeout
 
 usb_kbd_probe()'s one-shot interrupt endpoint test poll treated any
 negative return, including -EAGAIN and -ETIMEDOUT, as proof the

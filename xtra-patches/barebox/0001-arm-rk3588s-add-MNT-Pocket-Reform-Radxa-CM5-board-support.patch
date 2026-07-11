@@ -1,15 +1,24 @@
-From 864349fc586030ff59c817689e55379c321511b8 Mon Sep 17 00:00:00 2001
+From d2c05f1d1cfa1161b4e76b4f119cd8cd28c6b1c6 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Wed, 8 Jul 2026 17:30:00 -0800
-Subject: [PATCH 01/14] arm: rk3588s: add MNT Pocket Reform RCM5 board support
+Subject: arm: rk3588s: add MNT Pocket Reform Radxa CM5 board support
 
 Add barebox board support for the Radxa CM5 (RK3588S2) in the MNT
 Pocket Reform CM4 carrier:
 
-- New DTS rk3588s-mnt-pocket-reform-rcm5.dts using rk3588s.dtsi
-- Add ENTRY_FUNCTION start_rk3588s_mnt_pocket_reform_rcm5 in lowlevel.c
-- New compatible string "mntre,pocket-reform-rcm5" and a board.c match
-  entry for it
+- New DTS rk3588s-mnt-pocket-reform-radxa-cm5.dts using rk3588s.dtsi
+- Add ENTRY_FUNCTION start_rk3588s_mnt_pocket_reform_radxa_cm5 in
+  lowlevel.c
+- New compatible string "mntre,pocket-reform-radxa-cm5" and a board.c
+  match entry for it
+
+Named after the module (Radxa CM5), not the carrier: the carrier this
+board plugs into is still RCM4, unchanged - MNT is expected to use
+"RCM5" as the name for their own future dedicated CM5 carrier board,
+so naming this after RCM4's naming pattern would collide with that.
+Naming by module instead matches the existing convention in this file
+(RCORE-based boards are named "_rcore"), and stays correct regardless
+of what MNT's own RCM5 carrier ends up being.
 
 The Radxa CM5 is a third-party module, not MNT's own RCORE module, and
 it is built around RK3588S, not the RK3588 the real RCORE-based Pocket
@@ -24,26 +33,28 @@ assumption that the carrier wires this up identically for both
 modules. Runtime behavior is unchanged by this: the probe function's
 model data is currently unused, so the RCORE boards and this one all
 ran identical probe logic before this change too.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---
  arch/arm/boards/mnt-reform2-rk3588/board.c    |   9 +
  arch/arm/boards/mnt-reform2-rk3588/lowlevel.c |   6 +-
  arch/arm/dts/Makefile                         |   3 +-
- .../dts/rk3588s-mnt-pocket-reform-rcm5.dts    | 168 ++++++++++++++++++
+ .../rk3588s-mnt-pocket-reform-radxa-cm5.dts   | 168 ++++++++++++++++++
  images/Makefile.rockchip                      |   1 +
  5 files changed, 185 insertions(+), 2 deletions(-)
- create mode 100644 arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
+ create mode 100644 arch/arm/dts/rk3588s-mnt-pocket-reform-radxa-cm5.dts
 
 diff --git a/arch/arm/boards/mnt-reform2-rk3588/board.c b/arch/arm/boards/mnt-reform2-rk3588/board.c
-index eeacf51eb0..2228105a13 100644
+index eeacf51eb0..69b73faeb7 100644
 --- a/arch/arm/boards/mnt-reform2-rk3588/board.c
 +++ b/arch/arm/boards/mnt-reform2-rk3588/board.c
 @@ -67,6 +67,11 @@ static const struct reform2_model reform_next_rk3588 = {
  	.shortname = "reform_next_rk3588",
  };
  
-+static const struct reform2_model pocket_reform_rcm5_rk3588s = {
++static const struct reform2_model pocket_reform_radxa_cm5_rk3588s = {
 +	.name = "MNT Pocket Reform with Radxa CM5 RK3588S2 Module",
-+	.shortname = "pocket_reform_rcm5_rk3588s",
++	.shortname = "pocket_reform_radxa_cm5_rk3588s",
 +};
 +
  static const struct of_device_id reform2_rk3588_of_match[] = {
@@ -54,22 +65,21 @@ index eeacf51eb0..2228105a13 100644
  		.data = &reform_next_rk3588,
  	},
 +	{
-+		.compatible = "mntre,pocket-reform-rcm5",
-+		.data = &pocket_reform_rcm5_rk3588s,
++		.compatible = "mntre,pocket-reform-radxa-cm5",
++		.data = &pocket_reform_radxa_cm5_rk3588s,
 +	},
  	{ /* sentinel */ },
  };
  
-
 diff --git a/arch/arm/boards/mnt-reform2-rk3588/lowlevel.c b/arch/arm/boards/mnt-reform2-rk3588/lowlevel.c
-index bc70d49bfa..f54178f962 100644
+index bc70d49bfa..d03f76fd89 100644
 --- a/arch/arm/boards/mnt-reform2-rk3588/lowlevel.c
 +++ b/arch/arm/boards/mnt-reform2-rk3588/lowlevel.c
 @@ -128,6 +128,7 @@ extern char __dtb_rk3588_mnt_reform2_start[];
  extern char __dtb_rk3588_mnt_reform2_dsi_start[];
  extern char __dtb_rk3588_mnt_pocket_reform_start[];
  extern char __dtb_rk3588_mnt_reform_next_start[];
-+extern char __dtb_rk3588s_mnt_pocket_reform_rcm5_start[];
++extern char __dtb_rk3588s_mnt_pocket_reform_radxa_cm5_start[];
  
  ENTRY_FUNCTION(start_rk3588_mnt_reform2, r0, r1, r2)
  {
@@ -78,12 +88,12 @@ index bc70d49bfa..f54178f962 100644
  }
  
 -
-+ENTRY_FUNCTION(start_rk3588s_mnt_pocket_reform_rcm5, r0, r1, r2)
++ENTRY_FUNCTION(start_rk3588s_mnt_pocket_reform_radxa_cm5, r0, r1, r2)
 +{
-+	start_rk3588_mnt_reform_common(__dtb_rk3588s_mnt_pocket_reform_rcm5_start);
++	start_rk3588_mnt_reform_common(__dtb_rk3588s_mnt_pocket_reform_radxa_cm5_start);
 +}
 diff --git a/arch/arm/dts/Makefile b/arch/arm/dts/Makefile
-index 6d86fb9b87..a31fcfcda1 100644
+index 6d86fb9b87..74b0f72937 100644
 --- a/arch/arm/dts/Makefile
 +++ b/arch/arm/dts/Makefile
 @@ -266,7 +266,8 @@ lwl-$(CONFIG_MACH_MNT_REFORM2_RK3588) += \
@@ -92,15 +102,15 @@ index 6d86fb9b87..a31fcfcda1 100644
  	rk3588-mnt-reform-next.dtb.o \
 -	rk3588-mnt-pocket-reform.dtb.o
 +	rk3588-mnt-pocket-reform.dtb.o \
-+	rk3588s-mnt-pocket-reform-rcm5.dtb.o
++	rk3588s-mnt-pocket-reform-radxa-cm5.dtb.o
  lwl-$(CONFIG_MACH_VARISCITE_DT8MCUSTOMBOARD_IMX8MP) += imx8mp-var-dart-dt8mcustomboard.dtb.o
  lwl-$(CONFIG_MACH_TQMA93XX) += imx93-tqma9352-mba93xxca.dtb.o \
  			       imx93-tqma9352-mba93xxla.dtb.o
-diff --git a/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts b/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
+diff --git a/arch/arm/dts/rk3588s-mnt-pocket-reform-radxa-cm5.dts b/arch/arm/dts/rk3588s-mnt-pocket-reform-radxa-cm5.dts
 new file mode 100644
-index 0000000000..d07ca945ce
+index 0000000000..219034f457
 --- /dev/null
-+++ b/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
++++ b/arch/arm/dts/rk3588s-mnt-pocket-reform-radxa-cm5.dts
 @@ -0,0 +1,168 @@
 +// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 +/*
@@ -118,7 +128,7 @@ index 0000000000..d07ca945ce
 +
 +/ {
 +	model = "MNT Pocket Reform with Radxa CM5 RK3588S2 Module";
-+	compatible = "mntre,pocket-reform-rcm5", "radxa,cm5", "rockchip,rk3588s";
++	compatible = "mntre,pocket-reform-radxa-cm5", "radxa,cm5", "rockchip,rk3588s";
 +
 +	aliases {
 +		ethernet0 = &gmac1;
@@ -271,14 +281,14 @@ index 0000000000..d07ca945ce
 +		<702000000>;
 +};
 diff --git a/images/Makefile.rockchip b/images/Makefile.rockchip
-index a79145be9e..ec936915d1 100644
+index a79145be9e..111a517af2 100644
 --- a/images/Makefile.rockchip
 +++ b/images/Makefile.rockchip
 @@ -58,3 +58,4 @@ $(call build_rockchip_image, CONFIG_MACH_MNT_REFORM2_RK3588, start_rk3588_mnt_re
  $(call build_rockchip_image, CONFIG_MACH_MNT_REFORM2_RK3588, start_rk3588_mnt_reform2_dsi, mnt-reform2-rk3588/sdram-init.bin, mnt-reform2-dsi-rk3588)
  $(call build_rockchip_image, CONFIG_MACH_MNT_REFORM2_RK3588, start_rk3588_mnt_pocket_reform, mnt-reform2-rk3588/sdram-init.bin, mnt-pocket-reform-rk3588)
  $(call build_rockchip_image, CONFIG_MACH_MNT_REFORM2_RK3588, start_rk3588_mnt_reform_next, mnt-reform2-rk3588/sdram-init.bin, mnt-reform-next-rk3588)
-+$(call build_rockchip_image, CONFIG_MACH_MNT_REFORM2_RK3588, start_rk3588s_mnt_pocket_reform_rcm5, mnt-reform2-rk3588/sdram-init.bin, mnt-pocket-reform-rcm5-rk3588s)
++$(call build_rockchip_image, CONFIG_MACH_MNT_REFORM2_RK3588, start_rk3588s_mnt_pocket_reform_radxa_cm5, mnt-reform2-rk3588/sdram-init.bin, mnt-pocket-reform-radxa-cm5-rk3588s)
 -- 
 2.43.0
 

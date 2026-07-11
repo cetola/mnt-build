@@ -1,8 +1,7 @@
-From f4a22567cea8d3cbbaff31d47a7905b1e37d7d06 Mon Sep 17 00:00:00 2001
+From e845a46b5f282ed829084b19ab53faa2a144b737 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Sat, 11 Jul 2026 18:17:23 +0000
-Subject: [PATCH 24/24] input: usb_kbd_hid: fix undersized HID report
- buffer/read
+Subject: input: usb_kbd_hid: fix undersized HID report buffer/read
 
 USB_KBD_BOOT_REPORT_SIZE was 8, the classic boot-protocol size
 (modifier, reserved, 6 keycodes) with no Report ID. This device's HID

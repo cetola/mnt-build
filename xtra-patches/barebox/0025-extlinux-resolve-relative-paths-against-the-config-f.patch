@@ -1,8 +1,7 @@
-From e4f930c6ddec665613b360791b60ac47242b6da1 Mon Sep 17 00:00:00 2001
+From 19419d7f62c0a8d7f091c748002d1bc562a953b2 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Sat, 11 Jul 2026 18:39:05 +0000
-Subject: [PATCH] extlinux: resolve relative paths against the config file's
- directory
+Subject: extlinux: resolve relative paths against the config file's directory
 
 A previous patch fixed absolute-path resolution for KERNEL/INITRD/FDT
 by changing entry->rootpath from dirname(abspath) (the extlinux.conf

@@ -1,8 +1,8 @@
-From f5ceed56c799281cde13a8dfbd1761e260c54afb Mon Sep 17 00:00:00 2001
+From d80fc3667a1ae07fd32f5fc4a8b614e976a20718 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Sat, 11 Jul 2026 15:17:11 +0000
-Subject: [PATCH 22/22] input: usb_kbd_hid: ignore non-keyboard reports from
- the composite HID device
+Subject: input: usb_kbd_hid: ignore non-keyboard reports from the composite
+ HID device
 
 This is a composite HID device: keyboard (Report ID 1), mouse (2),
 consumer control (3), and gamepad (4) are all multiplexed over the

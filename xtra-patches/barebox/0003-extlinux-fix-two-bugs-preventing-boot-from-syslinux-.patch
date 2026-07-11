@@ -1,14 +1,13 @@
-From a30a2258d57daed7db487a9a74d8f549bf42a7a2 Mon Sep 17 00:00:00 2001
+From 104cda7ea9c4d70e8a4732b8a3552f2e0295825a Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Wed, 8 Jul 2026 17:30:00 -0800
-Subject: [PATCH 03/14] extlinux: fix two bugs preventing boot from
- syslinux-style extlinux.conf
+Subject: extlinux: fix two bugs preventing boot from syslinux-style
+ extlinux.conf
 
 Allow for KERNEL or LINUX keywords.
 
 Also allow for absolute paths. Not sure the correct way to do this. Should
 probably allow both but will save that for another day.
-
 ---
  common/extlinux.c | 17 ++++++++++++-----
  1 file changed, 12 insertions(+), 5 deletions(-)

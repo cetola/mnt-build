@@ -1,7 +1,7 @@
-From 083414497af5e733dcdb8b7d3b638b5514cc9242 Mon Sep 17 00:00:00 2001
+From 698acc8c9c9c5e4f15188dede6554d240cf1f749 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Wed, 8 Jul 2026 17:30:00 -0800
-Subject: [PATCH] mnt-reform-defconfig: enable NVMe
+Subject: mnt-reform-defconfig: enable NVMe
 
 Enable CONFIG_BLK_DEV_NVME=y: the PCIe host driver was already
 present but the NVMe block driver was missing, so NVMe SSDs attached
@@ -27,3 +27,4 @@ index 27542a90af..85964a84e5 100644
  CONFIG_REBOOT_MODE=y
 -- 
 2.43.0
+

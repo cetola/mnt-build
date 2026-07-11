@@ -1,8 +1,7 @@
-From d1625d1b384a5ea5ec044be7a53d334c6745394f Mon Sep 17 00:00:00 2001
+From e5d635034119fcf402682c1222b06094e37f909f Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Wed, 8 Jul 2026 17:30:00 -0800
-Subject: [PATCH 09/14] mmu: fix flush_cacheable_pages off-by-one touching
- guard page
+Subject: mmu: fix flush_cacheable_pages off-by-one touching guard page
 
 flush_cacheable_pages() accumulates contiguous cacheable page ranges and
 tracks flush_end as the exclusive end of each range: the address of the
@@ -48,7 +47,7 @@ Observed on RK3588S (Radxa CM5) during NVMe/PCIe bring-up.
 
 Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---
- arch/arm/cpu/flush_cacheable_pages.h | 18 +++++-------------
+ arch/arm/cpu/flush_cacheable_pages.h | 18 ++++++------------
  1 file changed, 6 insertions(+), 12 deletions(-)
 
 diff --git a/arch/arm/cpu/flush_cacheable_pages.h b/arch/arm/cpu/flush_cacheable_pages.h
@@ -89,7 +88,6 @@ index a03e10810d..9a47f84583 100644
 -		dma_flush_range_end(flush_start, flush_end);
 +		dma_flush_range_end(flush_start, flush_end - 1);
  }
-
---
+-- 
 2.43.0
 

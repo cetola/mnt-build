@@ -1,8 +1,7 @@
-From a6d303df1cf68305205a6cbf65fea5cd68b0d4be Mon Sep 17 00:00:00 2001
+From 4cec162c2d24eb628a90719c5947daa3438efac1 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Wed, 8 Jul 2026 17:30:00 -0800
-Subject: [PATCH 06/14] spi: rockchip: restore bus_num alias lookup via
- DEVICE_ID_SINGLE
+Subject: spi: rockchip: restore bus_num alias lookup via DEVICE_ID_SINGLE
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -29,7 +28,8 @@ Note: the barebox spi shell command only supports bus-number lookup
 (spi_get_controller(bus)), not DT-path identification. The correct
 long-term fix is either to extend the spi command to accept device
 names, or to implement the RP2040 init in C using of_find_device_by_node().
-This patch is a pragmatic workaround for the MNT Pocket Reform RCM5.
+This patch is a pragmatic workaround for the MNT Pocket Reform with
+Radxa CM5.
 ---
  drivers/spi/spi-rockchip.c | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)

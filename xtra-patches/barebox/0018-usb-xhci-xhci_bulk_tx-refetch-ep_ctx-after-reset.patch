@@ -1,8 +1,8 @@
-From 7b6f523fa7698f77e666882e1de6e4b33e6b75ce Mon Sep 17 00:00:00 2001
+From 44e428b41bdc1b82b93d5e80dc65164131caa104 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Sat, 11 Jul 2026 15:15:45 +0000
-Subject: [PATCH 18/22] usb: xhci: xhci_bulk_tx: re-fetch ep_ctx after
- resetting a halted endpoint
+Subject: usb: xhci: xhci_bulk_tx: re-fetch ep_ctx after resetting a halted
+ endpoint
 
 xhci_bulk_tx() reads the endpoint's context once at the top of the
 function and reuses that same value both to decide whether to call

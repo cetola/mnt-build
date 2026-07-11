@@ -1,8 +1,7 @@
-From 005e6d01ed4f1a8ee1c1205b58d09b589d7ed9a0 Mon Sep 17 00:00:00 2001
+From 58a5a044cc71905a90d85167e1988e4f2cdb5ccf Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Wed, 8 Jul 2026 17:30:00 -0800
-Subject: [PATCH 05/14] defaultenv: mnt-reform2-rk3588: add disp-reset init
- script
+Subject: defaultenv: mnt-reform2-rk3588: add disp-reset init script
 
 Send the 'r' SPI command to the RP2040 system controller at barebox
 startup to pulse the panel hardware RESX line (PIN_DISP_RESET, GPIO 2)
@@ -33,7 +32,7 @@ Depends on: RP2040 firmware with 'r' command support
 
 Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---
- .../init/disp-reset                           | 21 +++++++++++++++++++++
+ .../init/disp-reset                           | 21 +++++++++++++++++++
  1 file changed, 21 insertions(+)
  create mode 100644 arch/arm/boards/mnt-reform2-rk3588/defaultenv-mnt-reform2-rk3588/init/disp-reset
 
@@ -64,6 +63,6 @@ index 0000000000..314cb76f18
 +msleep 50
 +spi -b 0 -c 0 -m 1 -f 1000000 -r 8
 +msleep 50
---
+-- 
 2.43.0
 

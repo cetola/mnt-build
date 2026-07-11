@@ -1,12 +1,12 @@
-From 1bf3a41a0951d2ecafa7da40dde129a9bb757b5e Mon Sep 17 00:00:00 2001
+From eb6fb681d4f9470b46f337890b50e9b0c640fdd8 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Thu, 9 Jul 2026 10:51:10 -0700
-Subject: [PATCH 10/14] mmu: fix arch_remap_range permission-strip order and
+Subject: mmu: fix arch_remap_range permission-strip order and
  flush_cacheable_pages zero-size underflow
 
 ---
- arch/arm/cpu/flush_cacheable_pages.h |  4 ++++
- arch/arm/cpu/mmu_64.c                |  6 ++++--
+ arch/arm/cpu/flush_cacheable_pages.h | 4 ++++
+ arch/arm/cpu/mmu_64.c                | 6 ++++--
  2 files changed, 8 insertions(+), 2 deletions(-)
 
 diff --git a/arch/arm/cpu/flush_cacheable_pages.h b/arch/arm/cpu/flush_cacheable_pages.h
@@ -44,7 +44,6 @@ index 7f38473079..23c2066e35 100644
  	return __arch_remap_range((uint64_t)virt_addr, phys_addr, (uint64_t)size, map_type, true);
  }
  
-
 -- 
 2.43.0
 

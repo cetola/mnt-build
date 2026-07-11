@@ -1,7 +1,7 @@
-From a51970cdb94fa4a8d8577613fe5bae870bf0dc20 Mon Sep 17 00:00:00 2001
+From c63b04d00d8df036f11cba37a004dc8c43b57faf Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Thu, 9 Jul 2026 22:48:40 +0000
-Subject: [PATCH] input: usb_kbd_hid: keep polling after a transient poll error
+Subject: input: usb_kbd_hid: keep polling after a transient poll error
 
 usb_kbd_poll() returned early on any poll error other than -EAGAIN.
 This skipped the poller_call_async() reschedule at exit, so the
@@ -32,7 +32,7 @@ Signed-off-by: Stephano Cetola <stephano@cetola.net>
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/drivers/input/usb_kbd_hid.c b/drivers/input/usb_kbd_hid.c
-index 4649e13cf9..5e4fa19341 100644
+index 5b41be4dc8..5e4fa19341 100644
 --- a/drivers/input/usb_kbd_hid.c
 +++ b/drivers/input/usb_kbd_hid.c
 @@ -108,7 +108,7 @@ static void usb_kbd_poll(void *arg)
@@ -44,7 +44,6 @@ index 4649e13cf9..5e4fa19341 100644
  	}
  
  	if (!memcmp(data->old, data->new, USB_KBD_BOOT_REPORT_SIZE))
-
 -- 
 2.43.0
 

@@ -1,8 +1,7 @@
-From cd1ca3832bc845a27382627b3da065d0ba5ddb65 Mon Sep 17 00:00:00 2001
+From 3daa08614390e994f49b53eb5662e4a149ef30d6 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Sat, 11 Jul 2026 15:16:18 +0000
-Subject: [PATCH 19/22] usb: xhci: wait a real interval for interrupt endpoint
- transfers
+Subject: usb: xhci: wait a real interval for interrupt endpoint transfers
 
 _xhci_submit_int_msg() ignored its interval parameter and always
 waited 0ms for the transfer to complete. With a 0ms wait,

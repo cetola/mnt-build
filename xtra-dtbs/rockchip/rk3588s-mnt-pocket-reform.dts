@@ -16,7 +16,7 @@
 #include "rk3588s-radxa-cm5.dtsi"
 
 / {
-	model = "MNT Pocket Reform with RCM5 RK3588S2 Module";
+	model = "MNT Pocket Reform with Radxa CM5 RK3588S2 Module";
 	compatible = "mntre,pocket-reform-rcore", "radxa,cm5", "rockchip,rk3588s";
 
 	aliases {

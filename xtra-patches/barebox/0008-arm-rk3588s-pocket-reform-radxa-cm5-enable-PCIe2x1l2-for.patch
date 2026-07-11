@@ -1,16 +1,12 @@
-From a65776f88fcb18215ae80417191703e8ad1b733c Mon Sep 17 00:00:00 2001
+From 6f97c3943f2dd24a0ac590c3ee62c1100af10ea9 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
-Date: Wed, 8 Jul 2026 17:30:00 -0800
-Subject: [PATCH 08/14] arm: rk3588s: pocket-reform-rcm5: enable PCIe2x1l2 for
- NVMe
-MIME-Version: 1.0
-Content-Type: text/plain; charset=UTF-8
-Content-Transfer-Encoding: 8bit
+Date: Sat, 11 Jul 2026 19:02:18 +0000
+Subject: arm: rk3588s: pocket-reform-radxa-cm5: enable PCIe2x1l2 for NVMe
 
 Enable the PCIe 2.0 x1 lane 2 controller (pcie@fe190000) and its
-combphy (combphy0_ps) on the MNT Pocket Reform RCM5 board. This is
-the PCIe lane connected to the M.2 NVMe slot on the Pocket Reform
-CM4 carrier.
+combphy (combphy0_ps) on the MNT Pocket Reform with Radxa CM5 board.
+This is the PCIe lane connected to the M.2 NVMe slot on the Pocket
+Reform CM4 carrier.
 
 - &combphy0_ps: status = "okay": combo PHY used by pcie2x1l2
 - &pcie2x1l2: reset-gpios = GPIO3_PD1 (ACTIVE_HIGH), pcie2_0_rst
@@ -23,14 +19,14 @@ CONFIG_BLK_DEV_NVME=y is already set in the defconfig (patch 0007).
 
 Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---
- arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts | 17 +++++++++++++++++
+ .../dts/rk3588s-mnt-pocket-reform-radxa-cm5.dts | 17 +++++++++++++++++
  1 file changed, 17 insertions(+)
 
-diff --git a/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts b/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
-index 7e1368ade2..a692a8acf3 100644
---- a/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
-+++ b/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
-@@ -153,6 +153,17 @@
+diff --git a/arch/arm/dts/rk3588s-mnt-pocket-reform-radxa-cm5.dts b/arch/arm/dts/rk3588s-mnt-pocket-reform-radxa-cm5.dts
+index 242664b26a..7b9fa6b301 100644
+--- a/arch/arm/dts/rk3588s-mnt-pocket-reform-radxa-cm5.dts
++++ b/arch/arm/dts/rk3588s-mnt-pocket-reform-radxa-cm5.dts
+@@ -153,6 +153,17 @@ &usb_host1_ohci {
  	status = "okay";
  };
  
@@ -48,7 +44,7 @@ index 7e1368ade2..a692a8acf3 100644
  /* pinctrl-0 is required or gpio_spi_probe() hangs waiting on GPIO
   * descriptors from banks that haven't been probed yet. */
  / {
-@@ -173,6 +184,12 @@
+@@ -173,6 +184,12 @@ spi_lpc: spi {
  };
  
  &pinctrl {
@@ -61,7 +57,6 @@ index 7e1368ade2..a692a8acf3 100644
  	spipins {
  		spi_lpc_pins: spi-lpc-pins {
  			rockchip,pins =
-
 -- 
 2.43.0
 

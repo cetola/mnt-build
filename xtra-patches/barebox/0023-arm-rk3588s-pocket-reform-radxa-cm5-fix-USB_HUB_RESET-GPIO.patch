@@ -1,15 +1,15 @@
-From 2d4f9728b437037d5a7d9b254547c1f80af0d6a2 Mon Sep 17 00:00:00 2001
+From ddcb7ab8328d9a63e23c65ee778ada26a98abf6e Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
-Date: Sat, 11 Jul 2026 18:16:59 +0000
-Subject: [PATCH 23/24] arm: rk3588s: pocket-reform-rcm5: fix USB_HUB_RESET
- GPIO for RCM5
+Date: Sat, 11 Jul 2026 19:04:11 +0000
+Subject: arm: rk3588s: pocket-reform-radxa-cm5: fix USB_HUB_RESET GPIO
 
 reform2_rk3588_probe() used a single hardcoded USB_HUB_RESET GPIO
 (GPIO4_B3, SoC GPIO 139) shared by every board matched to this probe
-function, including the RCM5 board added in a previous patch. That
-value is correct for MNT's own RCORE module but was never verified
-for the Radxa CM5 + RCM4 adapter combination - it was carried over on
-the unverified assumption the carrier wires both modules identically.
+function, including the Radxa CM5 board added in a previous patch.
+That value is correct for MNT's own RCORE module but was never
+verified for the Radxa CM5 + RCM4 adapter combination - it was carried
+over on the unverified assumption the carrier wires both modules
+identically.
 
 Traced this against schematics instead of continuing to guess:
 
@@ -30,7 +30,7 @@ Traced this against schematics instead of continuing to guess:
 
 Fix: give struct reform2_model a per-board usb_hub_reset_gpio field
 instead of one shared macro, so RCORE-family boards keep GPIO4_B3/139
-and the RCM5 board uses the correct GPIO1_B2/42. Verified on real
+and the Radxa CM5 board uses the correct GPIO1_B2/42. Verified on real
 hardware: RCM4's onboard hub now actually receives a reset pulse it
 previously never got, since the wrong GPIO was being toggled.
 
@@ -46,7 +46,7 @@ Signed-off-by: Stephano Cetola <stephano@cetola.net>
  1 file changed, 17 insertions(+), 5 deletions(-)
 
 diff --git a/arch/arm/boards/mnt-reform2-rk3588/board.c b/arch/arm/boards/mnt-reform2-rk3588/board.c
-index 2228105a13..c58032381e 100644
+index 69b73faeb7..9c8bee59c3 100644
 --- a/arch/arm/boards/mnt-reform2-rk3588/board.c
 +++ b/arch/arm/boards/mnt-reform2-rk3588/board.c
 @@ -10,10 +10,17 @@
@@ -65,7 +65,7 @@ index 2228105a13..c58032381e 100644
 +/* GPIO1_B2 = 1*32 + 8 + 2 = 42: on the CM4-standard connector Radxa CM5
 + * mates with, connector pin 44 ("GPIO10") drives RCM4's onboard hub reset,
 + * and CM5 wires that pin to GPIO1_B2, not GPIO4_B3 like RCORE. */
-+#define USB_HUB_RESET_RCM5 42
++#define USB_HUB_RESET_RADXA_CM5 42
  
  static int reform2_rk3588_probe(struct device *dev)
  {
@@ -108,10 +108,10 @@ index 2228105a13..c58032381e 100644
 +	.usb_hub_reset_gpio = USB_HUB_RESET_RCORE,
  };
  
- static const struct reform2_model pocket_reform_rcm5_rk3588s = {
+ static const struct reform2_model pocket_reform_radxa_cm5_rk3588s = {
  	.name = "MNT Pocket Reform with Radxa CM5 RK3588S2 Module",
- 	.shortname = "pocket_reform_rcm5_rk3588s",
-+	.usb_hub_reset_gpio = USB_HUB_RESET_RCM5,
+ 	.shortname = "pocket_reform_radxa_cm5_rk3588s",
++	.usb_hub_reset_gpio = USB_HUB_RESET_RADXA_CM5,
  };
  
  static const struct of_device_id reform2_rk3588_of_match[] = {

@@ -1,7 +1,7 @@
-From d58a1a1fd812df24c0ff8d844daabba754cded2b Mon Sep 17 00:00:00 2001
+From 6a9d11cb38aa5d69d3d70495c6b7de277fe102d7 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
-Date: Thu, 9 Jul 2026 18:15:31 +0000
-Subject: [PATCH 12/20] arm: rk3588s: pocket-reform-rcm5: enable xHCI keyboard
+Date: Sat, 11 Jul 2026 19:03:20 +0000
+Subject: arm: rk3588s: pocket-reform-radxa-cm5: enable xHCI keyboard
 
 Enable the xHCI USB host controller in barebox for the Radxa CM5
 (RK3588S2) board.
@@ -13,14 +13,14 @@ and the entire hub chain is unreachable.
 
 Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---
- .../dts/rk3588s-mnt-pocket-reform-rcm5.dts    | 9 +++++++++
+ arch/arm/dts/rk3588s-mnt-pocket-reform-radxa-cm5.dts | 9 +++++++++
  1 file changed, 9 insertions(+)
 
-diff --git a/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts b/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
-index f3e725a9a6..aba12897a2 100644
---- a/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
-+++ b/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
-@@ -208,6 +208,15 @@
+diff --git a/arch/arm/dts/rk3588s-mnt-pocket-reform-radxa-cm5.dts b/arch/arm/dts/rk3588s-mnt-pocket-reform-radxa-cm5.dts
+index bc701fe6e6..27ccf8ee1d 100644
+--- a/arch/arm/dts/rk3588s-mnt-pocket-reform-radxa-cm5.dts
++++ b/arch/arm/dts/rk3588s-mnt-pocket-reform-radxa-cm5.dts
+@@ -208,6 +208,15 @@ disp_en: disp-en {
  	};
  };
  
@@ -36,6 +36,6 @@ index f3e725a9a6..aba12897a2 100644
  &hdptxphy0 {
  	status = "okay";
  };
-
---
+-- 
 2.43.0
+
