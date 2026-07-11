@@ -1,0 +1,111 @@
+From e4f930c6ddec665613b360791b60ac47242b6da1 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Sat, 11 Jul 2026 18:39:05 +0000
+Subject: [PATCH] extlinux: resolve relative paths against the config file's
+ directory
+
+A previous patch fixed absolute-path resolution for KERNEL/INITRD/FDT
+by changing entry->rootpath from dirname(abspath) (the extlinux.conf
+file's own directory) to the partition mount root, and adding
+extlinux_make_abs() to branch on a leading '/'. That fixed absolute
+paths but broke the relative-path case: relative paths now resolve
+against the partition root instead of the config file's directory,
+which is the actual syslinux convention (and what the pre-existing
+code did before that fix, just without the absolute-path handling).
+
+For the common syslinux layout - config at /boot/extlinux/extlinux.conf
+referencing a same-directory kernel - a relative KERNEL line would
+resolve to <partition-root>/vmlinuz instead of
+<partition-root>/boot/extlinux/vmlinuz.
+
+Fix: track the config file's own directory separately (cfgdir, same
+dirname(abspath) the code used before) alongside rootpath, and have
+extlinux_make_abs() resolve absolute paths against rootpath and
+relative paths against cfgdir.
+
+Verified on real hardware two ways:
+- Regression: existing (absolute-path) extlinux.conf still boots
+  correctly.
+- Relative-path case: temporarily replaced KERNEL/INITRD/FDT with
+  ../-relative paths (config lives in /boot/extlinux/, files live in
+  /boot/) and confirmed it boots correctly - this specific test
+  distinguishes old vs. new behavior cleanly, since a same-directory
+  relative path would have resolved "correctly" under the old code
+  by coincidence given this system's file layout.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ common/extlinux.c | 18 ++++++++++++------
+ 1 file changed, 12 insertions(+), 6 deletions(-)
+
+diff --git a/common/extlinux.c b/common/extlinux.c
+index 3419b734d4..a7daf45fa8 100644
+--- a/common/extlinux.c
++++ b/common/extlinux.c
+@@ -18,6 +18,7 @@
+ struct extlinux_entry {
+ 	struct bootentry entry;
+ 	char *rootpath;
++	char *cfgdir;
+ 	char *label;
+ 	char *kernel;
+ 	char *initrd;
+@@ -54,11 +55,14 @@ static char *remove_param(const char *params, const char *param)
+ 	return result;
+ }
+ 
+-static char *extlinux_make_abs(const char *rootpath, const char *relpath)
++/* Absolute paths resolve against the partition root; relative paths resolve
++ * against the extlinux.conf file's own directory, per syslinux convention. */
++static char *extlinux_make_abs(const char *rootpath, const char *cfgdir,
++				const char *relpath)
+ {
+ 	if (relpath[0] == '/')
+ 		return basprintf("%s%s", rootpath, relpath);
+-	return basprintf("%s/%s", rootpath, relpath);
++	return basprintf("%s/%s", cfgdir, relpath);
+ }
+ 
+ static int extlinux_boot(struct bootentry *be, int verbose, int dryrun)
+@@ -74,18 +78,18 @@ static int extlinux_boot(struct bootentry *be, int verbose, int dryrun)
+ 	data.dryrun = max_t(int, dryrun, data.dryrun);
+ 	data.verbose = max(verbose, data.verbose);
+ 
+-	kernel_abs = extlinux_make_abs(e->rootpath, e->kernel);
++	kernel_abs = extlinux_make_abs(e->rootpath, e->cfgdir, e->kernel);
+ 	data.os_file = kernel_abs;
+ 
+ 	if (e->initrd) {
+-		initrd_abs = extlinux_make_abs(e->rootpath, e->initrd);
++		initrd_abs = extlinux_make_abs(e->rootpath, e->cfgdir, e->initrd);
+ 		data.initrd_file = initrd_abs;
+ 	}
+ 
+ 	if (e->fdt) {
+-		char *fdtdir = e->fdtdir ? : e->rootpath;
++		char *fdtdir = e->fdtdir ? : e->cfgdir;
+ 
+-		fdt_abs = extlinux_make_abs(fdtdir, e->fdt);
++		fdt_abs = extlinux_make_abs(e->rootpath, fdtdir, e->fdt);
+ 		data.oftree_file = fdt_abs;
+ 	}
+ 
+@@ -127,6 +131,7 @@ static void extlinux_entry_free(struct bootentry *be)
+ 		container_of(be, struct extlinux_entry, entry);
+ 
+ 	free(e->rootpath);
++	free(e->cfgdir);
+ 	free(e->label);
+ 	free(e->kernel);
+ 	free(e->initrd);
+@@ -172,6 +177,7 @@ static struct extlinux_entry *parse_extlinux_conf(const char *abspath,
+ 				entry = xzalloc(sizeof(*entry));
+ 				entry->label = xstrdup(val);
+ 				entry->rootpath = xstrdup(rootpath);
++				entry->cfgdir = dirname(xstrdup(abspath));
+ 			} else if (entry) {
+ 				break;
+ 			}
+-- 
+2.43.0
+
