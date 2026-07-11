@@ -9,8 +9,10 @@ image-gen*.log
 uboot*.log
 __pycache__/
 *.pyc
-headers-extmod
-image-gen
+/headers-extmod
+/image-gen
 scripts/arm-libs-staging/
-uboot/
-dtbs/
+/uboot/
+/barebox/
+barebox*.log
+/dtbs/

@@ -1,0 +1,30 @@
+From 698acc8c9c9c5e4f15188dede6554d240cf1f749 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Wed, 8 Jul 2026 17:30:00 -0800
+Subject: mnt-reform-defconfig: enable NVMe
+
+Enable CONFIG_BLK_DEV_NVME=y: the PCIe host driver was already
+present but the NVMe block driver was missing, so NVMe SSDs attached
+via PCIe were never enumerated.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ mnt-reform-defconfig | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mnt-reform-defconfig b/mnt-reform-defconfig
+index 27542a90af..85964a84e5 100644
+--- a/mnt-reform-defconfig
++++ b/mnt-reform-defconfig
+@@ -1071,7 +1071,7 @@ CONFIG_ROCKCHIP_PM_DOMAINS=y
+ #
+ # NVME Support
+ #
+-# CONFIG_BLK_DEV_NVME is not set
++CONFIG_BLK_DEV_NVME=y
+ # end of NVME Support
+ 
+ CONFIG_REBOOT_MODE=y
+-- 
+2.43.0
+

@@ -1,0 +1,47 @@
+From 161868f2595a63ccc1dfe93af7658033d53d165c Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Sat, 11 Jul 2026 15:15:29 +0000
+Subject: usb: xhci: reset_ep: fix misaligned pointer in Set TR Dequeue Pointer
+
+reset_ep() computed the Set TR Dequeue Pointer command's address by
+ORing the ring's cycle bit into ring->enqueue before passing it to
+xhci_trb_virt_to_dma(). That function does pointer arithmetic
+(trb - seg->trbs) that requires a properly aligned TRB pointer.
+Tainting the low bit first breaks that arithmetic whenever
+cycle_state==1, which happens naturally as the ring wraps, producing
+a garbage segment offset and tripping the BUG_ON in
+xhci_trb_virt_to_dma().
+
+Observed on hardware: this panicked intermittently during interrupt
+endpoint polling, correlating with the ring having wrapped at least
+once.
+
+abort_td() in this same file computes the same kind of address
+correctly: get the DMA address from the clean pointer first, then OR
+the cycle bit into the resulting integer. Make reset_ep() do the same.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/usb/host/xhci-ring.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/usb/host/xhci-ring.c b/drivers/usb/host/xhci-ring.c
+index 61f32c0ada..5992e8e063 100644
+--- a/drivers/usb/host/xhci-ring.c
++++ b/drivers/usb/host/xhci-ring.c
+@@ -525,8 +525,10 @@ static void reset_ep(struct usb_device *udev, int ep_index)
+ 	BUG_ON(TRB_TO_SLOT_ID(field) != udev->slot_id);
+ 	xhci_acknowledge_event(ctrl);
+ 
+-	addr = xhci_trb_virt_to_dma(ring->enq_seg,
+-		(void *)((uintptr_t)ring->enqueue | ring->cycle_state));
++	/* OR the cycle bit in after computing the DMA address, not before:
++	 * xhci_trb_virt_to_dma() needs an aligned pointer (see abort_td() below). */
++	addr = xhci_trb_virt_to_dma(ring->enq_seg, ring->enqueue);
++	addr |= ring->cycle_state;
+ 	xhci_queue_command(ctrl, addr, udev->slot_id, ep_index, TRB_SET_DEQ);
+ 	event = xhci_wait_for_event(ctrl, TRB_COMPLETION, XHCI_TIMEOUT_DEFAULT);
+ 	if (!event)
+-- 
+2.43.0
+

@@ -1,0 +1,55 @@
+From 3daa08614390e994f49b53eb5662e4a149ef30d6 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Sat, 11 Jul 2026 15:16:18 +0000
+Subject: usb: xhci: wait a real interval for interrupt endpoint transfers
+
+_xhci_submit_int_msg() ignored its interval parameter and always
+waited 0ms for the transfer to complete. With a 0ms wait,
+xhci_wait_for_event() does essentially a single instant check of the
+event ring and gives up if nothing is pending yet, then abort_td()
+cancels the just-queued transfer.
+
+The xHC polls the device autonomously at the endpoint's bInterval
+once a TRB is queued and the doorbell is rung, entirely in hardware,
+independent of how long the driver waits. A 0ms wait cancels that
+transfer before the hardware's own polling cycle ever gets a chance
+to complete, even when the device has real data ready to send. Every
+call was doomed to time out regardless of actual device state.
+
+Fix: wait the endpoint's own service interval instead of a fixed 0,
+giving the hardware's autonomous polling a real chance to succeed.
+
+Known limitation: interval is a raw copy of bInterval
+(usb_kbd_hid.c), which is only a literal millisecond count for
+Full-Speed/Low-Speed devices. High-Speed and SuperSpeed devices
+encode bInterval as a microframe exponent instead, as
+xhci_microframes_to_exponent() already accounts for elsewhere in this
+file. This keyboard's MCU is Full-Speed-only, so the raw value is
+correct here, but a High-Speed or SuperSpeed interrupt device on this
+same code path would get an incorrectly short wait.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/usb/host/xhci.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/usb/host/xhci.c b/drivers/usb/host/xhci.c
+index 27d4353597..ce823a7f5d 100644
+--- a/drivers/usb/host/xhci.c
++++ b/drivers/usb/host/xhci.c
+@@ -1109,8 +1109,11 @@ static int _xhci_submit_int_msg(struct usb_device *udev, unsigned long pipe,
+ 	 * interrupt endpoint is to be serviced, the xHC will consume
+ 	 * (at most) one TD. A TD (comprised of sg list entries) can
+ 	 * take several service intervals to transmit.
++	 *
++	 * timeout_ms=0 defeats that: it aborts before the xHC's own
++	 * autonomous poll cycle ever gets a chance to complete.
+ 	 */
+-	return xhci_bulk_tx(udev, pipe, length, buffer, 0);
++	return xhci_bulk_tx(udev, pipe, length, buffer, interval);
+ }
+ 
+ /**
+-- 
+2.43.0
+

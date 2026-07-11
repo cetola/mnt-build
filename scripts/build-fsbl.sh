@@ -97,6 +97,9 @@ fsbl_init_defaults() {
     BOOTLOADER_FILENAME="$(basename "${DTBPATH%.dtb}")-flash.bin"
   fi
 
+  # Patches subdir under xtra-patches/ (default u-boot for backward compat).
+  : "${FSBL_PATCHES_SUBDIR:=u-boot}"
+
   mkdir -p "$WORK_DIR" "$DOWNLOADS_DIR"
 
   if [[ -z "${FSBL_LOGFILE:-}" ]]; then
@@ -338,7 +341,12 @@ fsbl_checkout_source_repo() {
 }
 
 fsbl_apply_xtra_patches() {
-  local patches_dir="${FSBL_SCRIPT_DIR}/../xtra-patches/u-boot/${BOOTLOADER_PROJECT}"
+  local subdir="${FSBL_PATCHES_SUBDIR:-u-boot}"
+  local patches_dir="${FSBL_SCRIPT_DIR}/../xtra-patches/${subdir}/${BOOTLOADER_PROJECT}"
+  # Fall back to flat layout (no per-project subdir) if the project subdir doesn't exist.
+  if [[ ! -d "$patches_dir" ]]; then
+    patches_dir="${FSBL_SCRIPT_DIR}/../xtra-patches/${subdir}"
+  fi
   [[ -d "$patches_dir" ]] || return 0
   local patches=("$patches_dir"/*.patch)
   [[ -e "${patches[0]}" ]] || return 0

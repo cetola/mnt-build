@@ -1,0 +1,105 @@
+From 41e928337f22c13417b11c6cc910f0139430d1f5 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Sat, 11 Jul 2026 19:01:20 +0000
+Subject: arm: rk3588s: pocket-reform-radxa-cm5: add spi-gpio node for RP2040
+
+The SoM-to-RP2040 SPI lines on the CM4 carrier are general GPIO pins, not
+connected to any hardware Rockchip SPI controller. Add a spi-gpio (bitbang)
+master node with the four GPIO pins used on the RK3588S2:
+
+  SCK  = GPIO1_PB5
+  MISO = GPIO1_PC7
+  MOSI = GPIO4_PA2
+  CS   = GPIO1_PD4 (active low, handled by driver)
+
+pinctrl-0 is required on this node: barebox's pinctrl_config_one() calls
+of_device_ensure_probed() on the pinctrl node when applying the state,
+which guarantees the Rockchip pinctrl and all GPIO bank devices are
+probed before gpio_spi_probe() tries to get GPIO descriptors. Without
+it the GPIO banks may not yet exist and gpio_spi_probe() hangs. The pin
+group also sets each line to RK_FUNC_GPIO (IOMUX function 0), matching
+the Linux DTS for this board.
+
+No child device node is needed: the barebox 'spi' command talks to the
+controller by bus number directly. Adding a child with compatible =
+"mntre,lpc11u24" would cause deep probe to block indefinitely waiting for
+a matching barebox driver that does not exist. Pattern follows
+arch/arm/dts/stm32mp133c-mect1s.dtsi which uses spi-gpio with no children.
+
+Add spi0 alias so barebox assigns bus number 0 deterministically.
+
+Also enable CONFIG_DRIVER_SPI_GPIO=y in mnt-reform-defconfig: the DTS
+node above is inert without the driver it binds to, and the driver
+with no matching node does nothing either, so both halves belong in
+one patch.
+---
+ .../rk3588s-mnt-pocket-reform-radxa-cm5.dts   | 32 +++++++++++++++++++
+ mnt-reform-defconfig                          |  2 +-
+ 2 files changed, 33 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm/dts/rk3588s-mnt-pocket-reform-radxa-cm5.dts b/arch/arm/dts/rk3588s-mnt-pocket-reform-radxa-cm5.dts
+index 219034f457..242664b26a 100644
+--- a/arch/arm/dts/rk3588s-mnt-pocket-reform-radxa-cm5.dts
++++ b/arch/arm/dts/rk3588s-mnt-pocket-reform-radxa-cm5.dts
+@@ -21,6 +21,7 @@ aliases {
+ 		serial2 = &uart2;
+ 		mmc0 = &sdhci;
+ 		mmc1 = &sdmmc;
++		spi0 = &spi_lpc;
+ 	};
+ 
+ 	chosen {
+@@ -152,6 +153,37 @@ &usb_host1_ohci {
+ 	status = "okay";
+ };
+ 
++/* pinctrl-0 is required or gpio_spi_probe() hangs waiting on GPIO
++ * descriptors from banks that haven't been probed yet. */
++/ {
++	spi_lpc: spi {
++		compatible = "spi-gpio";
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		pinctrl-names = "default";
++		pinctrl-0 = <&spi_lpc_pins>;
++
++		sck-gpios  = <&gpio1 RK_PB5 GPIO_ACTIVE_HIGH>;
++		miso-gpios = <&gpio1 RK_PC7 GPIO_ACTIVE_HIGH>;
++		mosi-gpios = <&gpio4 RK_PA2 GPIO_ACTIVE_HIGH>;
++		cs-gpios   = <&gpio1 RK_PD4 GPIO_ACTIVE_HIGH>;
++		num-chipselects = <1>;
++	};
++};
++
++&pinctrl {
++	spipins {
++		spi_lpc_pins: spi-lpc-pins {
++			rockchip,pins =
++				<1 RK_PB5 RK_FUNC_GPIO &pcfg_pull_none>,
++				<1 RK_PC7 RK_FUNC_GPIO &pcfg_pull_none>,
++				<4 RK_PA2 RK_FUNC_GPIO &pcfg_pull_none>,
++				<1 RK_PD4 RK_FUNC_GPIO &pcfg_pull_none>;
++		};
++	};
++};
++
+ /* Override the barebox rk3588.dtsi SCMI rates to also set SPLL to 702 MHz,
+  * matching what lowlevel.c's rk3588_spll_set_rate() configures at PBL time. */
+ &scmi_clk {
+diff --git a/mnt-reform-defconfig b/mnt-reform-defconfig
+index 045856e980..27542a90af 100644
+--- a/mnt-reform-defconfig
++++ b/mnt-reform-defconfig
+@@ -685,7 +685,7 @@ CONFIG_NET_USB_RTL8152=y
+ #
+ CONFIG_SPI=y
+ # CONFIG_SPI_MEM is not set
+-# CONFIG_DRIVER_SPI_GPIO is not set
++CONFIG_DRIVER_SPI_GPIO=y
+ # CONFIG_DRIVER_SPI_LITEX_SPIFLASH is not set
+ CONFIG_SPI_ROCKCHIP=y
+ # end of SPI drivers
+-- 
+2.43.0
+

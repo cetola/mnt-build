@@ -1,0 +1,51 @@
+From 6a3748c1df5e2f178deee1441186a1f368cfd1f0 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Sat, 11 Jul 2026 15:16:36 +0000
+Subject: input: usb_kbd_hid: don't fall back to control endpoint on a benign
+ interrupt poll timeout
+
+usb_kbd_probe()'s one-shot interrupt endpoint test poll treated any
+negative return, including -EAGAIN and -ETIMEDOUT, as proof the
+interrupt endpoint was broken, permanently switching do_poll to the
+control endpoint fallback for the rest of the session.
+
+At probe time nothing has been pressed yet, so -EAGAIN/-ETIMEDOUT
+from that one-shot test is the expected, normal result, not a sign of
+a broken endpoint. Since this check ran unconditionally on any
+negative return, it triggered on essentially every boot.
+
+The control endpoint fallback cannot work on this device: the
+keyboard firmware's GET_REPORT handler (pocket-reform-keyboard-fw) is
+an unimplemented stub that always returns 0, so control endpoint
+polling can never see live data. Falling back to it on a benign
+timeout meant the keyboard was routed to a dead path on essentially
+every boot, before real interrupt polling was ever given a chance.
+
+Fix: only fall back on a genuine error, not -EAGAIN/-ETIMEDOUT.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/input/usb_kbd_hid.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/input/usb_kbd_hid.c b/drivers/input/usb_kbd_hid.c
+index 5e4fa19341..93b55bf72f 100644
+--- a/drivers/input/usb_kbd_hid.c
++++ b/drivers/input/usb_kbd_hid.c
+@@ -194,10 +194,11 @@ static int usb_kbd_probe(struct usb_device *usbdev,
+ 	data->intpktsize = min(usb_maxpacket(usbdev, data->intpipe),
+ 			       USB_KBD_BOOT_REPORT_SIZE);
+ 	data->intinterval = data->ep->bInterval;
+-	/* test polling via interrupt endpoint */
++	/* -EAGAIN/-ETIMEDOUT here just mean nothing's arrived yet at probe
++	 * time, not a broken endpoint; only a real error should fall back. */
+ 	data->do_poll = usb_kbd_int_poll;
+ 	ret = data->do_poll(data);
+-	if (ret < 0) {
++	if (ret < 0 && ret != -EAGAIN && ret != -ETIMEDOUT) {
+ 		/* fall back to polling via control enpoint */
+ 		data->do_poll = usb_kbd_cnt_poll;
+ 		usb_set_idle(usbdev,
+-- 
+2.43.0
+

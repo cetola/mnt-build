@@ -1,0 +1,57 @@
+From 5b4ce082ab4f57a8a56de9b5ea30241fddd688df Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Wed, 8 Jul 2026 17:30:00 -0800
+Subject: defaultenv: mnt-reform2-rk3588: add bootsource fallback boot script
+
+barebox's extlinux scanner has no scan_disk handler and cannot scan an
+MBR disk cdev directly. It only works when given a filesystem partition
+cdev. bootsource_of_cdev_find() returns the disk cdev (e.g. mmc1) and
+the extlinux provider finds zero entries, leaving auto-boot stuck.
+
+Add /env/boot/bootsource to the mnt-reform2-rk3588 default environment.
+This script is the fallback for the "bootsource" boot target. The DTS
+chosen node maps barebox,bootsource-mmc0/1 to &sdhci/&sdmmc, enabling
+bootsource_of_alias_xlate() to translate the BROM hardware instance to
+the correct barebox device number ($bootsource_instance). The script
+then boots mmc${bootsource_instance}.0 directly, bypassing the extlinux
+scan_disk limitation.
+
+On the Radxa CM5 + RCM4 combination this bootsource-detection branch is
+unreachable: barebox is loaded by the Rockchip miniloader + TF-A and
+enters at EL2, and rk3588_barebox_entry() only captures the BROM's
+boot-source scratch register when current_el == 3, so $bootsource is
+always "unknown" there. The Radxa CM5 module also has no eMMC, so the
+mmc0.0 fallback is a no-op on this board too. In practice this script
+always boots mmc1.0 (SD) on this board. The bootsource-detection logic
+stays meaningful for other boards sharing this defaultenv that enter
+at EL3 and do have onboard eMMC.
+
+Use `&&` short-circuit chaining instead of if/then to avoid the
+barebox hush false-condition bug: for `if [ cond ]; then cmd; fi`,
+run_list_real reports the if-statement's exit status as 0 (success)
+whenever the condition is false, even though the then-branch never
+ran, so bootscript_boot would report a successful boot despite
+nothing having booted. `[ cond ] && cmd` instead short-circuits to
+the test's own exit status when the condition is false, correctly
+propagating failure.
+---
+ .../defaultenv-mnt-reform2-rk3588/boot/bootsource          | 7 +++++++
+ 1 file changed, 7 insertions(+)
+ create mode 100644 arch/arm/boards/mnt-reform2-rk3588/defaultenv-mnt-reform2-rk3588/boot/bootsource
+
+diff --git a/arch/arm/boards/mnt-reform2-rk3588/defaultenv-mnt-reform2-rk3588/boot/bootsource b/arch/arm/boards/mnt-reform2-rk3588/defaultenv-mnt-reform2-rk3588/boot/bootsource
+new file mode 100644
+index 0000000000..c790171684
+--- /dev/null
++++ b/arch/arm/boards/mnt-reform2-rk3588/defaultenv-mnt-reform2-rk3588/boot/bootsource
+@@ -0,0 +1,7 @@
++#!/bin/sh
++# Boot from the first partition of the bootsource MMC device.
++#
++# The mmc0.0 fallback below is a no-op on this board (no eMMC) but is
++# needed for other boards sharing this defaultenv — don't remove it.
++[ "$bootsource" = "mmc" ] && boot mmc${bootsource_instance}.0
++boot mmc1.0 || boot mmc0.0
+-- 
+2.43.0
+

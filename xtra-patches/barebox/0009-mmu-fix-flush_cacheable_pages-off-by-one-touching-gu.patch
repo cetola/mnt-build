@@ -1,0 +1,93 @@
+From e5d635034119fcf402682c1222b06094e37f909f Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Wed, 8 Jul 2026 17:30:00 -0800
+Subject: mmu: fix flush_cacheable_pages off-by-one touching guard page
+
+flush_cacheable_pages() accumulates contiguous cacheable page ranges and
+tracks flush_end as the exclusive end of each range: the address of the
+first page BEYOND the last cacheable block, which equals the start
+address of the next block. The flush_end == addr extension test relies
+on this invariant holding everywhere flush_end is assigned.
+
+Two places break the invariant.
+
+First: when a non-cacheable page (e.g. the stack guard page) creates a
+gap in the middle of a flush region followed by more cacheable pages,
+dma_flush_range_end(flush_start, flush_end) is called just before
+starting a new range. dma_flush_range_end() treats its second argument
+as an inclusive end and calls v8_flush_dcache_range(start, end + 1), so
+the exclusive flush_end becomes an exclusive bound of end+1. This causes
+dc civac to execute at flush_end itself: the first address of the gap.
+On ARMv8 (Cortex-A55/A76), dc civac requires write permission to the
+VA. When flush_end equals the guard-page address (MAP_FAULT, no
+access), the instruction raises a synchronous Data Abort that barebox's
+fault handler reports as "stack overflow" because FAR matches the guard
+page.
+
+Second: flush_end is clamped against region_end via
+min(flush_end + block_size, region_end), in both the range-extension
+branch and right after starting a new range. region_end is computed as
+PAGE_ALIGN(region_start + size) - 1, an inclusive last-address value.
+Because block_size is always a multiple of PAGE_SIZE (4K/2M/1G
+translation granules) and region_end + 1 is always page-aligned, this
+clamp can only ever land exactly on region_end when a cacheable run
+reaches the end of the requested region -- the ordinary case for most
+flush calls. When that happens, flush_end silently holds an inclusive
+value instead of the exclusive one it holds everywhere else.
+
+Fix both by keeping flush_end consistently exclusive: clamp against
+region_end + 1 (not region_end) at both extension sites, and subtract
+1 to convert to the inclusive end dma_flush_range_end expects at both
+call sites. With flush_end always exclusive, both call sites can apply
+the same -1 conversion unconditionally and get a correct inclusive end
+regardless of whether flush_end came from range extension or from
+hitting the region boundary.
+
+Observed on RK3588S (Radxa CM5) during NVMe/PCIe bring-up.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ arch/arm/cpu/flush_cacheable_pages.h | 18 ++++++------------
+ 1 file changed, 6 insertions(+), 12 deletions(-)
+
+diff --git a/arch/arm/cpu/flush_cacheable_pages.h b/arch/arm/cpu/flush_cacheable_pages.h
+index a03e10810d..9a47f84583 100644
+--- a/arch/arm/cpu/flush_cacheable_pages.h
++++ b/arch/arm/cpu/flush_cacheable_pages.h
+@@ -51,27 +51,21 @@ static void flush_cacheable_pages(void *start, size_t size)
+ 			continue;
+ 
+ 		if (flush_end == addr) {
+-			/*
+-			 * While it's safe to flush the whole block_size,
+-			 * it's unnecessary time waste to go beyond region_end.
+-			 */
+-			flush_end = min(flush_end + block_size, region_end);
++			/* region_end is inclusive, flush_end is exclusive: clamp to region_end + 1. */
++			flush_end = min(flush_end + block_size, region_end + 1);
+ 			continue;
+ 		}
+ 
+-		/*
+-		 * We don't have a previous contiguous flush area to append to.
+-		 * If we recorded any area before, let's flush it now
+-		 */
++		/* flush_end is exclusive; dma_flush_range_end() wants an inclusive end. */
+ 		if (flush_start != ~0UL)
+-			dma_flush_range_end(flush_start, flush_end);
++			dma_flush_range_end(flush_start, flush_end - 1);
+ 
+ 		/* and start the new contiguous flush area with this page */
+ 		flush_start = addr;
+-		flush_end = min(flush_start + block_size, region_end);
++		flush_end = min(flush_start + block_size, region_end + 1);
+ 	}
+ 
+ 	/* The previous loop won't flush the last cached range, so do it here */
+ 	if (flush_start != ~0UL)
+-		dma_flush_range_end(flush_start, flush_end);
++		dma_flush_range_end(flush_start, flush_end - 1);
+ }
+-- 
+2.43.0
+

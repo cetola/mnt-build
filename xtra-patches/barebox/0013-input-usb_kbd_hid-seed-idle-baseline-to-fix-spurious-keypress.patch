@@ -1,0 +1,79 @@
+From 696d604637ee39b6812cbf0024cfb884d8cc0f7d Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Thu, 9 Jul 2026 18:47:57 +0000
+Subject: input: usb_kbd_hid: seed idle baseline to fix spurious keypress at
+ connect
+
+data->old is zeroed by xzalloc. usb_kbd_poll() detects keypresses by
+diffing data->new against data->old, so the first real report seen
+after probe gets diffed against that zeroed state instead of against
+the device's actual idle state. This keyboard's first report contains
+nonzero bytes even when no key is pressed (observed: 01 03 44 00 45
+00 36 00), which read against a zeroed baseline as a fresh keypress:
+0x36 (HID comma) at byte [6] came out as KEY_COMMA permanently
+pressed, auto-repeat flooding the barebox prompt.
+
+Fix by copying the first captured report into data->old before
+registering the poller, so only real transitions from that point on
+produce key events.
+
+Also request report protocol (1) instead of boot protocol (0) in
+SET_PROTOCOL. The keyboard's HID interface descriptor declares
+HID_ITF_PROTOCOL_NONE (pocket-reform-keyboard-fw usb_descriptors.c),
+so it was never a boot-protocol-compatible device to begin with, and
+its firmware sends the same Report-ID-prefixed layout regardless of
+the negotiated protocol (main.c always calls
+tud_hid_keyboard_report(REPORT_ID_KEYBOARD, ...) unconditionally).
+Requesting boot protocol was a mismatched request the device happened
+to accept without complaint. This keeps the request consistent with
+what the device actually declares and sends.
+
+Scan the full [3:7] keycode window in the key-released loop instead
+of stopping at the first zero byte. This keyboard's firmware compacts
+pressed keycodes to the front of the report and zero-pads the rest,
+so the two are normally equivalent, but scanning unconditionally
+removes the driver's dependency on that packing behavior holding for
+every report.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/input/usb_kbd_hid.c | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/input/usb_kbd_hid.c b/drivers/input/usb_kbd_hid.c
+index 52c11b61bf..5b41be4dc8 100644
+--- a/drivers/input/usb_kbd_hid.c
++++ b/drivers/input/usb_kbd_hid.c
+@@ -157,8 +157,6 @@ static void usb_kbd_poll(void *arg)
+ 			if (gone) {
+ 				input_report_key_event(&data->input, usb_kbd_keycode[pressed_old], 0);
+ 			}
+-		} else {
+-			break;
+ 		}
+ 	}
+ 
+@@ -176,7 +174,8 @@ static int usb_kbd_probe(struct usb_device *usbdev,
+ 	struct usb_kbd_pdata *data;
+ 
+ 	dev_info(&usbdev->dev, "USB HID keyboard found\n");
+-	ret = usb_set_protocol(usbdev, iface->desc.bInterfaceNumber, 0);
++	/* Report protocol matches what this device's descriptor declares. */
++	ret = usb_set_protocol(usbdev, iface->desc.bInterfaceNumber, 1);
+ 	if (ret < 0)
+ 		return ret;
+ 
+@@ -214,6 +213,10 @@ static int usb_kbd_probe(struct usb_device *usbdev,
+ 	} else
+ 		dev_info(&usbdev->dev, "poll keyboard via int ep\n");
+ 
++	/* data->old starts zeroed; seed it from the real idle report so the
++	 * first poll doesn't read nonzero idle bytes as a keypress. */
++	memcpy(data->old, data->new, USB_KBD_BOOT_REPORT_SIZE);
++
+ 	data->input.parent = &usbdev->dev;
+ 	ret = input_device_register(&data->input);
+ 	if (ret) {
+-- 
+2.43.0
+

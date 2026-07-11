@@ -1,0 +1,62 @@
+From 6f97c3943f2dd24a0ac590c3ee62c1100af10ea9 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Sat, 11 Jul 2026 19:02:18 +0000
+Subject: arm: rk3588s: pocket-reform-radxa-cm5: enable PCIe2x1l2 for NVMe
+
+Enable the PCIe 2.0 x1 lane 2 controller (pcie@fe190000) and its
+combphy (combphy0_ps) on the MNT Pocket Reform with Radxa CM5 board.
+This is the PCIe lane connected to the M.2 NVMe slot on the Pocket
+Reform CM4 carrier.
+
+- &combphy0_ps: status = "okay": combo PHY used by pcie2x1l2
+- &pcie2x1l2: reset-gpios = GPIO3_PD1 (ACTIVE_HIGH), pcie2_0_rst
+  pinctrl group, status = "okay"
+- pcie2_0_rst pinctrl: sets GPIO3_PD1 to GPIO function (RK_FUNC_GPIO)
+
+GPIO and pinctrl match the Linux DTS for this board
+(rk3588s-mnt-pocket-reform.dts), marked "checked, correct" there.
+CONFIG_BLK_DEV_NVME=y is already set in the defconfig (patch 0007).
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ .../dts/rk3588s-mnt-pocket-reform-radxa-cm5.dts | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/arch/arm/dts/rk3588s-mnt-pocket-reform-radxa-cm5.dts b/arch/arm/dts/rk3588s-mnt-pocket-reform-radxa-cm5.dts
+index 242664b26a..7b9fa6b301 100644
+--- a/arch/arm/dts/rk3588s-mnt-pocket-reform-radxa-cm5.dts
++++ b/arch/arm/dts/rk3588s-mnt-pocket-reform-radxa-cm5.dts
+@@ -153,6 +153,17 @@ &usb_host1_ohci {
+ 	status = "okay";
+ };
+ 
++&combphy0_ps {
++	status = "okay";
++};
++
++&pcie2x1l2 {
++	reset-gpios = <&gpio3 RK_PD1 GPIO_ACTIVE_HIGH>;
++	pinctrl-names = "default";
++	pinctrl-0 = <&pcie2_0_rst>;
++	status = "okay";
++};
++
+ /* pinctrl-0 is required or gpio_spi_probe() hangs waiting on GPIO
+  * descriptors from banks that haven't been probed yet. */
+ / {
+@@ -173,6 +184,12 @@ spi_lpc: spi {
+ };
+ 
+ &pinctrl {
++	pcie2 {
++		pcie2_0_rst: pcie2-0-rst {
++			rockchip,pins = <3 RK_PD1 RK_FUNC_GPIO &pcfg_pull_none>;
++		};
++	};
++
+ 	spipins {
+ 		spi_lpc_pins: spi-lpc-pins {
+ 			rockchip,pins =
+-- 
+2.43.0
+

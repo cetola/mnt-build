@@ -1,0 +1,49 @@
+From eb6fb681d4f9470b46f337890b50e9b0c640fdd8 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Thu, 9 Jul 2026 10:51:10 -0700
+Subject: mmu: fix arch_remap_range permission-strip order and
+ flush_cacheable_pages zero-size underflow
+
+---
+ arch/arm/cpu/flush_cacheable_pages.h | 4 ++++
+ arch/arm/cpu/mmu_64.c                | 6 ++++--
+ 2 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/cpu/flush_cacheable_pages.h b/arch/arm/cpu/flush_cacheable_pages.h
+index 9a47f84583..97aee5a527 100644
+--- a/arch/arm/cpu/flush_cacheable_pages.h
++++ b/arch/arm/cpu/flush_cacheable_pages.h
+@@ -28,6 +28,10 @@ static void flush_cacheable_pages(void *start, size_t size)
+ 	size_t block_size;
+ 	mmu_addr_t *ttb;
+ 
++	/* size=0 would compute region_end = PAGE_ALIGN(0)-1 = 0xFFFF...FFFF */
++	if (!size)
++		return;
++
+ 	region_start = PAGE_ALIGN_DOWN((ulong)start);
+ 	region_end = PAGE_ALIGN(region_start + size) - 1;
+ 
+diff --git a/arch/arm/cpu/mmu_64.c b/arch/arm/cpu/mmu_64.c
+index 7f38473079..23c2066e35 100644
+--- a/arch/arm/cpu/mmu_64.c
++++ b/arch/arm/cpu/mmu_64.c
+@@ -286,11 +286,13 @@ static void early_remap_range(uint64_t addr, size_t size, maptype_t map_type)
+ 
+ int arch_remap_range(void *virt_addr, phys_addr_t phys_addr, size_t size, maptype_t map_type)
+ {
+-	map_type = arm_mmu_maybe_skip_permissions(map_type);
+-
++	/* Check against the original map_type: permission-stripping below can
++	 * turn MAP_CACHED into MAP_CACHED_RWX, which would look incompatible. */
+ 	if (!maptype_is_compatible(map_type, MAP_CACHED))
+ 		flush_cacheable_pages(virt_addr, size);
+ 
++	map_type = arm_mmu_maybe_skip_permissions(map_type);
++
+ 	return __arch_remap_range((uint64_t)virt_addr, phys_addr, (uint64_t)size, map_type, true);
+ }
+ 
+-- 
+2.43.0
+

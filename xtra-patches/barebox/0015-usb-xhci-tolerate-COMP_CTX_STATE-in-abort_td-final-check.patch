@@ -1,0 +1,77 @@
+From a8d9338f4f6b2ecc17cdb82128b89741884c520b Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Fri, 10 Jul 2026 00:41:01 +0000
+Subject: usb: xhci: tolerate COMP_CTX_STATE in abort_td's final completion
+ check
+
+abort_td() issues a Stop Ring command followed by a Set TR Dequeue
+Pointer command to cancel a pending transfer. The completion check
+for the Stop Ring command already tolerates COMP_CTX_STATE as an
+acceptable outcome alongside COMP_SUCCESS. The completion check for
+the following Set TR Dequeue Pointer command did not, and hit its
+BUG_ON when the endpoint had transitioned to a state where that
+command legitimately returns COMP_CTX_STATE instead.
+
+Observed on hardware: this panicked during normal interrupt endpoint
+polling, on the second poll after the first one's timeout triggered
+this same abort path successfully.
+
+Fix: apply the same tolerance already used for the earlier check in
+this function, and log when it happens (dev_dbg) purely for future
+diagnostic visibility - no behavior change.
+
+Verified this is safe, not just tolerated blind: Linux's xhci-hcd
+tracks its own software dequeue pointer for a transfer ring
+(ep_ring->dequeue) and only updates it after confirming the completed
+Set TR Dequeue Pointer command's target matches what it queued -
+otherwise it warns and leaves that tracking untouched, but still
+proceeds with TD cleanup and restarts the ring regardless (Linux does
+not halt or error out to the caller over this completion code
+either). That extra care exists specifically to protect Linux's own
+software dequeue tracking from going stale.
+
+This driver has no equivalent tracking to protect: grepping every
+read/write of a transfer ring's ->dequeue/->deq_seg fields in this
+driver shows they're written once at ring allocation and never read
+again - inc_deq(), the only function that advances a ring's dequeue
+pointer, is called exactly once in the whole driver, only for
+ctrl->event_ring (a different ring entirely), never for a per-endpoint
+transfer ring. The fields that are actually live for a transfer ring
+(->enqueue, ->cycle_state) are maintained entirely by this driver's
+own enqueue-side bookkeeping (inc_enq()) and are completely
+unaffected by what this completion code says either way. So the
+specific risk this tolerance was flagged for - the driver silently
+assuming the dequeue pointer moved somewhere it didn't - cannot
+happen here: nothing in this driver reads that field for a transfer
+ring to have a wrong assumption about in the first place. Linux's
+more careful handling solves a problem that doesn't exist in this
+codebase's design, rather than being a protection this driver is
+missing.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/usb/host/xhci-ring.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/usb/host/xhci-ring.c b/drivers/usb/host/xhci-ring.c
+index 00344e8074..9707988c3b 100644
+--- a/drivers/usb/host/xhci-ring.c
++++ b/drivers/usb/host/xhci-ring.c
+@@ -594,9 +594,12 @@ static void abort_td(struct usb_device *udev, int ep_index)
+ 	if (!event)
+ 		return;
+ 
++	comp = GET_COMP_CODE(le32_to_cpu(event->event_cmd.status));
++	if (comp == COMP_CTX_STATE)
++		dev_dbg(ctrl->dev, "abort_td: Set TR Dequeue Pointer got CTX_STATE, endpoint was already in the target state\n");
+ 	BUG_ON(TRB_TO_SLOT_ID(le32_to_cpu(event->event_cmd.flags))
+-		!= udev->slot_id || GET_COMP_CODE(le32_to_cpu(
+-		event->event_cmd.status)) != COMP_SUCCESS);
++		!= udev->slot_id || (comp != COMP_SUCCESS && comp
++		!= COMP_CTX_STATE));
+ 	xhci_acknowledge_event(ctrl);
+ }
+ 
+-- 
+2.43.0
+

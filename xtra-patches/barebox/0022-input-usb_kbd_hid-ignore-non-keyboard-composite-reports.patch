@@ -1,0 +1,61 @@
+From d80fc3667a1ae07fd32f5fc4a8b614e976a20718 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Sat, 11 Jul 2026 15:17:11 +0000
+Subject: input: usb_kbd_hid: ignore non-keyboard reports from the composite
+ HID device
+
+This is a composite HID device: keyboard (Report ID 1), mouse (2),
+consumer control (3), and gamepad (4) are all multiplexed over the
+same interrupt endpoint (pocket-reform-keyboard-fw
+usb_descriptors.h). usb_kbd_poll() never checked the Report ID before
+scanning bytes [3:7] as keycodes, so a mouse or consumer-control
+report interleaved with a real keypress read as all-zero keycode
+bytes, i.e. "no keys pressed", releasing the key almost immediately
+after it was detected.
+
+Fix: ignore any report that isn't Report ID 1 before scanning it.
+
+Also replace the long-commented-out raw printk dump of the report
+bytes with a proper dev_dbg() using the same format.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/input/usb_kbd_hid.c | 19 +++++++++----------
+ 1 file changed, 9 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/input/usb_kbd_hid.c b/drivers/input/usb_kbd_hid.c
+index d6cb98ac37..658dc1dbb9 100644
+--- a/drivers/input/usb_kbd_hid.c
++++ b/drivers/input/usb_kbd_hid.c
+@@ -110,19 +110,18 @@ static void usb_kbd_poll(void *arg)
+ 		goto exit;
+ 	}
+ 
++	/* Composite device: keyboard/mouse/consumer/gamepad share this
++	 * endpoint via Report ID. Ignore anything that isn't keyboard (ID 1). */
++	if (data->new[0] != 1)
++		goto exit;
++
+ 	if (!memcmp(data->old, data->new, USB_KBD_BOOT_REPORT_SIZE))
+ 		goto exit;
+ 
+-	/*printk(KERN_ALERT "%s: %02x %02x %02x %02x %02x %02x %02x %02x\n", __func__,
+-				 data->new[0], // 0x01
+-				 data->new[1],
+-				 data->new[2],
+-				 data->new[3], // first key
+-				 data->new[4],
+-				 data->new[5],
+-				 data->new[6],
+-				 data->new[7]
+-				 );*/
++	dev_dbg(&usbdev->dev, "ret=%d change: %02x %02x %02x %02x %02x %02x %02x %02x\n",
++		ret,
++		data->new[0], data->new[1], data->new[2], data->new[3],
++		data->new[4], data->new[5], data->new[6], data->new[7]);
+ 
+ 	for (i = 3; i <= 7; i++) {
+ 		uint8_t pressed_new = data->new[i];
+-- 
+2.43.0
+

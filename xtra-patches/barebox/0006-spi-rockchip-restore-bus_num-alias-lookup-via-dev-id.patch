@@ -1,0 +1,68 @@
+From 63fc76f64dd852b3e6bb5fdf5459e0d6a52734b6 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Wed, 8 Jul 2026 17:30:00 -0800
+Subject: spi: rockchip: restore bus_num alias lookup via dev->id
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+ctlr->bus_num = pdev->id was commented out when this driver was
+ported from Linux (pdev doesn't exist in barebox's device model here,
+only dev - the port left this line unresolved rather than translating
+it). With bus_num left at its kzalloc default of 0,
+spi_register_controller() only runs the alias lookup when bus_num < 0,
+so it's skipped and every Rockchip SPI controller ends up on bus 0.
+
+On RK3588S, spi@feb20000 (the rk806 PMIC SPI, aliased as spi2) is
+enabled and probed before the gpio-spi master. With both stealing
+bus 0, spi_get_controller(0) returns the PMIC controller instead of
+the intended gpio-spi RP2040 bus. The barebox spi command then does
+a write+read through the Rockchip SPI driver, which programmes the
+hardware in XFM_RO (RX-only) mode for the read phase, in that mode
+dummy TXDR writes don't generate clock pulses, the RX FIFO never
+fills, and rockchip_spi_pio's while(1) loop never exits → boot hang.
+
+Fix: set ctlr->bus_num = dev->id, the direct translation of the
+original Linux line (dev is what pdev became during the port) and
+the convention most other barebox SPI drivers already use
+(gpio_spi.c, mvebu_spi.c, mxs_spi.c, omap3_spi.c, spi-fsl-qspi.c,
+etc). drivers/of/platform.c sets dev->id = DEVICE_ID_SINGLE (-1) for
+every DT-instantiated device, and this driver is only ever
+DT-instantiated, so dev->id is always -1 here - identical in effect
+to hardcoding -1 directly (the convention 4 other barebox SPI drivers
+use instead: stm32_spi.c, spi-sifive.c, atmel-quadspi.c,
+spi-stm32-qspi.c). Either spelling triggers the same alias-lookup
+path in spi_register_controller(), so this isn't a narrow
+board-specific workaround: every Rockchip SPI controller across every
+board using this driver is DT-instantiated, so the fix is correct
+universally, not just for the Radxa CM5 board that exposed it by
+being the first to actually have two Rockchip SPI controllers active
+at once.
+
+The sibling commented-out line (ctlr->mode_bits = ...) is left alone:
+it's commented out in several other barebox SPI drivers too
+(spi-bcm2835.c, spi-fsl-qspi.c, spi-nxp-fspi.c, spi-stm32-qspi.c) as
+an established convention, and mode_bits is never read anywhere in
+barebox's SPI core - it's a dead field regardless.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/spi/spi-rockchip.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/spi/spi-rockchip.c b/drivers/spi/spi-rockchip.c
+index 1e81e9393f..b9f43fa4d6 100644
+--- a/drivers/spi/spi-rockchip.c
++++ b/drivers/spi/spi-rockchip.c
+@@ -514,7 +514,7 @@ static int rockchip_spi_probe(struct device *dev)
+ 		goto err_put_ctlr;
+ 	}
+ 
+-//	ctlr->bus_num = pdev->id;
++	ctlr->bus_num = dev->id;
+ //	ctlr->mode_bits = SPI_CPOL | SPI_CPHA | SPI_LOOP | SPI_LSB_FIRST;
+ 
+ 	/*
+-- 
+2.43.0
+

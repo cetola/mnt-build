@@ -1,0 +1,49 @@
+From c63b04d00d8df036f11cba37a004dc8c43b57faf Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Thu, 9 Jul 2026 22:48:40 +0000
+Subject: input: usb_kbd_hid: keep polling after a transient poll error
+
+usb_kbd_poll() returned early on any poll error other than -EAGAIN.
+This skipped the poller_call_async() reschedule at exit, so the
+keyboard poller died permanently after a single non-EAGAIN error.
+
+A poller should never die on a recoverable error: a control endpoint
+stall clears on the next SETUP packet, and the poller only needs to
+keep running for that recovery to happen.
+
+Observed on hardware: kbd-hid poll failed with -EPIPE right after
+reaching the barebox prompt, then stopped responding for the rest of
+boot. At this point in the driver's fallback logic, an -EAGAIN from
+the interrupt-endpoint probe test routes to the control-endpoint
+GET_REPORT path (usb_kbd_cnt_poll), and the keyboard firmware's
+GET_REPORT handler is an unimplemented stub that always STALLs. This
+patch alone does not make the control-endpoint path work; that
+request keeps failing on every poll regardless. It only stops the
+poller from dying, which matters because the real fix (routing around
+this fallback and using interrupt-endpoint polling instead) depends
+on the poller still being alive to retry.
+
+Fix: goto exit instead of returning, so the poller reschedules
+itself like the -EAGAIN case already does.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/input/usb_kbd_hid.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/input/usb_kbd_hid.c b/drivers/input/usb_kbd_hid.c
+index 5b41be4dc8..5e4fa19341 100644
+--- a/drivers/input/usb_kbd_hid.c
++++ b/drivers/input/usb_kbd_hid.c
+@@ -108,7 +108,7 @@ static void usb_kbd_poll(void *arg)
+ 		/* exit with noreturn */
+ 		dev_err(&usbdev->dev,
+ 			"usb_submit_int_msg() failed. Keyboard disconnect?\n");
+-		return;
++		goto exit;
+ 	}
+ 
+ 	if (!memcmp(data->old, data->new, USB_KBD_BOOT_REPORT_SIZE))
+-- 
+2.43.0
+
