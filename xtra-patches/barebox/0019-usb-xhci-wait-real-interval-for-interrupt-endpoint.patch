@@ -1,7 +1,7 @@
-From f12bcf25246e92ffc5f26fd42e45e6d713d7b5d0 Mon Sep 17 00:00:00 2001
+From cd1ca3832bc845a27382627b3da065d0ba5ddb65 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
-Date: Fri, 10 Jul 2026 00:42:50 +0000
-Subject: [PATCH 5/6] usb: xhci: wait a real interval for interrupt endpoint
+Date: Sat, 11 Jul 2026 15:16:18 +0000
+Subject: [PATCH 19/22] usb: xhci: wait a real interval for interrupt endpoint
  transfers
 
 _xhci_submit_int_msg() ignored its interval parameter and always
@@ -31,23 +31,20 @@ same code path would get an incorrectly short wait.
 
 Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---
- drivers/usb/host/xhci.c | 8 +++++++-
- 1 file changed, 7 insertions(+), 1 deletion(-)
+ drivers/usb/host/xhci.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
 
 diff --git a/drivers/usb/host/xhci.c b/drivers/usb/host/xhci.c
-index 27d4353597..cb8bf0eac3 100644
+index 27d4353597..ce823a7f5d 100644
 --- a/drivers/usb/host/xhci.c
 +++ b/drivers/usb/host/xhci.c
-@@ -1109,8 +1109,14 @@ static int _xhci_submit_int_msg(struct usb_device *udev, unsigned long pipe,
+@@ -1109,8 +1109,11 @@ static int _xhci_submit_int_msg(struct usb_device *udev, unsigned long pipe,
  	 * interrupt endpoint is to be serviced, the xHC will consume
  	 * (at most) one TD. A TD (comprised of sg list entries) can
  	 * take several service intervals to transmit.
 +	 *
-+	 * Passing timeout_ms=0 here defeats that: the xHC polls the device
-+	 * autonomously at its bInterval once the TRB is queued, but a 0ms
-+	 * wait aborts the transfer via abort_td() before that polling ever
-+	 * gets a chance to complete, even when the device has real data to
-+	 * send. Wait at least one service interval instead.
++	 * timeout_ms=0 defeats that: it aborts before the xHC's own
++	 * autonomous poll cycle ever gets a chance to complete.
  	 */
 -	return xhci_bulk_tx(udev, pipe, length, buffer, 0);
 +	return xhci_bulk_tx(udev, pipe, length, buffer, interval);

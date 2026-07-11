@@ -1,8 +1,8 @@
-From c9e3e2fe884cc5bda0a367d2cae83de588fe2142 Mon Sep 17 00:00:00 2001
+From d079391b8ec8c85d8632495f5a1318a916f42b53 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
-Date: Fri, 10 Jul 2026 01:05:27 +0000
-Subject: [PATCH] input: usb_kbd_hid: don't fall back to control endpoint on
- a benign interrupt poll timeout
+Date: Sat, 11 Jul 2026 15:16:36 +0000
+Subject: [PATCH 20/22] input: usb_kbd_hid: don't fall back to control endpoint
+ on a benign interrupt poll timeout
 
 usb_kbd_probe()'s one-shot interrupt endpoint test poll treated any
 negative return, including -EAGAIN and -ETIMEDOUT, as proof the
@@ -25,25 +25,20 @@ Fix: only fall back on a genuine error, not -EAGAIN/-ETIMEDOUT.
 
 Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---
- drivers/input/usb_kbd_hid.c | 10 ++++++++--
- 1 file changed, 8 insertions(+), 2 deletions(-)
+ drivers/input/usb_kbd_hid.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
 
 diff --git a/drivers/input/usb_kbd_hid.c b/drivers/input/usb_kbd_hid.c
-index 9483835a07..332368d518 100644
+index 5e4fa19341..93b55bf72f 100644
 --- a/drivers/input/usb_kbd_hid.c
 +++ b/drivers/input/usb_kbd_hid.c
-@@ -196,10 +196,16 @@ static int usb_kbd_probe(struct usb_device *usbdev,
+@@ -194,10 +194,11 @@ static int usb_kbd_probe(struct usb_device *usbdev,
  	data->intpktsize = min(usb_maxpacket(usbdev, data->intpipe),
  			       USB_KBD_BOOT_REPORT_SIZE);
  	data->intinterval = data->ep->bInterval;
 -	/* test polling via interrupt endpoint */
-+	/*
-+	 * Test polling via interrupt endpoint. -EAGAIN / -ETIMEDOUT here just
-+	 * mean no report was pending at this instant (normal at probe time,
-+	 * before any key has been touched) and does not indicate the
-+	 * interrupt endpoint is broken. Only a genuine error should trigger
-+	 * the control endpoint fallback.
-+	 */
++	/* -EAGAIN/-ETIMEDOUT here just mean nothing's arrived yet at probe
++	 * time, not a broken endpoint; only a real error should fall back. */
  	data->do_poll = usb_kbd_int_poll;
  	ret = data->do_poll(data);
 -	if (ret < 0) {
@@ -53,3 +48,4 @@ index 9483835a07..332368d518 100644
  		usb_set_idle(usbdev,
 -- 
 2.43.0
+

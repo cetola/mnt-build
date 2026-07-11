@@ -37,11 +37,11 @@ every report.
 
 Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---
- drivers/input/usb_kbd_hid.c | 16 +++++++++++++---
- 1 file changed, 13 insertions(+), 3 deletions(-)
+ drivers/input/usb_kbd_hid.c |  9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
 
 diff --git a/drivers/input/usb_kbd_hid.c b/drivers/input/usb_kbd_hid.c
-index 52c11b61bf..ee6cb4e960 100644
+index 52c11b61bf..5b41be4dc8 100644
 --- a/drivers/input/usb_kbd_hid.c
 +++ b/drivers/input/usb_kbd_hid.c
 @@ -157,8 +157,6 @@ static void usb_kbd_poll(void *arg)
@@ -52,34 +52,28 @@ index 52c11b61bf..ee6cb4e960 100644
 -			break;
  		}
  	}
-
-@@ -176,7 +174,10 @@ static int usb_kbd_probe(struct usb_device *usbdev,
+ 
+@@ -176,7 +174,8 @@ static int usb_kbd_probe(struct usb_device *usbdev,
  	struct usb_kbd_pdata *data;
-
+ 
  	dev_info(&usbdev->dev, "USB HID keyboard found\n");
 -	ret = usb_set_protocol(usbdev, iface->desc.bInterfaceNumber, 0);
-+	/* Request report protocol: this device's interface descriptor declares
-+	 * HID_ITF_PROTOCOL_NONE and its firmware always sends the Report-ID-prefixed
-+	 * layout the driver expects, regardless of what protocol is negotiated. */
++	/* Report protocol matches what this device's descriptor declares. */
 +	ret = usb_set_protocol(usbdev, iface->desc.bInterfaceNumber, 1);
  	if (ret < 0)
  		return ret;
-
-@@ -214,6 +215,15 @@ static int usb_kbd_probe(struct usb_device *usbdev,
+ 
+@@ -214,6 +213,10 @@ static int usb_kbd_probe(struct usb_device *usbdev,
  	} else
  		dev_info(&usbdev->dev, "poll keyboard via int ep\n");
-
-+	/* Snapshot the actual keyboard idle state as baseline.  data->old is
-+	 * zeroed by xzalloc, but this keyboard sends non-zero bytes even when
-+	 * no key is pressed (observed: 01 03 44 00 45 00 36 00).  Without this
-+	 * copy the first poller call sees a state change and fires spurious key
-+	 * events including KEY_COMMA, causing auto-repeat flooding at the prompt.
-+	 * After this copy, only actual transitions from this idle state trigger
-+	 * events. */
+ 
++	/* data->old starts zeroed; seed it from the real idle report so the
++	 * first poll doesn't read nonzero idle bytes as a keypress. */
 +	memcpy(data->old, data->new, USB_KBD_BOOT_REPORT_SIZE);
 +
  	data->input.parent = &usbdev->dev;
  	ret = input_device_register(&data->input);
  	if (ret) {
+
 --
 2.43.0

@@ -32,16 +32,19 @@ Signed-off-by: Stephano Cetola <stephano@cetola.net>
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/drivers/input/usb_kbd_hid.c b/drivers/input/usb_kbd_hid.c
-index 4649e13cf9..28cd7075da 100644
+index 4649e13cf9..5e4fa19341 100644
 --- a/drivers/input/usb_kbd_hid.c
 +++ b/drivers/input/usb_kbd_hid.c
-@@ -111,5 +111,5 @@ static void usb_kbd_poll(void *arg)
+@@ -108,7 +108,7 @@ static void usb_kbd_poll(void *arg)
+ 		/* exit with noreturn */
  		dev_err(&usbdev->dev,
  			"usb_submit_int_msg() failed. Keyboard disconnect?\n");
 -		return;
 +		goto exit;
  	}
  
+ 	if (!memcmp(data->old, data->new, USB_KBD_BOOT_REPORT_SIZE))
+
 -- 
 2.43.0
 

@@ -1,8 +1,8 @@
-From 7888a11628e373a4c74d2c567291fa347ab472eb Mon Sep 17 00:00:00 2001
+From 7b6f523fa7698f77e666882e1de6e4b33e6b75ce Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
-Date: Fri, 10 Jul 2026 00:42:28 +0000
-Subject: [PATCH 4/6] usb: xhci: xhci_bulk_tx: re-fetch ep_ctx after resetting
- a halted endpoint
+Date: Sat, 11 Jul 2026 15:15:45 +0000
+Subject: [PATCH 18/22] usb: xhci: xhci_bulk_tx: re-fetch ep_ctx after
+ resetting a halted endpoint
 
 xhci_bulk_tx() reads the endpoint's context once at the top of the
 function and reuses that same value both to decide whether to call
@@ -22,26 +22,22 @@ and re-fetch ep_ctx before prepare_ring() uses it.
 
 Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---
- drivers/usb/host/xhci-ring.c | 12 +++++++++++-
- 1 file changed, 11 insertions(+), 1 deletion(-)
+ drivers/usb/host/xhci-ring.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
 
 diff --git a/drivers/usb/host/xhci-ring.c b/drivers/usb/host/xhci-ring.c
-index 4f805677dc..c8673c01ef 100644
+index 5992e8e063..cdf2bb0338 100644
 --- a/drivers/usb/host/xhci-ring.c
 +++ b/drivers/usb/host/xhci-ring.c
-@@ -710,8 +710,18 @@ int xhci_bulk_tx(struct usb_device *udev, unsigned long pipe,
+@@ -704,8 +704,14 @@ int xhci_bulk_tx(struct usb_device *udev, unsigned long pipe,
  	 * the next transfer. It is the responsibility of the upper layer to
  	 * have dealt with whatever caused the error.
  	 */
 -	if ((le32_to_cpu(ep_ctx->ep_info) & EP_STATE_MASK) == EP_STATE_HALTED)
 +	if ((le32_to_cpu(ep_ctx->ep_info) & EP_STATE_MASK) == EP_STATE_HALTED) {
  		reset_ep(udev, ep_index);
-+		/*
-+		 * reset_ep() updates the endpoint's output context via DMA.
-+		 * Re-invalidate and re-fetch it, otherwise prepare_ring()
-+		 * below sees the stale pre-reset EP_STATE_HALTED value and
-+		 * refuses to queue the transfer even after a successful reset.
-+		 */
++		/* reset_ep() updates the context via DMA; re-fetch or
++		 * prepare_ring() below still sees the stale HALTED value. */
 +		xhci_inval_cache((uintptr_t)virt_dev->out_ctx->bytes,
 +				 virt_dev->out_ctx->size);
 +		ep_ctx = xhci_get_ep_ctx(ctrl, virt_dev->out_ctx, ep_index);
@@ -51,3 +47,4 @@ index 4f805677dc..c8673c01ef 100644
  	/*
 -- 
 2.43.0
+

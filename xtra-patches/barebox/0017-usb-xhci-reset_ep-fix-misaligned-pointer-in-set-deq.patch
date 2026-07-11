@@ -1,7 +1,7 @@
-From 270cbb505f6559208f4296522182124e49ecace5 Mon Sep 17 00:00:00 2001
+From 4283bc426fad385bea0658261b34d1ad9181d63f Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
-Date: Fri, 10 Jul 2026 00:41:56 +0000
-Subject: [PATCH 3/6] usb: xhci: reset_ep: fix misaligned pointer in Set TR
+Date: Sat, 11 Jul 2026 15:15:29 +0000
+Subject: [PATCH 17/22] usb: xhci: reset_ep: fix misaligned pointer in Set TR
  Dequeue Pointer
 
 reset_ep() computed the Set TR Dequeue Pointer command's address by
@@ -23,27 +23,21 @@ the cycle bit into the resulting integer. Make reset_ep() do the same.
 
 Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---
- drivers/usb/host/xhci-ring.c | 12 ++++++++++--
- 1 file changed, 10 insertions(+), 2 deletions(-)
+ drivers/usb/host/xhci-ring.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
 
 diff --git a/drivers/usb/host/xhci-ring.c b/drivers/usb/host/xhci-ring.c
-index 61f32c0ada..4f805677dc 100644
+index 61f32c0ada..5992e8e063 100644
 --- a/drivers/usb/host/xhci-ring.c
 +++ b/drivers/usb/host/xhci-ring.c
-@@ -525,8 +525,16 @@ static void reset_ep(struct usb_device *udev, int ep_index)
+@@ -525,8 +525,10 @@ static void reset_ep(struct usb_device *udev, int ep_index)
  	BUG_ON(TRB_TO_SLOT_ID(field) != udev->slot_id);
  	xhci_acknowledge_event(ctrl);
  
 -	addr = xhci_trb_virt_to_dma(ring->enq_seg,
 -		(void *)((uintptr_t)ring->enqueue | ring->cycle_state));
-+	/*
-+	 * OR the cycle bit into the DMA address after computing it, not into
-+	 * the pointer beforehand: xhci_trb_virt_to_dma() does pointer
-+	 * arithmetic (trb - seg->trbs) that requires proper TRB alignment,
-+	 * and tainting the low bit first breaks that whenever cycle_state==1
-+	 * (which happens naturally as the ring wraps). abort_td() below
-+	 * already does this the correct way.
-+	 */
++	/* OR the cycle bit in after computing the DMA address, not before:
++	 * xhci_trb_virt_to_dma() needs an aligned pointer (see abort_td() below). */
 +	addr = xhci_trb_virt_to_dma(ring->enq_seg, ring->enqueue);
 +	addr |= ring->cycle_state;
  	xhci_queue_command(ctrl, addr, udev->slot_id, ep_index, TRB_SET_DEQ);
@@ -51,3 +45,4 @@ index 61f32c0ada..4f805677dc 100644
  	if (!event)
 -- 
 2.43.0
+

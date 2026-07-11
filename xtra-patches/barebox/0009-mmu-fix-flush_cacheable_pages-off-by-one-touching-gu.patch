@@ -48,54 +48,48 @@ Observed on RK3588S (Radxa CM5) during NVMe/PCIe bring-up.
 
 Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---
- arch/arm/cpu/flush_cacheable_pages.h | 21 ++++++++++++++++-----
- 1 file changed, 16 insertions(+), 5 deletions(-)
+ arch/arm/cpu/flush_cacheable_pages.h | 18 +++++-------------
+ 1 file changed, 6 insertions(+), 12 deletions(-)
 
 diff --git a/arch/arm/cpu/flush_cacheable_pages.h b/arch/arm/cpu/flush_cacheable_pages.h
-index a03e10810d..14cb0b431a 100644
+index a03e10810d..9a47f84583 100644
 --- a/arch/arm/cpu/flush_cacheable_pages.h
 +++ b/arch/arm/cpu/flush_cacheable_pages.h
-@@ -54,24 +54,35 @@ static void flush_cacheable_pages(void *start, size_t size)
- 			/*
- 			 * While it's safe to flush the whole block_size,
- 			 * it's unnecessary time waste to go beyond region_end.
-+			 * Clamp against region_end + 1, not region_end: flush_end
-+			 * is exclusive everywhere in this function (that's what
-+			 * the flush_end == addr check above relies on), but
-+			 * region_end is an inclusive last-address value. Clamping
-+			 * straight to region_end would silently make flush_end
-+			 * inclusive in this one case, and the dma_flush_range_end()
-+			 * call below always treats flush_end as exclusive.
- 			 */
+@@ -51,27 +51,21 @@ static void flush_cacheable_pages(void *start, size_t size)
+ 			continue;
+ 
+ 		if (flush_end == addr) {
+-			/*
+-			 * While it's safe to flush the whole block_size,
+-			 * it's unnecessary time waste to go beyond region_end.
+-			 */
 -			flush_end = min(flush_end + block_size, region_end);
++			/* region_end is inclusive, flush_end is exclusive: clamp to region_end + 1. */
 +			flush_end = min(flush_end + block_size, region_end + 1);
  			continue;
  		}
-
- 		/*
- 		 * We don't have a previous contiguous flush area to append to.
+ 
+-		/*
+-		 * We don't have a previous contiguous flush area to append to.
 -		 * If we recorded any area before, let's flush it now
-+		 * If we recorded any area before, let's flush it now.
-+		 * flush_end is the exclusive end of the cacheable range. Subtract
-+		 * 1 to convert to the inclusive end expected by dma_flush_range_end,
-+		 * preventing dc civac from stepping into the next (possibly fault-mapped)
-+		 * page when a non-cacheable page (e.g. the stack guard) follows.
- 		 */
+-		 */
++		/* flush_end is exclusive; dma_flush_range_end() wants an inclusive end. */
  		if (flush_start != ~0UL)
 -			dma_flush_range_end(flush_start, flush_end);
 +			dma_flush_range_end(flush_start, flush_end - 1);
-
+ 
  		/* and start the new contiguous flush area with this page */
  		flush_start = addr;
 -		flush_end = min(flush_start + block_size, region_end);
 +		flush_end = min(flush_start + block_size, region_end + 1);
  	}
-
+ 
  	/* The previous loop won't flush the last cached range, so do it here */
  	if (flush_start != ~0UL)
 -		dma_flush_range_end(flush_start, flush_end);
 +		dma_flush_range_end(flush_start, flush_end - 1);
  }
+
 --
 2.43.0
 

@@ -27,10 +27,10 @@ Signed-off-by: Stephano Cetola <stephano@cetola.net>
  1 file changed, 17 insertions(+)
 
 diff --git a/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts b/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
-index 942916e46a..a3c5d20bd9 100644
+index 7e1368ade2..a692a8acf3 100644
 --- a/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
 +++ b/arch/arm/dts/rk3588s-mnt-pocket-reform-rcm5.dts
-@@ -153,6 +153,17 @@ &usb_host1_ohci {
+@@ -153,6 +153,17 @@
  	status = "okay";
  };
  
@@ -45,10 +45,10 @@ index 942916e46a..a3c5d20bd9 100644
 +	status = "okay";
 +};
 +
- /*
-  * GPIO SPI master for the RP2040 system controller (LPC / reform2_lpc protocol).
-  * The SoM-to-RP2040 SPI lines are on general GPIOs, not a hardware SPI controller,
-@@ -185,6 +196,12 @@ spi_lpc: spi {
+ /* pinctrl-0 is required or gpio_spi_probe() hangs waiting on GPIO
+  * descriptors from banks that haven't been probed yet. */
+ / {
+@@ -173,6 +184,12 @@
  };
  
  &pinctrl {
@@ -61,6 +61,7 @@ index 942916e46a..a3c5d20bd9 100644
  	spipins {
  		spi_lpc_pins: spi-lpc-pins {
  			rockchip,pins =
+
 -- 
 2.43.0
 

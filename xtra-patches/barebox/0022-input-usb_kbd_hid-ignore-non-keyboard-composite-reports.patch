@@ -1,8 +1,8 @@
-From c9e3e2fe884cc5bda0a367d2cae83de588fe2144 Mon Sep 17 00:00:00 2001
+From f5ceed56c799281cde13a8dfbd1761e260c54afb Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
-Date: Fri, 10 Jul 2026 01:05:55 +0000
-Subject: [PATCH] input: usb_kbd_hid: ignore non-keyboard reports from the
- composite HID device
+Date: Sat, 11 Jul 2026 15:17:11 +0000
+Subject: [PATCH 22/22] input: usb_kbd_hid: ignore non-keyboard reports from
+ the composite HID device
 
 This is a composite HID device: keyboard (Report ID 1), mouse (2),
 consumer control (3), and gamepad (4) are all multiplexed over the
@@ -16,41 +16,26 @@ after it was detected.
 Fix: ignore any report that isn't Report ID 1 before scanning it.
 
 Also replace the long-commented-out raw printk dump of the report
-bytes with a proper dev_dbg() using the same format, and add a
-comment on the existing idle-resend memcmp check explaining why it's
-needed (usb_set_idle() makes the device auto-resend its current
-report every ~4ms even when nothing changed).
+bytes with a proper dev_dbg() using the same format.
 
 Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---
- drivers/input/usb_kbd_hid.c | 31 +++++++++++++++++++++----------
- 1 file changed, 21 insertions(+), 10 deletions(-)
+ drivers/input/usb_kbd_hid.c | 19 +++++++++----------
+ 1 file changed, 9 insertions(+), 10 deletions(-)
 
 diff --git a/drivers/input/usb_kbd_hid.c b/drivers/input/usb_kbd_hid.c
-index b8119e09f4..a416380866 100644
+index d6cb98ac37..658dc1dbb9 100644
 --- a/drivers/input/usb_kbd_hid.c
 +++ b/drivers/input/usb_kbd_hid.c
-@@ -114,19 +114,30 @@ static void usb_kbd_poll(void *arg)
+@@ -110,19 +110,18 @@ static void usb_kbd_poll(void *arg)
  		goto exit;
  	}
  
-+	/*
-+	 * This is a composite HID device: keyboard (Report ID 1), mouse (2),
-+	 * consumer control (3), and gamepad (4) are all multiplexed over
-+	 * this same interrupt endpoint (pocket-reform-keyboard-fw
-+	 * usb_descriptors.h). A non-keyboard report interleaved with a real
-+	 * keypress would otherwise get scanned as if it were keyboard data,
-+	 * reading zeros at [3:7] and looking like every key just released.
-+	 * Ignore anything that isn't Report ID 1 entirely.
-+	 */
++	/* Composite device: keyboard/mouse/consumer/gamepad share this
++	 * endpoint via Report ID. Ignore anything that isn't keyboard (ID 1). */
 +	if (data->new[0] != 1)
 +		goto exit;
 +
-+	/*
-+	 * usb_set_idle() makes the device auto-resend its current report
-+	 * every ~4ms even when nothing changed. Only scan on a real change,
-+	 * otherwise this fires nonstop at idle.
-+	 */
  	if (!memcmp(data->old, data->new, USB_KBD_BOOT_REPORT_SIZE))
  		goto exit;
  
@@ -73,3 +58,4 @@ index b8119e09f4..a416380866 100644
  		uint8_t pressed_new = data->new[i];
 -- 
 2.43.0
+
