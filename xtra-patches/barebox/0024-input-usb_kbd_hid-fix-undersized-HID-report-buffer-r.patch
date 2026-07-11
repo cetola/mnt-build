@@ -1,0 +1,93 @@
+From f4a22567cea8d3cbbaff31d47a7905b1e37d7d06 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Sat, 11 Jul 2026 18:17:23 +0000
+Subject: [PATCH 24/24] input: usb_kbd_hid: fix undersized HID report
+ buffer/read
+
+USB_KBD_BOOT_REPORT_SIZE was 8, the classic boot-protocol size
+(modifier, reserved, 6 keycodes) with no Report ID. This device's HID
+report descriptor does use a Report ID (TUD_HID_REPORT_DESC_KEYBOARD
+with HID_REPORT_ID), and TinyUSB's tud_hid_n_report() prepends that ID
+as an extra byte ahead of the 8-byte struct (hid_device.c), so every
+report this device actually sends is 9 bytes.
+
+data->new was dma_alloc()'d at exactly 8 bytes, and every interrupt
+transfer request was sized to match. The device DMAs a 9-byte packet
+on every single poll regardless of which keys are pressed, one byte
+past the end of that allocation, every time - not just when 6 keys are
+held. That's a much better fit for the intermittent, seemingly
+unrelated flakiness this was chased down for (specifically: Shift
+appearing to work, then not, unpredictably) than simply "the 6th
+simultaneous key is dropped" would be on its own.
+
+Fix: size the buffer and both scancode scan loops for the real 9-byte
+report (Report ID + modifier + reserved + 6 keycodes, indices 3-8)
+instead of 8 (indices 3-7). Verified on real hardware: Shift/capital
+letters, previously flaky, now work reliably.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/input/usb_kbd_hid.c | 20 +++++++++++---------
+ 1 file changed, 11 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/input/usb_kbd_hid.c b/drivers/input/usb_kbd_hid.c
+index 658dc1dbb9..7406997d79 100644
+--- a/drivers/input/usb_kbd_hid.c
++++ b/drivers/input/usb_kbd_hid.c
+@@ -29,10 +29,11 @@
+ 	(USB_KBD_NUMLOCK | USB_KBD_CAPSLOCK | USB_KBD_SCROLLLOCK)
+ 
+ /*
+- * USB Keyboard reports are 8 bytes in boot protocol.
+- * Appendix B of HID Device Class Definition 1.11
++ * Boot-protocol report is 8 bytes (Appendix B, HID 1.11), but this device's
++ * report descriptor declares a Report ID, which TinyUSB prepends as a 9th
++ * byte on the wire ahead of the 8-byte struct.
+  */
+-#define USB_KBD_BOOT_REPORT_SIZE 8
++#define USB_KBD_BOOT_REPORT_SIZE 9
+ 
+ struct usb_kbd_pdata;
+ 
+@@ -118,18 +119,19 @@ static void usb_kbd_poll(void *arg)
+ 	if (!memcmp(data->old, data->new, USB_KBD_BOOT_REPORT_SIZE))
+ 		goto exit;
+ 
+-	dev_dbg(&usbdev->dev, "ret=%d change: %02x %02x %02x %02x %02x %02x %02x %02x\n",
++	dev_dbg(&usbdev->dev, "ret=%d change: %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
+ 		ret,
+ 		data->new[0], data->new[1], data->new[2], data->new[3],
+-		data->new[4], data->new[5], data->new[6], data->new[7]);
++		data->new[4], data->new[5], data->new[6], data->new[7],
++		data->new[8]);
+ 
+-	for (i = 3; i <= 7; i++) {
++	for (i = 3; i <= 8; i++) {
+ 		uint8_t pressed_new = data->new[i];
+ 
+ 		if (pressed_new > 0) {
+ 			// new keypress?
+ 			int new = 1;
+-			for (int j = 3; j <= 7; j++) {
++			for (int j = 3; j <= 8; j++) {
+ 				if (data->old[j] == pressed_new) {
+ 					new = 0;
+ 					break;
+@@ -141,12 +143,12 @@ static void usb_kbd_poll(void *arg)
+ 		}
+ 	}
+ 
+-	for (i = 3; i <= 7; i++) {
++	for (i = 3; i <= 8; i++) {
+ 		uint8_t pressed_old = data->old[i];
+ 		if (pressed_old > 0) {
+ 			// key released?
+ 			int gone = 1;
+-			for (int j = 3; j <= 7; j++) {
++			for (int j = 3; j <= 8; j++) {
+ 				if (data->new[j] == pressed_old) {
+ 					gone = 0;
+ 					break;
+-- 
+2.43.0
+
