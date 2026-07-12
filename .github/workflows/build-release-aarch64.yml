@@ -36,11 +36,6 @@ jobs:
           )"
           RELEASE_TAG="${BUILD_VERSION}-aarch64"
 
-          if [[ "$REF" != "refs/heads/main" && "$REF" != refs/tags/* ]]; then
-            echo "workflow_dispatch must target main or a tag" >&2
-            exit 1
-          fi
-
           if [[ "$REF_NAME" == *-x86_64 || "$REF_NAME" == *-x86 ]]; then
             echo "x86_64 tags are not supported by this arm64-only workflow" >&2
             exit 1
