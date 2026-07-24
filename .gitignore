@@ -3,6 +3,7 @@
 *.img
 *.bmap
 build-*.log
+patch-failures-*.log
 headers-*.log
 container*.log
 image-gen*.log

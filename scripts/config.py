@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-DEFAULT_KERNEL_VERSION = '7.1.4'
+DEFAULT_KERNEL_VERSION = '7.1.5'
 DEFAULT_LOCALVERSION_NAME = 'reform'
 DEFAULT_LOCALVERSION_REV = 1
 DEFAULT_CROSS_COMPILE = "aarch64-linux-gnu-"
@@ -72,6 +72,7 @@ class BuildConfig:
     reform_tools_dir: Path
     patches_dir: Path
     xtra_patches_dir: Path
+    mnt_overrides_dir: Path
     xtra_dtbs_dir: Path
     defconfig_file: Path
     config_file: Path
@@ -81,6 +82,8 @@ class BuildConfig:
     output_lpc_module_tar: Path
     output_wifi_module_tar: Path
     log_file: Path
+    log_build_version: str
+    timestamp: str
     jobs: int
     localversion_rev: int
 
@@ -143,6 +146,7 @@ class BuildConfig:
             reform_tools_dir=build_dir / "reform-tools",
             patches_dir=build_dir / "reform-debian-packages" / "linux" / f"patches{major_minor}",
             xtra_patches_dir=build_dir / "xtra-patches" / major_minor,
+            mnt_overrides_dir=build_dir / "xtra-patches" / "mnt-overrides" / major_minor,
             xtra_dtbs_dir=xtra_dtbs_dir,
             defconfig_file=build_dir / "configs" / defconfig_name_for_arch(arch),
             config_file=build_dir / "configs" / f"config-{version}-mnt-reform-{arch}",
@@ -152,6 +156,12 @@ class BuildConfig:
             output_lpc_module_tar=linux_dir / f"reform2_lpc-{build_version}.tar.gz",
             output_wifi_module_tar=linux_dir / f"wlan-{build_version}.tar.gz",
             log_file=build_dir / f"build-{log_build_version}-{timestamp}.log",
+            log_build_version=log_build_version,
+            timestamp=timestamp,
             jobs=jobs,
             localversion_rev=localversion_rev
         )
+
+    def failed_patch_log(self, suffix: str = "") -> Path:
+        """Path for a patch-failure log, named/located like the main build log."""
+        return self.build_dir / f"patch-failures{suffix}-{self.log_build_version}-{self.timestamp}.log"

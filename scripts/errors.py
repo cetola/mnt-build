@@ -11,6 +11,8 @@ class PatchStats:
         self.success = 0
         self.failed = 0
         self.failed_patches = []
+        self.skipped = 0
+        self.skipped_patches = []
         self.mnt_found = 0
         self.xtra_success = 0
         self.xtra_failed = 0
@@ -47,6 +49,10 @@ class PatchStats:
     def add_failure(self, patch_name: str):
         self.failed += 1
         self.failed_patches.append(patch_name)
+
+    def add_skipped(self, patch_name: str):
+        self.skipped += 1
+        self.skipped_patches.append(patch_name)
 
     def set_mnt_found(self, count: int):
         self.mnt_found = count

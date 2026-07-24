@@ -6,11 +6,15 @@ import subprocess
 import tarfile
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from config import BuildConfig, DEFAULT_CROSS_COMPILE, DEFAULT_KERNEL_ONLY, DTS_CONFIGS, EXTRA_DTB_PATHS, VENDOR_CONFIG_MAP
 from errors import BuildError, PatchStats
 from logging_setup import Colors
+
+# mnt-overrides files that don't look like a real patch are treated as a skip
+# marker. Their text is logged as the skip reason, truncated to this length.
+MNT_OVERRIDE_SKIP_REASON_MAX_LEN = 200
 
 
 class KernelBuilder:
@@ -181,7 +185,7 @@ class KernelBuilder:
         """Apply kernel patches from patches_dir, then xtra_patches_dir if present."""
         stats = PatchStats()
 
-        failed_log_path = self.config.linux_dir / "failed.log"
+        failed_log_path = self.config.failed_patch_log()
         self.logger.info("Applying MNT kernel patches...")
         mnt_patch_count = self._apply_patch_set(
             self.config.patches_dir,
@@ -190,6 +194,8 @@ class KernelBuilder:
             label="",
             on_success=stats.add_success,
             on_failure=stats.add_failure,
+            overrides_dir=self.config.mnt_overrides_dir,
+            on_skip=stats.add_skipped,
         )
         stats.set_mnt_found(mnt_patch_count)
 
@@ -217,6 +223,8 @@ class KernelBuilder:
             self.logger.info(f"Succeeded: {stats.success}")
             self.logger.info(f"Failed:    {stats.failed}")
             self.logger.info(f"Total:     {stats.total}")
+        if stats.skipped:
+            self.logger.info(f"Skipped (mnt-overrides): {stats.skipped} ({', '.join(stats.skipped_patches)})")
 
         return stats
 
@@ -247,7 +255,7 @@ class KernelBuilder:
             {
                 "patches_dir": xtra_dir,
                 "target_dir": self.config.linux_dir,
-                "failed_log_path": self.config.linux_dir / "failed_xtra.log",
+                "failed_log_path": self.config.failed_patch_log("-xtra"),
                 "label": "extra",
                 "patch_files": linux_patch_files,
             }
@@ -260,7 +268,7 @@ class KernelBuilder:
                 {
                     "patches_dir": bucket_dir,
                     "target_dir": target_dir,
-                    "failed_log_path": target_dir / f"failed_xtra_{bucket_name}.log",
+                    "failed_log_path": self.config.failed_patch_log(f"-xtra-{bucket_name}"),
                     "label": f"extra:{bucket_name}",
                     "patch_files": bucket_patch_files,
                 }
@@ -289,6 +297,8 @@ class KernelBuilder:
         on_success,
         on_failure,
         patch_files: Optional[List[Path]] = None,
+        overrides_dir: Optional[Path] = None,
+        on_skip: Optional[Callable[[str], None]] = None,
     ) -> int:
         """Apply all *.patch files from patches_dir, recording results via callbacks.
 
@@ -300,6 +310,14 @@ class KernelBuilder:
                               Pass an empty string for the primary patch set.
             on_success:       Callable invoked (no args) for each successful patch.
             on_failure:       Callable invoked (patch_name) for each failed patch.
+            overrides_dir:    Optional mnt-overrides tree, mirroring patches_dir's relative
+                              layout. A file at the same relative path that looks like a real
+                              patch (contains a unified-diff hunk header) replaces the upstream
+                              patch's content. Any other file there (including an empty one)
+                              skips the upstream patch entirely. Its text is logged as the skip
+                              reason, truncated to MNT_OVERRIDE_SKIP_REASON_MAX_LEN characters.
+            on_skip:          Callable invoked (patch_name) for each patch skipped via a
+                              non-patch override file.
         """
         qualifier = f" ({label})" if label else ""
         if patch_files is None and not patches_dir.exists():
@@ -331,7 +349,36 @@ class KernelBuilder:
             patch_name = str(patch_file.relative_to(patches_dir))
             self.logger.debug(f"Processing{qualifier} patch: {patch_name}")
 
-            with open(patch_file, 'r') as f:
+            patch_source = patch_file
+            if overrides_dir is not None:
+                override_file = overrides_dir / patch_name
+                if override_file.exists():
+                    with open(override_file, 'r') as f:
+                        override_content = f.read()
+
+                    if self._is_patch_content(override_content):
+                        self.logger.info(
+                            f"{Colors.YELLOW}↺{Colors.RESET} Using mnt-overrides patch for{qualifier}: {patch_name}"
+                        )
+                        patch_source = override_file
+                    else:
+                        reason = override_content.strip()
+                        if len(reason) > MNT_OVERRIDE_SKIP_REASON_MAX_LEN:
+                            reason = reason[:MNT_OVERRIDE_SKIP_REASON_MAX_LEN]
+                            self.logger.warning(
+                                f"mnt-overrides skip reason for {patch_name} exceeds "
+                                f"{MNT_OVERRIDE_SKIP_REASON_MAX_LEN} characters; truncated"
+                            )
+                        reason_suffix = f": {reason}" if reason else " (no reason given)"
+                        self.logger.info(
+                            f"{Colors.YELLOW}⊘{Colors.RESET} Skipping{qualifier} "
+                            f"(mnt-overrides) {patch_name}{reason_suffix}"
+                        )
+                        if on_skip is not None:
+                            on_skip(patch_name)
+                        continue
+
+            with open(patch_source, 'r') as f:
                 patch_content = f.read()
 
             dry_run_result = self.run_command(
@@ -368,6 +415,11 @@ class KernelBuilder:
             self.logger.warning(f"Failed{qualifier} patches logged to: {failed_log_path}")
 
         return len(patch_files)
+
+    @staticmethod
+    def _is_patch_content(content: str) -> bool:
+        """Heuristic: does this look like a real unified diff, not a skip-reason note?"""
+        return content.startswith("@@ -") or "\n@@ -" in content
 
     def _format_failed_patch(self, patch_name: str, result: subprocess.CompletedProcess) -> str:
         """Format a failed patch entry for the log file."""
