@@ -8,7 +8,7 @@ The team at [MNT Research](https://mntre.com/) has done an amazing job documenti
 
 ## :shrug: What is MNT Build?
 
-This repo attempts to build the Linux kernel and associated required artifacts for the MNT Reform platforms. It focuses on a "distro-agnostic" approach, so that you can use the kernel in whatever distro you choose. It also focuses on extensibility, so that you can integrate the scripts into your workflow.
+MNT Build is a simple build system for the Linux kernel and associated required artifacts for the MNT Reform platforms. It focuses on a "distro-agnostic" approach, so that you can use the kernel in whatever distro you choose. It also focuses on extensibility, so that you can integrate the scripts into your workflow.
 
 As we need to test that it actually works, we use Arch Linux ARM as the testing distro. That's also the filesystem we use to test the kernel modules, headers (DKMS), and the booting process (u-boot handoff).
 
@@ -92,14 +92,32 @@ I will currently only release images for hardware that I can test. So today, tha
 
 The kernel is patched with all patches from `reform-debian-packages/linux/patches[ver]`. As such, it should boot on any MNT Reform platform, provided you use the correct DTB and have a U-Boot setup that works for your system.
 
-## :boot: U-Boot
+## :mirror::boot: U-Boot &amp; :bear::package: Barebox
+
+U-Boot and Barebox commands are meant for helping you muck with the bootloader. Both are driven through the same `./mnt-build` interface. Simply swap the subcommand (`uboot` or `barebox`) and they behave identically: prepare a checkout, build, diff against the released artifact, menuconfig, or clean.
+
+```bash
+./mnt-build barebox --list sysimage
+./mnt-build barebox --sysimage pocket-reform-system-rk3588 --dry-run
+./mnt-build barebox --sysimage pocket-reform-system-rk3588 --clean
+./mnt-build barebox --sysimage pocket-reform-system-rk3588 --menuconfig
+./mnt-build barebox --sysimage pocket-reform-system-rk3588 # no options will build the bootloader
+```
+
+The two differences worth knowing:
+- **Sysimage support**: U-Boot supports all sysimages; barebox is currently only available for the RK3588/RK3588S sysimages (`reform-next-system-rk3588`, `pocket-reform-system-rk3588`, `pocket-reform-system-rk3588s`).
+- **`--reset`**: U-Boot-only. Resets the inner `u-boot/` sub-repo to the SHA `build.sh` expects (`./mnt-build uboot --sysimage <name> --reset`).
+
+See `./mnt-build uboot --help` / `./mnt-build barebox --help` for all options and details.
+
+## :rocket: FSBL
 
 If you only need bootloader artifacts (without generating a full OS image), use `scripts/build-fsbl.sh`. It fetches a prebuilt bootloader or builds one from source for a target `--sysimage`, then prints the exact flash offsets (`seek`/`skip`) and `dd` command to use for SD.
 
 Example:
 ```bash
-$> ./scripts/build-fsbl.sh --sysimage pocket-reform-system-a311d --mode source
-$> sudo dd if=path/to/<flash.bin> of=/dev/sdX conv=notrunc bs=512 seek=<seek> skip=<skip>
+./scripts/build-fsbl.sh --sysimage pocket-reform-system-a311d --mode source
+sudo dd if=path/to/<flash.bin> of=/dev/sdX conv=notrunc bs=512 seek=<seek> skip=<skip>
 ```
 
 See ./scripts/build-fsbl.sh --help for all options and details.
