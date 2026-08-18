@@ -1,55 +1,54 @@
-From 9c11a9553df2f42848bd605cefe892049db418d2 Mon Sep 17 00:00:00 2001
+From be356b0f187d7da27daeb2a8ea28e318428b1842 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Wed, 8 Jul 2026 17:30:00 -0800
-Subject: defaultenv: mnt-pocket-reform-radxa-cm5: add disp-reset init script
+Subject: [PATCH] defaultenv: mnt-pocket-reform-radxa-cm5: add disp-reset init
+ script
 
-Send the 'r' SPI command to the RP2040 system controller at barebox
-startup to pulse the panel hardware RESX line (PIN_DISP_RESET, GPIO 2)
-before autoboot.
+Send a set-gpio command to the SC firmware at barebox startup. This
+pulses the panel hardware RESX line (PIN_DISP_RESET, GPIO 2) before
+autoboot.
 
-The RP2040 pulses RESX on cold boot but not on warm reboot. Without this
-pulse, the Wisecoco V2 panel (ER88477) gets a blank screen because DSI
-init races against an uninitialized panel. The JDI V1 panel may also
-benefit from a clean reset on warm reboot.
+The RP2040 pulses RESX on cold boot. It does not pulse RESX on warm
+reboot. Without this pulse the Wisecoco V2 panel (ER88477) shows a
+blank screen. DSI init races against an uninitialized panel. The JDI
+V1 panel may also benefit from a clean reset on warm reboot.
 
-The reform2_lpc protocol (matching the Linux reform2_lpc.c driver) requires
-two separate SPI transactions with a 50ms gap between them: one to write
-the command, one to read the response. The RP2040 processes the command in
-a timer interrupt after the first transaction's CS deasserts, then fills
-its TX FIFO before the second transaction clocks out the response. Skipping
-the read transaction, or combining write and read into one transaction,
-gives the RP2040 no time to respond and the read (if attempted at all)
-comes back all zeros.
+We assert reset with "(set-gpio 0 0)". We release reset with
+"(set-gpio 0 1)". Hold time is 20ms. This matches the SC firmware's
+own cold-boot pulse width.
 
-Command bytes: { 0xb5, 0x72, 0x01, 0xc6 }
-  0xb5 = LPC magic, 0x72 = 'r' (display reset), 0x01 = trigger,
-  0xc6 = XOR checksum. Response is 8 bytes (ignored); RESX pulse occurs
-  after the response is sent, so the trailing 50ms after each transaction
-  covers both the 20ms pulse and panel stabilization time.
+Write and read are separate SPI transactions with a 50ms gap. The
+RP2040 processes the command in a timer interrupt after the write
+transaction ends. It then fills its response buffer before the read
+transaction. A combined write and read leaves no time for this. The
+RP2040 sends zeros if we do not wait.
 
-This script hardcodes bus 0, matching this board's own spi_lpc alias
-(patch 0004). That's only meaningful for boards that actually have this
-node - the RCORE-based boards sharing reform2_rk3588_probe() do not.
-Originally landed in defaultenv-mnt-reform2-rk3588, the directory shared
-by every board using that probe function, meaning it would have run
-unconditionally on RCORE boards too, where bus 0 is not this board's
-RP2040 but potentially any Rockchip SPI controller depending on probe
-order (see patch 0006's commit message for the bus-numbering bug this
-depends on). Moved to a new board-specific defaultenv-mnt-pocket-reform-
-radxa-cm5 directory, gated behind a new has_disp_reset_env field on
-struct reform2_model, set only for this board, so this script cannot
-run - and cannot address whatever ends up on bus 0 - on any board
-except this one.
+This script hardcodes bus 0. This matches this board's own spi_lpc
+alias from patch 0004. Only boards with that node need this script.
+The RCORE boards that share reform2_rk3588_probe() do not have it.
 
-Depends on: RP2040 firmware with 'r' command support
-            spi-gpio node in DTS (patch 0004)
+This script first lived in defaultenv-mnt-reform2-rk3588, the
+directory shared by every board using that probe function. That
+meant it would run on RCORE boards too. On those boards bus 0 is not
+this board's RP2040. It could be any Rockchip SPI controller
+depending on probe order. See patch 0006 for the bus numbering bug
+this depends on.
+
+We moved the script to a new board specific directory,
+defaultenv-mnt-pocket-reform-radxa-cm5. We gated it behind a new
+has_disp_reset_env field on struct reform2_model. Only this board
+sets that field. So this script cannot run, and cannot touch
+whatever is on bus 0, on any other board.
+
+Depends on SC firmware with set-gpio command support.
+Depends on the spi-gpio node in DTS added by patch 0004.
 
 Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---
- arch/arm/boards/mnt-reform2-rk3588/Makefile   |  3 ++-
- arch/arm/boards/mnt-reform2-rk3588/board.c    |  4 ++++
- .../init/disp-reset                           | 21 +++++++++++++++++++
- 3 files changed, 27 insertions(+), 1 deletion(-)
+ arch/arm/boards/mnt-reform2-rk3588/Makefile   |  3 +-
+ arch/arm/boards/mnt-reform2-rk3588/board.c    |  4 +++
+ .../init/disp-reset                           | 29 +++++++++++++++++++
+ 3 files changed, 35 insertions(+), 1 deletion(-)
  create mode 100644 arch/arm/boards/mnt-reform2-rk3588/defaultenv-mnt-pocket-reform-radxa-cm5/init/disp-reset
 
 diff --git a/arch/arm/boards/mnt-reform2-rk3588/Makefile b/arch/arm/boards/mnt-reform2-rk3588/Makefile
@@ -96,31 +95,39 @@ index 69b73faeb7..f58e275a04 100644
  static const struct of_device_id reform2_rk3588_of_match[] = {
 diff --git a/arch/arm/boards/mnt-reform2-rk3588/defaultenv-mnt-pocket-reform-radxa-cm5/init/disp-reset b/arch/arm/boards/mnt-reform2-rk3588/defaultenv-mnt-pocket-reform-radxa-cm5/init/disp-reset
 new file mode 100644
-index 0000000000..314cb76f18
+index 0000000000..b95af79753
 --- /dev/null
 +++ b/arch/arm/boards/mnt-reform2-rk3588/defaultenv-mnt-pocket-reform-radxa-cm5/init/disp-reset
-@@ -0,0 +1,21 @@
+@@ -0,0 +1,29 @@
 +#!/bin/sh
 +# Pulse panel hardware RESX via the RP2040 system controller before autoboot.
 +#
-+# The RP2040 owns PIN_DISP_RESET (GPIO 2) and pulses it on cold boot, but not
-+# on warm reboot. The 'r' SPI command triggers a 20ms active-low pulse, giving
-+# the panel a clean reset regardless of how barebox was entered.
++# The RP2040 owns PIN_DISP_RESET (GPIO 2). It pulses this pin on cold boot.
++# It does not pulse this pin on warm reboot. This script does that pulse.
 +#
-+# The reform2_lpc protocol requires two separate SPI transactions with a 50ms
-+# gap between them. Write and read must be separate calls: the RP2040 processes
-+# the command in a timer interrupt after the first transaction completes, then
-+# fills its TX FIFO with the response before the second transaction clocks it
-+# out. A combined write+read in one transaction leaves no time for this and
-+# the RP2040 sends zeros.
++# Write and read are separate SPI transactions with a 50ms gap. The RP2040
++# processes the command in a timer interrupt after the write transaction
++# ends. It then fills its response buffer before the read transaction. A
++# combined write and read does not give it time to do this. It would send
++# back zeros.
 +#
-+# Command: { 0xb5, 'r'=0x72, arg1=0x01, checksum=0xc6 }
-+# checksum = 0xb5 ^ 0x72 ^ 0x01 = 0xc6
-+# Response: 8 bytes (ignored); RESX pulse occurs after the response is sent.
-+spi -b 0 -c 0 -m 1 -f 1000000 0xb5 0x72 0x01 0xc6
++# The response is 8 bytes. We read it but ignore it.
++
++# assert reset
++spi -b 0 -c 0 -m 1 -f 1000000 0x28 0x73 0x65 0x74 0x2d 0x67 0x70 0x69
++msleep 1
++spi -b 0 -c 0 -m 1 -f 1000000 0x6f 0x20 0x30 0x20 0x30 0x29
++msleep 50
++spi -b 0 -c 0 -m 1 -f 1000000 -r 8
++msleep 50
++
++# release reset
++spi -b 0 -c 0 -m 1 -f 1000000 0x28 0x73 0x65 0x74 0x2d 0x67 0x70 0x69
++msleep 1
++spi -b 0 -c 0 -m 1 -f 1000000 0x6f 0x20 0x30 0x20 0x31 0x29
 +msleep 50
 +spi -b 0 -c 0 -m 1 -f 1000000 -r 8
 +msleep 50
 -- 
-2.43.0
+2.53.0
 
