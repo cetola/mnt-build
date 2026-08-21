@@ -115,7 +115,7 @@
 		num-chipselects = <1>;
 
 		spidev@0 {
-			compatible = "mntre,lpc11u24";
+			compatible = "mntre,system-controller";
 			spi-max-frequency = <1000000>;
 			reg = <0>;
 		};
