@@ -4,26 +4,7 @@ Date: Sat, 22 Aug 2026 18:10:00 -0700
 Subject: mnt-sc: fix inverted "err " response check
 
 sc_cmdresp_retry()'s response parser branches on whether the firmware's
-reply starts with "err ":
-
-	} else if (vcount >= 4 && strncmp(rxbuf, "err ", 4)) {
-		dev_err(&mntsc->spi->dev, "mntsc: error response: %s\n", rxbuf);
-	...
-	} else {
-		dev_err(&mntsc->spi->dev, "mntsc: couldn't parse response: %s\n", rxbuf);
-
-strncmp() returns 0 when the strings match. Used directly as a boolean
-here without negation, this condition is true when rxbuf does NOT start
-with "err ", so a genuine firmware error response falls through to the
-"couldn't parse response" branch instead of the intended "error
-response" branch, mislabeling real firmware-reported errors as parse
-failures (e.g. "mntsc: couldn't parse response: err maxp" and
-"...err undf", observed on RK3588S/Radxa CM5 hardware).
-
-Both branches otherwise do the same thing (log, set ret = -EAGAIN,
-break), so this doesn't change retry behavior, only which message gets
-logged - worth fixing anyway since it actively misleads whoever's
-reading dmesg to debug a firmware-side error.
+reply starts with "err " but strncmp() returns 0 when the strings match.
 
 Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---

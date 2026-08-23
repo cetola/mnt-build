@@ -8,28 +8,7 @@ string as its id name. The SPI core strips the vendor prefix off the DT
 compatible string before matching against a driver's id_table (see the
 "Strip off any vendor prefix" block in __spi_register_driver(),
 drivers/spi/spi.c), so it looks up "system-controller", not
-"mntre,system-controller". With the prefix left in, the id never matches,
-and per that same function's comment, SPI module autoloading depends on
-this id_table match, not on the of_match_table compatible string: "For
-Really Good Reasons we use spi: modaliases not of: modaliases for DT so
-module autoloading won't work if we don't have a spi_device_id as well as
-a compatible string."
-
-Practical effect: mnt_sc.ko is never auto-loaded by udev at boot, even
-when the DTB correctly declares a "mntre,system-controller" node and the
-module is present under /lib/modules. Confirmed on RK3588S (Radxa CM5):
-`modprobe mnt_sc` binds and probes fine (driver reports "MNT System
-Controller v4"), but nothing triggers that modprobe automatically.
-
-reform2_lpc.c, the sibling driver this one was adapted from, already
-strips the prefix correctly (g_spi_dev_id_list[] uses "lpc11u24", not
-"mntre,lpc11u24"), so this is a straightforward port oversight, not a
-deliberate choice - no comment in this driver, the patch that added it,
-or elsewhere in the kernel tree explains keeping the prefix, and no other
-driver in the tree registers "system-controller" as a spi_device_id name,
-so there's no collision risk motivating it either.
-
-Fix: drop the vendor prefix, matching reform2_lpc.c's convention.
+"mntre,system-controller".
 
 Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---

@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Sun, 23 Aug 2026 12:00:00 -0700
+Subject: mnt-sc: fix store_uart stack buffer overflow
+
+snprintf's size argument was `count` when count > 64, not the actual
+64-byte size of `cmd`. Writing more than 64 bytes to the uart sysfs
+attribute overflowed the stack buffer.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/firmware/mnt-sc.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/firmware/mnt-sc.c b/drivers/firmware/mnt-sc.c
+index 8bcda2173b3b..3c4d5e6f7081 100644
+--- a/drivers/firmware/mnt-sc.c
++++ b/drivers/firmware/mnt-sc.c
+@@ -487,7 +487,7 @@ static ssize_t store_uart(struct device *dev, struct device_attribute *attr,
+ 	struct mntsc_driver_data *mntsc =
+ 		(struct mntsc_driver_data *)dev_get_drvdata(dev);
+ 	char cmd[64];
+-	snprintf(cmd, (count > 64 ? count : 64), "%s", buf);
++	snprintf(cmd, sizeof(cmd), "%s", buf); // was unbounded for count > 64
+ 	cmd[63] = 0;
+ 	sc_cmdresp_retry(mntsc, cmd, uart_resp);
+ 	return count;
+--
+2.47.3
