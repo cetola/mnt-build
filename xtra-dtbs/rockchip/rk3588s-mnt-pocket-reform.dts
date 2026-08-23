@@ -114,10 +114,16 @@
 		cs-gpios = <&gpio1 RK_PD4 0>; // GPIO4
 		num-chipselects = <1>;
 
-		spidev@0 {
+		mnt_sc: spidev@0 {
 			compatible = "mntre,system-controller";
 			spi-max-frequency = <1000000>;
 			reg = <0>;
+			gpio-controller;
+			#gpio-cells = <2>;
+
+			backlight {
+				// optional backlight populated by SC
+			};
 		};
 	};
 };
@@ -383,8 +389,12 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&disp_en>;
 		
-		// reset is driven by rp2040
-		// dcdc en is also driven by rp2040
+		// reset and dcdc en are driven by the system controller (disp_reset,
+		// offset 0), not a raw SoC GPIO; dispv2-gpios (disp_v2_bl_unlock,
+		// offset 8) is what the SC's driver watches to know when to create
+		// the backlight device.
+		reset-gpios = <&mnt_sc 0 GPIO_ACTIVE_LOW>;
+		dispv2-gpios = <&mnt_sc 8 GPIO_ACTIVE_HIGH>;
 		// actually backlight enable
 		enable-gpios = <&gpio1 RK_PC2 GPIO_ACTIVE_HIGH>;
 		probe-mode-lpm;
