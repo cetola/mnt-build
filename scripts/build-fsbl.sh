@@ -609,105 +609,25 @@ get_fsbl_artifact() {
   return "$rc"
 }
 
+# Maps each value-taking flag to the variable it sets.
+declare -A FSBL_ARG_VARS=(
+  [--sysimage]=SYSIMAGE
+  [--mode]=BOOTLOADER_SOURCE_MODE
+  [--ref]=UBOOT_REF
+  [--sha]=UBOOT_SHA
+  [--repo]=UBOOT_REPO_URL
+  [--downloads-dir]=DOWNLOADS_DIR
+  [--work-dir]=WORK_DIR
+  [--build-cmd]=UBOOT_BUILD_CMD
+  [--artifact-path]=UBOOT_ARTIFACT_PATH
+  [--artifact-glob]=UBOOT_ARTIFACT_GLOB
+  [--cross-compile]=UBOOT_CROSS_COMPILE
+  [--defconfig]=UBOOT_DEFCONFIG
+)
+
 fsbl_parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --sysimage)
-        [[ $# -lt 2 ]] && {
-          fsbl_usage
-          fsbl_die "--sysimage requires an argument"
-        }
-        SYSIMAGE="$2"
-        shift 2
-        ;;
-      --mode)
-        [[ $# -lt 2 ]] && {
-          fsbl_usage
-          fsbl_die "--mode requires an argument"
-        }
-        BOOTLOADER_SOURCE_MODE="$2"
-        shift 2
-        ;;
-      --ref)
-        [[ $# -lt 2 ]] && {
-          fsbl_usage
-          fsbl_die "--ref requires an argument"
-        }
-        UBOOT_REF="$2"
-        shift 2
-        ;;
-      --sha)
-        [[ $# -lt 2 ]] && {
-          fsbl_usage
-          fsbl_die "--sha requires an argument"
-        }
-        UBOOT_SHA="$2"
-        shift 2
-        ;;
-      --repo)
-        [[ $# -lt 2 ]] && {
-          fsbl_usage
-          fsbl_die "--repo requires an argument"
-        }
-        UBOOT_REPO_URL="$2"
-        shift 2
-        ;;
-      --downloads-dir)
-        [[ $# -lt 2 ]] && {
-          fsbl_usage
-          fsbl_die "--downloads-dir requires an argument"
-        }
-        DOWNLOADS_DIR="$2"
-        shift 2
-        ;;
-      --work-dir)
-        [[ $# -lt 2 ]] && {
-          fsbl_usage
-          fsbl_die "--work-dir requires an argument"
-        }
-        WORK_DIR="$2"
-        shift 2
-        ;;
-      --build-cmd)
-        [[ $# -lt 2 ]] && {
-          fsbl_usage
-          fsbl_die "--build-cmd requires an argument"
-        }
-        UBOOT_BUILD_CMD="$2"
-        shift 2
-        ;;
-      --artifact-path)
-        [[ $# -lt 2 ]] && {
-          fsbl_usage
-          fsbl_die "--artifact-path requires an argument"
-        }
-        UBOOT_ARTIFACT_PATH="$2"
-        shift 2
-        ;;
-      --artifact-glob)
-        [[ $# -lt 2 ]] && {
-          fsbl_usage
-          fsbl_die "--artifact-glob requires an argument"
-        }
-        UBOOT_ARTIFACT_GLOB="$2"
-        shift 2
-        ;;
-      --cross-compile)
-        [[ $# -lt 2 ]] && {
-          fsbl_usage
-          fsbl_die "--cross-compile requires an argument"
-        }
-        UBOOT_CROSS_COMPILE="$2"
-        shift 2
-        ;;
-      --defconfig)
-        [[ $# -lt 2 ]] && {
-          fsbl_usage
-          fsbl_die "--defconfig requires an argument"
-        }
-        UBOOT_DEFCONFIG="$2"
-        shift 2
-        ;;
       --diff)
         FSBL_DIFF=1
         shift
@@ -722,8 +642,17 @@ fsbl_parse_args() {
         return 0
         ;;
       *)
-        fsbl_usage
-        fsbl_die "Unknown argument: $1"
+        if [[ -n "${FSBL_ARG_VARS[$1]:-}" ]]; then
+          [[ $# -lt 2 ]] && {
+            fsbl_usage
+            fsbl_die "$1 requires an argument"
+          }
+          printf -v "${FSBL_ARG_VARS[$1]}" '%s' "$2"
+          shift 2
+        else
+          fsbl_usage
+          fsbl_die "Unknown argument: $1"
+        fi
         ;;
     esac
   done

@@ -128,8 +128,10 @@ class KernelBuilder:
                 try:
                     proc.stdin.write(input_data)
                     proc.stdin.close()
-                except Exception:
-                    pass
+                except OSError as e:
+                    proc.kill()
+                    proc.wait()
+                    raise BuildError(f"Failed to write input to command: {cmd_str}") from e
 
             assert proc.stdout is not None
             for line in iter(proc.stdout.readline, ''):

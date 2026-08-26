@@ -452,9 +452,17 @@ class UBootManager:
         # e.g. "rk3588s-mnt-pocket-reform" -> look for "*mnt-pocket-reform_defconfig"
         parts = base.split("-", 1)
         if len(parts) == 2:
-            machine_part = parts[1]
+            soc_prefix, machine_part = parts
             candidates = sorted(checkout_dir.glob(f"*{machine_part}_defconfig"))
             if candidates:
+                # A shared checkout can hold defconfigs for more than one SoC
+                # variant of the same machine (e.g. rk3588 and rk3588s both
+                # matching "*mnt-pocket-reform_defconfig"). Prefer the one
+                # whose SoC prefix matches exactly, so the wrong variant
+                # isn't picked just because it sorts first.
+                for candidate in candidates:
+                    if candidate.name.split("-", 1)[0] == soc_prefix:
+                        return candidate
                 return candidates[0]
 
         return None
