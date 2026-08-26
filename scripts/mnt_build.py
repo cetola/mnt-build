@@ -40,7 +40,6 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
               kernel_only: bool = DEFAULT_KERNEL_ONLY,
               dtbs_only: bool = False,
               modules_only: bool = False) -> int:
-    """Run the kernel build process."""
     if cross_compile is None:
         cross_compile = DEFAULT_CROSS_COMPILE
     normalized_cross_compile = cross_compile.strip()
@@ -187,7 +186,6 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
 
 
 def run_clean(build_dir: Optional[Path] = None) -> int:
-    """Clean kernel repository state for development."""
     config = BuildConfig.create(version=DEFAULT_KERNEL_VERSION, build_dir=build_dir)
     config.build_dir.mkdir(parents=True, exist_ok=True)
     logger = setup_logging(config.log_file)
@@ -222,7 +220,6 @@ def run_clean(build_dir: Optional[Path] = None) -> int:
 
 
 def run_uboot_list() -> int:
-    """List all sysimages and their U-Boot configuration."""
     mnt_build_root = Path(__file__).parent.parent
     manager = UBootManager(mnt_build_root)
     try:
@@ -243,7 +240,7 @@ def run_uboot_list() -> int:
 
 
 def run_uboot_build(sysimage: str) -> int:
-    """Build U-Boot for a sysimage, preparing the checkout if needed."""
+    """Prepares the checkout if needed, then builds."""
     mnt_build_root = Path(__file__).parent.parent
     manager = UBootManager(mnt_build_root)
     try:
@@ -260,7 +257,7 @@ def run_uboot_build(sysimage: str) -> int:
 
 
 def run_uboot_diff(sysimage: str) -> int:
-    """Build U-Boot (if needed) then compare against the MNT prebuilt artifact."""
+    """Builds if needed, then compares against the MNT prebuilt artifact."""
     mnt_build_root = Path(__file__).parent.parent
     manager = UBootManager(mnt_build_root)
     try:
@@ -288,7 +285,6 @@ def run_uboot_reset(sysimage: str) -> int:
 
 
 def run_uboot_clean(sysimage: str) -> int:
-    """Remove the U-Boot checkout for a sysimage."""
     mnt_build_root = Path(__file__).parent.parent
     manager = UBootManager(mnt_build_root)
     try:
@@ -302,7 +298,6 @@ def run_uboot_clean(sysimage: str) -> int:
 
 
 def run_uboot_menuconfig(sysimage: str) -> int:
-    """Run make menuconfig in the U-Boot checkout for a sysimage."""
     mnt_build_root = Path(__file__).parent.parent
     manager = UBootManager(mnt_build_root)
     try:
@@ -330,7 +325,6 @@ def run_uboot_dry_run(sysimage: str) -> int:
 
 
 def run_barebox_list() -> int:
-    """List all sysimages and their barebox configuration."""
     mnt_build_root = Path(__file__).parent.parent
     manager = BareboxManager(mnt_build_root)
     try:
@@ -346,7 +340,7 @@ def run_barebox_list() -> int:
 
 
 def run_barebox_build(sysimage: str) -> int:
-    """Build barebox for a sysimage, preparing the checkout if needed."""
+    """Prepares the checkout if needed, then builds."""
     mnt_build_root = Path(__file__).parent.parent
     manager = BareboxManager(mnt_build_root)
     try:
@@ -360,7 +354,7 @@ def run_barebox_build(sysimage: str) -> int:
 
 
 def run_barebox_diff(sysimage: str) -> int:
-    """Build barebox (if needed) then compare against the MNT CI artifact."""
+    """Builds if needed, then compares against the MNT CI artifact."""
     mnt_build_root = Path(__file__).parent.parent
     manager = BareboxManager(mnt_build_root)
     try:
@@ -374,7 +368,6 @@ def run_barebox_diff(sysimage: str) -> int:
 
 
 def run_barebox_menuconfig(sysimage: str) -> int:
-    """Run make menuconfig in the barebox checkout for a sysimage."""
     mnt_build_root = Path(__file__).parent.parent
     manager = BareboxManager(mnt_build_root)
     try:
@@ -402,7 +395,6 @@ def run_barebox_dry_run(sysimage: str) -> int:
 
 
 def run_barebox_clean(sysimage: str) -> int:
-    """Remove the barebox checkout for a sysimage."""
     mnt_build_root = Path(__file__).parent.parent
     manager = BareboxManager(mnt_build_root)
     try:

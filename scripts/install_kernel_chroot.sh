@@ -105,7 +105,7 @@ install_pkgbuild_deps() {
       | sort -u
   )
 
-  # Exclude package names built by this same PKGBUILD; they won't exist in repos.
+  # Exclude package names built by this same PKGBUILD. They won't exist in repos.
   mapfile -t local_pkg_names < <(
     printf '%s\n' "$srcinfo" \
       | awk -F' = ' '/^[[:space:]]*pkgname[[:space:]]*=/ {print $2}' \

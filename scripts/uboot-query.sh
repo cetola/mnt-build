@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
-# uboot-query.sh
-#
 # Sourceable config bridge between sysimage-config.sh and the Python uboot module.
 #
 # Usage:
-#   uboot-query.sh                — print supported sysimage names, one per line
-#   uboot-query.sh <sysimage>     — print KEY=value config lines for one sysimage
+#   uboot-query.sh              prints supported sysimage names, one per line
+#   uboot-query.sh <sysimage>   prints KEY=value config lines for one sysimage
 #
 # Output keys (single sysimage mode):
 #   BOOTLOADER_PROJECT, BOOTLOADER_TAG,
@@ -16,7 +14,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Stub logging — we only want structured output on stdout.
+# Stub logging. Only structured output goes to stdout.
 log()      { :; }
 log_warn() { :; }
 die()      { echo "ERROR: $*" >&2; exit 1; }
@@ -33,8 +31,8 @@ fi
 
 SYSIMAGE="$1"
 
-# Detect config source before configure_sysimage loads it (both call
-# find_machine_conf_for_sysimage; the second call is cheap — just a file scan).
+# configure_sysimage also calls find_machine_conf_for_sysimage. Calling it
+# again here is cheap, it's just a file scan.
 CONFIG_SOURCE_PATH=""
 CONFIG_SOURCE_IS_FALLBACK=0
 if machine_conf="$(find_machine_conf_for_sysimage "$SYSIMAGE" 2>/dev/null)"; then

@@ -10,8 +10,8 @@ readonly SUPPORTED_SYSIMAGES=(
 
 # Sysimages for which barebox is a supported bootloader option.
 # Add an entry here to make --bootloader barebox available for a new machine.
-# This only applies to machines loaded from reform-tools/machines/ confs (which
-# can't declare BAREBOX_PROJECT themselves); local-machines/ confs set it directly.
+# Only applies to machines loaded from reform-tools/machines/ confs, which
+# can't declare BAREBOX_PROJECT themselves. local-machines/ confs set it directly.
 readonly BAREBOX_SUPPORTED_SYSIMAGES=(
   reform-next-system-rk3588
   pocket-reform-system-rk3588
@@ -20,10 +20,10 @@ readonly BAREBOX_SUPPORTED_SYSIMAGES=(
 
 # Default barebox repo and ref used for all supported sysimages.
 # mnt-reform-barebox layers MNT additions (build.sh, mnt-reform-defconfig, CI)
-# as commits on top of upstream barebox releases. The MNT release tags (v2026.06.0
-# etc.) track upstream and do NOT include those additions — they land on main after
-# each tag. Pin to the latest main SHA until MNT cuts a tag that includes build.sh.
-# Update this SHA when pulling in new barebox/MNT changes.
+# as commits on top of upstream barebox releases. MNT release tags (v2026.06.0
+# etc.) track upstream and do not include those additions, they land on main
+# after each tag. Pin to the latest main SHA until MNT cuts a tag that includes
+# build.sh. Update this SHA when pulling in new barebox/MNT changes.
 readonly BAREBOX_DEFAULT_PROJECT="mnt-reform-barebox"
 readonly BAREBOX_DEFAULT_TAG="1cd690cc061990e2bcef2cd5b1c5aa4cfa749e09"
 
@@ -287,7 +287,6 @@ find_machine_conf_for_sysimage() {
 load_machine_conf() {
   local conf="$1"
 
-  # Reset in case this function is called more than once.
   reset_sysimage_config
 
   # shellcheck source=/dev/null

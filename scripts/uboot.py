@@ -73,7 +73,6 @@ class UBootManager:
         return folder + (" (fallback)" if is_fallback else "")
 
     def get_info(self, sysimage: str) -> SysimageUBootInfo:
-        """Return U-Boot config for a single sysimage."""
         try:
             data = self._query_sysimage(sysimage)
         except subprocess.CalledProcessError as e:
@@ -110,18 +109,16 @@ class UBootManager:
             print(f"[uboot] To start fresh: mnt-build uboot --sysimage {sysimage} --clean")
             return 0
 
-        # Clone
         print(f"[uboot] Cloning {repo_url} ...")
         subprocess.run(["git", "clone", repo_url, str(checkout_dir)], check=True)
 
-        # Checkout tag (detached HEAD so accidental commits are obvious)
+        # Detached HEAD, so accidental commits are obvious.
         print(f"[uboot] Checking out {info.tag} ...")
         subprocess.run(
             ["git", "-C", str(checkout_dir), "checkout", "--detach", info.tag],
             check=True,
         )
 
-        # Apply patches
         patches = sorted(patches_dir.glob("*.patch")) if patches_dir.is_dir() else []
         if not patches:
             print(f"[uboot] No patches to apply (xtra-patches/u-boot/{info.project}/ is empty)")
@@ -142,7 +139,6 @@ class UBootManager:
             p = checkout_dir / name
             if p.is_file():
                 return p
-        # Glob fallback: newest *-flash.bin anywhere in the tree
         matches = sorted(checkout_dir.rglob("*-flash.bin"), key=lambda p: p.stat().st_mtime, reverse=True)
         if matches:
             return matches[0]
@@ -152,7 +148,10 @@ class UBootManager:
         )
 
     # Build prerequisites: (kind, check_name, apt_package, description)
-    # kind: 'tool' -> shutil.which; 'python' -> importlib; 'library' -> pkg-config
+    # kind is one of:
+    #   tool    -> shutil.which
+    #   python  -> importlib
+    #   library -> pkg-config
     _BUILD_PREREQS = [
         ("tool",    "make",                    "build-essential",    "build system"),
         ("tool",    "git",                     "git",                "version control"),
@@ -184,10 +183,9 @@ class UBootManager:
                     if result.returncode != 0:
                         missing.append((pkg, desc))
                 except FileNotFoundError:
-                    # pkg-config not installed — skip library checks
                     pass
 
-        # Cross-compiler is derived from cross_compile prefix at runtime
+        # Not in _BUILD_PREREQS: derived from cross_compile at runtime, not fixed.
         compiler = f"{cross_compile}gcc"
         if not shutil.which(compiler):
             missing.append((f"gcc-{cross_compile.rstrip('-')}", f"cross-compiler ({compiler})"))
@@ -210,7 +208,6 @@ class UBootManager:
         return proc.returncode
 
     def build(self, sysimage: str, cross_compile: str = "aarch64-linux-gnu-") -> int:
-        """Build U-Boot for a sysimage. Prepares the checkout first if needed."""
         print(f"[uboot] Checking build prerequisites ...", flush=True)
         missing = self._check_build_prerequisites(cross_compile)
         if missing:
@@ -350,7 +347,7 @@ class UBootManager:
         """Build (if needed) then byte-level diff against the MNT prebuilt artifact.
 
         Downloads the prebuilt from source.mnt.re (GitLab CI artifacts) for comparison.
-        GitLab artifacts expire, so the download is best-effort — a 404 is reported
+        GitLab artifacts expire, so the download is best-effort. A 404 is reported
         clearly rather than treated as an error.
         """
         info = self.get_info(sysimage)
@@ -377,8 +374,7 @@ class UBootManager:
         print(f"  SHA256: {built_sha256}")
         print()
 
-        # Custom sysimages (config from local-machines/) have no CI artifact —
-        # there is no prebuilt binary to download.
+        # Custom sysimages (config from local-machines/) have no prebuilt CI artifact.
         if info.config_source.startswith("local-machines"):
             print(
                 "This is a custom sysimage (local-machines/) — no prebuilt artifact\n"
@@ -386,9 +382,8 @@ class UBootManager:
             )
             return 1
 
-        # Download the prebuilt for byte-level comparison.
-        # Use curl directly (same URL pattern as build-fsbl.sh) — avoids build-fsbl.sh's
-        # SHA1 hard-fail which would reject any source build not matching MNT's CI binary.
+        # curl directly, same URL pattern as build-fsbl.sh, to avoid its SHA1
+        # hard-fail, which would reject any source build not matching MNT's CI binary.
         prebuilt_downloads = downloads_dir / "prebuilt-ref"
         prebuilt_downloads.mkdir(parents=True, exist_ok=True)
         prebuilt_artifact = prebuilt_downloads / info.filename
@@ -454,8 +449,7 @@ class UBootManager:
         if exact.is_file():
             return exact
 
-        # Strip SoC prefix (first dash-separated token) and match on machine part.
-        # e.g. "rk3588s-mnt-pocket-reform" → look for "*mnt-pocket-reform_defconfig"
+        # e.g. "rk3588s-mnt-pocket-reform" -> look for "*mnt-pocket-reform_defconfig"
         parts = base.split("-", 1)
         if len(parts) == 2:
             machine_part = parts[1]
@@ -537,7 +531,7 @@ class UBootManager:
 
         The actual U-Boot source lives in uboot/<project>/u-boot/ (a sub-repo
         managed by build.sh). If no .config exists there, the matching defconfig
-        is loaded automatically — no prior build required.
+        is loaded automatically. No prior build required.
         """
         info = self.get_info(sysimage)
         checkout_dir = self._uboot_root / info.project
@@ -582,7 +576,6 @@ class UBootManager:
         return result.returncode
 
     def clean(self, sysimage: str) -> int:
-        """Remove the U-Boot checkout for a sysimage."""
         info = self.get_info(sysimage)
         checkout_dir = self._uboot_root / info.project
 

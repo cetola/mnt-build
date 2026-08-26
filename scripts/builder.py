@@ -40,7 +40,6 @@ class KernelBuilder:
         self.logger.info("=" * 60)
 
     def _make_kernel_vars(self) -> List[str]:
-        """Return kernel make variable assignments with optional toolchain prefix."""
         args = [f"ARCH={self.arch}", f"LOCALVERSION={self.config.localversion}"]
         if self.cross_compile:
             args.append(f"CROSS_COMPILE={self.cross_compile}")
@@ -111,7 +110,7 @@ class KernelBuilder:
                 self.logger.error(f"stderr: {e.stderr}")
                 raise BuildError(f"Command failed: {cmd_str}") from e
 
-        # stream_output == True: use Popen and stream lines to logger + file
+        # stream_output is True here. Use Popen, stream lines to logger + file.
         logfile_path = Path(self.config.log_file)
         with open(logfile_path, "a", buffering=1) as logfile:
             proc = subprocess.Popen(
@@ -150,10 +149,8 @@ class KernelBuilder:
     # ------------------------------------------------------------------
 
     def check_prerequisites(self, run_olddefconfig: bool = False):
-        """Verify all required tools and files exist."""
         self.logger.info("Checking prerequisites...")
 
-        # Verify the kernel tree looks valid before invoking make
         if not (self.config.linux_dir / "Makefile").exists():
             raise BuildError(f"Kernel source not found at: {self.config.linux_dir}")
 
@@ -418,11 +415,10 @@ class KernelBuilder:
 
     @staticmethod
     def _is_patch_content(content: str) -> bool:
-        """Heuristic: does this look like a real unified diff, not a skip-reason note?"""
+        """Guesses whether this looks like a real unified diff, not a skip-reason note."""
         return content.startswith("@@ -") or "\n@@ -" in content
 
     def _format_failed_patch(self, patch_name: str, result: subprocess.CompletedProcess) -> str:
-        """Format a failed patch entry for the log file."""
         return (
             f"{'=' * 60}\n"
             f"Failed patch: {patch_name}\n"
@@ -436,7 +432,7 @@ class KernelBuilder:
     # ------------------------------------------------------------------
 
     def _resolve_origin_default_branch(self) -> str:
-        """Resolve default branch name from origin/HEAD (fallback: main/master)."""
+        """Resolve default branch name from origin/HEAD (falls back to main or master)."""
         head_ref = self.run_command(
             ['git', 'symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'],
             cwd=self.config.linux_dir,
@@ -494,7 +490,6 @@ class KernelBuilder:
         self.run_command(['git', 'reset', '--hard', f'origin/{default_branch}'], cwd=self.config.linux_dir)
         self.run_command(['git', 'clean', '-fd'], cwd=self.config.linux_dir)
 
-        # Build set of origin branch names.
         remote_refs = self.run_command(
             ['git', 'for-each-ref', '--format=%(refname:short)', 'refs/remotes/origin'],
             cwd=self.config.linux_dir
@@ -518,7 +513,7 @@ class KernelBuilder:
                 self.run_command(['git', 'branch', '-D', branch], cwd=self.config.linux_dir, check=False)
                 deleted_branches.append(branch)
 
-        # Remove local-only tags; keep only tags that exist on origin.
+        # Remove local-only tags. Keep only tags that exist on origin.
         remote_tags_output = self.run_command(
             ['git', 'ls-remote', '--tags', '--refs', 'origin'],
             cwd=self.config.linux_dir
@@ -564,9 +559,7 @@ class KernelBuilder:
     def setup_custom_dts_files(self):
         """Copy custom DTS files and update vendor Makefiles.
 
-        Copies DTS files to the kernel source tree and adds corresponding
-        entries to vendor-specific Makefiles for DTB creation.
-        Sources: reform-debian-packages (DTS_CONFIGS) and xtra-dtbs/ (optional).
+        Sources are reform-debian-packages (DTS_CONFIGS) and xtra-dtbs/ (optional).
         """
         if not self._uses_dtbs():
             self.logger.info(f"Skipping custom DTS setup for ARCH={self.arch}")
@@ -635,11 +628,8 @@ class KernelBuilder:
     # ------------------------------------------------------------------
 
     def update_config_with_olddefconfig(self, skip_git_operations: bool = False):
-        """Update kernel config using olddefconfig.
-
-        Prepares the kernel to the same state as a normal build, then runs
-        olddefconfig and saves the result back to the configs directory.
-        """
+        """Prepare the kernel like a normal build, run olddefconfig, then save
+        the result back to the configs directory."""
         self.logger.info("Updating kernel config with olddefconfig...")
         self.logger.info("Preparing kernel to build state before running olddefconfig...")
 
@@ -711,8 +701,8 @@ class KernelBuilder:
             self.logger.info("Copying kernel config...")
             shutil.copy2(self.config.config_file, self.config.linux_dir / '.config')
 
-        # Commit changes and tag, this is to avoid -dirty in our kernel name
-        # Ideally we'd build the kernel outside a git repo, but for now, this
+        # Commit and tag so the kernel version string doesn't end up -dirty.
+        # Ideally we'd build outside a git repo entirely, but this works for now.
         self.log_phase("Git Snapshot")
         self.logger.info("Create git tag and commit.")
         self.run_command(['git', 'add', '--all'], cwd=self.config.linux_dir)
@@ -723,7 +713,6 @@ class KernelBuilder:
             cwd=self.config.linux_dir
         )
 
-        # Compile
         if self.kernel_only:
             self.logger.info(
                 f"Compiling kernel image only with {self.config.jobs} jobs "
@@ -782,7 +771,6 @@ class KernelBuilder:
     # ------------------------------------------------------------------
 
     def build_lpc_module(self):
-        """Build the LPC kernel module."""
         self.logger.info("Building LPC module...")
         lpc_dir = self.config.build_dir / "reform-tools" / "lpc"
 
@@ -803,7 +791,6 @@ class KernelBuilder:
         self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} LPC module built")
 
     def build_qcacld2_module(self):
-        """Build the QCACLD2 WiFi module."""
         self.logger.info("Building QCACLD2 WiFi module...")
         qca_dir = self.config.build_dir / "qcacld2"
 
@@ -943,7 +930,6 @@ class KernelBuilder:
         return dest_path
 
     def create_headers_tarball(self, headers_dir: Optional[Path] = None):
-        """Create a headers tarball from the extmod build tree."""
         self.logger.info("Creating headers tarball...")
 
         if headers_dir is None:

@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ARM_STAGING="${SCRIPT_DIR}/arm-libs-staging"
 TMPWORK=""
 
-# Prefer an explicit override, then whichever of docker/podman is installed.
+# CONTAINER_ENGINE overrides. Otherwise docker wins if both are installed.
 if [ -z "${CONTAINER_ENGINE:-}" ]; then
     if command -v docker >/dev/null 2>&1; then
         CONTAINER_ENGINE=docker
@@ -20,9 +20,7 @@ if [ -z "${CONTAINER_ENGINE:-}" ]; then
     fi
 fi
 
-# Always clean up intermediate download scratch space on exit.
-# ARM_STAGING is intentionally left behind on failure so the caller
-# can inspect what was (or wasn't) staged.
+# ARM_STAGING is left behind on failure so the caller can inspect it.
 cleanup_tmpwork() {
     [ -z "${TMPWORK}" ] || rm -rf "${TMPWORK}"
 }
@@ -35,9 +33,9 @@ ALARM_MIRRORS=(
     "http://sg.mirror.archlinuxarm.org/aarch64"
 )
 
-# Try every configured mirror for <repo>/<pkg>; write the tarball to <outfile>.
-# <workdir> must be a private scratch directory — it will hold the repo.db.
-# Returns 1 if the package cannot be resolved from any mirror.
+# Tries every mirror for <repo>/<pkg>, writes the tarball to <outfile>.
+# <workdir> must be a private scratch directory, it holds repo.db.
+# Returns 1 if no mirror has the package.
 try_download_alarm_pkg() {
     local repo="$1" pkg="$2" outfile="$3" workdir="$4"
     for mirror in "${ALARM_MIRRORS[@]}"; do
@@ -55,8 +53,7 @@ try_download_alarm_pkg() {
     return 1
 }
 
-# Download an ALARM package and copy its shared libs into arm-libs-staging/lib/.
-# Each call gets its own scratch subdir so calls can run concurrently.
+# Each call gets its own scratch subdir, so calls can run concurrently.
 install_alarm_libs() {
     local repo="$1" pkg="$2"
     local workdir
@@ -74,7 +71,7 @@ prepare_arm_libs() {
     rm -rf "${ARM_STAGING}"
     mkdir -p "${ARM_STAGING}/lib" "${ARM_STAGING}/include"
 
-    # All four packages are independent — fetch them in parallel.
+    # All four packages are independent. Fetch them in parallel.
     local pids=()
 
     {

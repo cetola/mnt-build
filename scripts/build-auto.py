@@ -11,7 +11,6 @@ import argparse
 import os
 import sys
 
-# Import build functionality from mnt_build.py
 from mnt_build import (
     run_build,
     DEFAULT_KERNEL_VERSION,

@@ -217,14 +217,13 @@ find_constraining_deps() {
   local symbol="$1"
   local resolved_config="$2"
 
-  # Find the Kconfig file that defines this symbol.
   local kconfig_file
   kconfig_file="$(rg -l "^[[:space:]]*(menuconfig|config)[[:space:]]+${symbol}$" \
     "$KERNEL_DIR" --glob '*Kconfig*' -m 1 2>/dev/null || true)"
   [[ -z "$kconfig_file" ]] && return 0
 
-  # Use awk to extract all "depends on" expressions for this symbol's block,
-  # handling backslash-continuation lines and stopping at the next entry.
+  # Extracts all "depends on" expressions for this symbol's block, handling
+  # backslash-continuation lines and stopping at the next entry.
   local dep_expr
   dep_expr="$(awk -v sym="$symbol" '
     /^[[:space:]]*(menuconfig|config)[[:space:]]+/ {
@@ -247,7 +246,7 @@ find_constraining_deps() {
 
   [[ -z "${dep_expr// }" ]] && return 0
 
-  # Extract bare symbol names — uppercase words that are not Kconfig keywords.
+  # Extract bare symbol names, uppercase words that are not Kconfig keywords.
   local dep_symbols
   dep_symbols="$(echo "$dep_expr" | \
     grep -oE '[A-Z][A-Z0-9_]+' | \
@@ -268,16 +267,15 @@ find_constraining_deps() {
 
 # ── Defconfig health check ────────────────────────────────────────────────────
 # Compares defconfig_arm64 directly against the pre-resolved full config for
-# this kernel version. No Kconfig tree scanning — just a fast file diff.
+# this kernel version. No Kconfig tree scanning, just a fast file diff.
 #
-#   stale-symbol  — symbol in your defconfig is absent from the resolved config
-#                   (removed or never existed in this kernel version)
-#   overridden    — symbol exists in the resolved config but at a different value
-#                   than you intended (a dependency is forcing it elsewhere)
+#   stale-symbol: symbol in your defconfig is absent from the resolved config
+#                 (removed or never existed in this kernel version)
+#   overridden:   symbol exists in the resolved config but at a different value
+#                 than you intended (a dependency is forcing it elsewhere)
 #
 # Either finding causes the script to exit so the defconfig is fixed first.
 
-# Delete the defconfig lines for every stale symbol in the health report.
 # Kernel symbol names are [A-Za-z0-9_] only, so they're regex-safe.
 remove_stale_symbols() {
   local defconfig="$1"
@@ -326,7 +324,7 @@ run_health_check() {
   normalize_config "$defconfig" "$defconfig_norm"
   normalize_config "$resolved_config" "$resolved_norm"
 
-  # Join on symbol name; flag anything that differs or is absent in the resolved config.
+  # Join on symbol name. Flag anything that differs or is absent in the resolved config.
   awk -F'\t' '
     NR==FNR {
       intended[substr($1,8)] = $2
@@ -374,7 +372,6 @@ run_health_check() {
     echo
   fi
 
-  # Offer to remove all stale symbols in one go.
   local removed_stale=0
   if [[ "$stale_count" -gt 0 ]]; then
     read -r -p "Do you want to remove all stale symbols? (Y/n): " stale_answer
@@ -390,8 +387,8 @@ run_health_check() {
     fi
   fi
 
-  # Block continuing if stale symbols remain (user declined removal), or if any
-  # overridden symbols are present (those must be resolved by hand).
+  # Stale symbols the user declined to remove, or any overridden symbol,
+  # block continuing. Overridden symbols must be resolved by hand.
   if [[ "$stale_count" -gt 0 && "$removed_stale" -eq 0 ]]; then
     echo "Stale symbols remain — fix your defconfig before running the upstream sync check."
     exit 1
@@ -436,7 +433,7 @@ while IFS=$'\t' read -r sym val; do
     continue
   fi
 
-  # Record the raw diff now; resolved result filled in after olddefconfig.
+  # Record the raw diff now. The resolved result gets filled in after olddefconfig.
   if [[ "$val" != "$base_val" ]]; then
     printf '%s\t%s\t%s\t%s\t%s\n' "$sym" "$val" "$base_val" "pending" "pending" >> "$report"
   else
@@ -601,7 +598,6 @@ if [[ ! "$answer" =~ ^[Yy]$ ]]; then
   exit 0
 fi
 
-# If there are ignored-but-differing symbols, ask whether to include them too.
 include_ignored=0
 if [[ "${#ignored_differing[@]}" -gt 0 ]]; then
   echo
@@ -612,8 +608,7 @@ if [[ "${#ignored_differing[@]}" -gt 0 ]]; then
   fi
 fi
 
-# Apply selected upstream values to the already-resolved scratch config,
-# then use savedefconfig to produce a clean minimal defconfig.
+# savedefconfig below turns this into a clean minimal defconfig.
 echo
 echo "Applying selected upstream values..."
 while IFS=$'\t' read -r sym up cur res status; do

@@ -41,12 +41,10 @@ def setup_logging(log_file: Path) -> logging.Logger:
     logger.setLevel(logging.DEBUG)
     logger.handlers.clear()
 
-    # Console handler with colors
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(ColoredFormatter())
 
-    # File handler without colors
     file_handler = logging.FileHandler(log_file)
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(

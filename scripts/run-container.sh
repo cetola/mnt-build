@@ -5,7 +5,7 @@ set -euo pipefail
 MOUNT_PATH="${GITHUB_WORKSPACE:-$HOME/mnt-build}"
 read -ra DOCKER_FLAGS <<< "${DOCKER_FLAGS:-}"
 
-# Prefer an explicit override, then whichever of docker/podman is installed.
+# CONTAINER_ENGINE overrides. Otherwise docker wins if both are installed.
 if [ -z "${CONTAINER_ENGINE:-}" ]; then
     if command -v docker >/dev/null 2>&1; then
         CONTAINER_ENGINE=docker

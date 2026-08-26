@@ -237,7 +237,7 @@ cleanup_mounts() {
   umount "$ROOT_MNT/proc" 2>/dev/null || true
   umount "$ROOT_MNT/boot" 2>/dev/null || true
   umount "$ROOT_MNT" 2>/dev/null || true
-  umount "$BOOT_MNT" 2>/dev/null || true  # Add this - clean up boot mount point too
+  umount "$BOOT_MNT" 2>/dev/null || true
 
   sync
   sleep 1
@@ -248,9 +248,9 @@ cleanup_mounts() {
 
 cleanup() {
   set +e
-  # Note: unshare -m creates a private mount namespace, so mounts inside
-  # the chroot don't need cleanup - they're automatically cleaned up when
-  # the namespace exits. We only clean up mounts we created before chroot.
+  # unshare -m creates a private mount namespace, so mounts inside the chroot
+  # don't need cleanup, they're automatically cleaned up when the namespace
+  # exits. We only clean up mounts created before entering the chroot.
   cleanup_mounts
 }
 trap cleanup EXIT
@@ -276,7 +276,7 @@ partition_image() {
 setup_loop_device() {
   log "Setting up loop device..."
   
-  # Attach AFTER partitioning; ask kernel to scan partitions immediately
+  # Attach after partitioning. Ask kernel to scan partitions immediately.
   LOOPDEV="$(losetup --find --show --partscan "${IMAGE}")"
   log "Using loop device: ${LOOPDEV}"
 
@@ -284,7 +284,7 @@ setup_loop_device() {
   udevadm settle || true
   sleep 1
 
-  # Optional: nudge the kernel to re-read partition table (best effort)
+  # Best-effort nudge for the kernel to re-read the partition table.
   partprobe "${LOOPDEV}" || true
   udevadm settle || true
   sleep 1
@@ -300,7 +300,6 @@ setup_loop_device() {
     ((attempt++))
   done
 
-  # Hard fail with useful diagnostics if still missing
   if [[ ! -b "${LOOPDEV}p1" || ! -b "${LOOPDEV}p2" ]]; then
     log_error "Partition nodes not created for ${LOOPDEV}"
     ls -l "${LOOPDEV}"* || true
@@ -582,13 +581,12 @@ reclaim_filesystem_free_space() {
   log "Reclaiming free space for better image compression..."
   local zero_fill_max_mb="${ZERO_FILL_MAX_MB:-2048}"
 
-  # Validate env input and keep a safe default.
   if ! [[ "$zero_fill_max_mb" =~ ^[0-9]+$ ]]; then
     log_warn "Invalid ZERO_FILL_MAX_MB='$zero_fill_max_mb', using 2048."
     zero_fill_max_mb=2048
   fi
 
-  # Best effort pre-trim: discard any currently free extents.
+  # Best-effort pre-trim of already-free extents.
   fstrim -v "$ROOT_MNT" || true
   fstrim -v "$BOOT_MNT" || true
 
@@ -602,7 +600,6 @@ reclaim_filesystem_free_space() {
     log "ZERO_FILL_MAX_MB=0; skipping root zero-fill."
   fi
 
-  # Keep boot fill very small.
   log "Zero-filling up to 128 MiB on boot filesystem..."
   dd if=/dev/zero of="$BOOT_MNT/.zero-fill" bs=1M count=128 status=none || true
   sync || true
@@ -719,7 +716,6 @@ main() {
   # Create working directories before opening the logfile in downloads/.
   mkdir -p "$DOWNLOADS_DIR" "$BOOT_MNT" "$ROOT_MNT"
 
-  # Setup logging
   exec > >(tee -a "$LOGFILE") 2>&1
   
   log "Logging to: $LOGFILE"
@@ -727,7 +723,6 @@ main() {
   log "Selected sysimage: $SYSIMAGE"
   echo
   
-  # Validation
   check_root
   check_required_tools
   echo
@@ -735,14 +730,12 @@ main() {
   # Fail early if bootloader source/build configuration is invalid
   preflight_bootloader_artifact
   
-  # Image creation
   create_disk_image
   partition_image
   setup_loop_device
   format_partitions
   mount_partitions
   
-  # Download and extract
   download_dependencies
   verify_bootloader_checksum
   install_bootloader_to_image
@@ -750,11 +743,9 @@ main() {
   extract_rootfs
   configure_pacman_mirrors
   
-  # Filesystem configuration
   create_fstab
   setup_chroot_environment
   
-  # Kernel installation
   create_chroot_script
   run_chroot_installation
   resolve_installed_kernel_version
@@ -762,7 +753,6 @@ main() {
   configure_extlinux
   cleanup_chroot_environment
   
-  # Finalization
   reclaim_filesystem_free_space
   cleanup_mounts
   sync

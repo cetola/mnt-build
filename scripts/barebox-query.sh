@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
-# barebox-query.sh
-#
 # Sourceable config bridge between sysimage-config.sh and the Python barebox module.
 #
 # Usage:
-#   barebox-query.sh                — print supported sysimage names, one per line
-#   barebox-query.sh <sysimage>     — print KEY=value config lines for one sysimage
+#   barebox-query.sh              prints supported sysimage names, one per line
+#   barebox-query.sh <sysimage>   prints KEY=value config lines for one sysimage
 #
 # Output keys (single sysimage mode):
 #   BAREBOX_PROJECT  (empty if barebox is not supported for this sysimage)
@@ -17,7 +15,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Stub logging — we only want structured output on stdout.
+# Stub logging. Only structured output goes to stdout.
 log()      { :; }
 log_warn() { :; }
 die()      { echo "ERROR: $*" >&2; exit 1; }
@@ -34,7 +32,6 @@ fi
 
 SYSIMAGE="$1"
 
-# Detect config source before configure_sysimage loads it.
 CONFIG_SOURCE_PATH=""
 CONFIG_SOURCE_IS_FALLBACK=0
 if machine_conf="$(find_machine_conf_for_sysimage "$SYSIMAGE" 2>/dev/null)"; then

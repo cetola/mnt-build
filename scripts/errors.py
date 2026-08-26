@@ -1,12 +1,9 @@
 # SPDX-License-Identifier: MIT
 class BuildError(Exception):
-    """Custom exception for build failures."""
     pass
 
 
 class PatchStats:
-    """Track patch application statistics."""
-
     def __init__(self):
         self.success = 0
         self.failed = 0

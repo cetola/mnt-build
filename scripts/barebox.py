@@ -71,7 +71,6 @@ class BareboxManager:
         return folder + (" (fallback)" if is_fallback else "")
 
     def get_info(self, sysimage: str) -> SysimageBareboxInfo:
-        """Return barebox config for a single sysimage."""
         try:
             data = self._query_sysimage(sysimage)
         except subprocess.CalledProcessError as e:
@@ -234,7 +233,7 @@ class BareboxManager:
                 f"Expected artifact '{artifact_name}' not found in {images_dir}. "
                 "Has the build completed successfully?"
             )
-        # No artifact name configured — fall back to newest barebox-*.img.
+        # No artifact name configured. Fall back to newest barebox-*.img.
         if images_dir.is_dir():
             matches = sorted(images_dir.glob("barebox-*.img"),
                              key=lambda p: p.stat().st_mtime, reverse=True)
@@ -250,7 +249,6 @@ class BareboxManager:
         )
 
     def build(self, sysimage: str) -> int:
-        """Build barebox for a sysimage. Prepares the checkout first if needed."""
         print(f"[barebox] Checking build prerequisites ...", flush=True)
         missing = self._check_build_prerequisites()
         if missing:
@@ -476,7 +474,6 @@ class BareboxManager:
 
     def menuconfig(self, sysimage: str,
                    cross_compile: str = "aarch64-linux-gnu-") -> int:
-        """Run make menuconfig directly in the barebox checkout."""
         info = self.get_info(sysimage)
         if not info.project:
             print(f"[barebox] barebox is not supported for sysimage '{sysimage}'",
@@ -507,7 +504,6 @@ class BareboxManager:
         return result.returncode
 
     def clean(self, sysimage: str) -> int:
-        """Remove the barebox checkout for a sysimage."""
         info = self.get_info(sysimage)
         if not info.project:
             print(f"[barebox] barebox is not supported for sysimage '{sysimage}'",

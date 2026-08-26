@@ -17,7 +17,7 @@ def defconfig_name_for_arch(arch: str) -> str:
 
 
 def log_arch_name_for_arch(arch: str) -> str:
-    """Return the user-facing architecture label used in build log filenames."""
+    # Used in build log filenames, not just internally.
     arch_aliases = {
         "arm64": "aarch64",
     }
@@ -52,8 +52,8 @@ VENDOR_CONFIG_MAP = {
     "amlogic":   "CONFIG_ARCH_MESON",
 }
 
-# Upstream DTBs built by make dtbs that should be verified and packaged
-# alongside the custom DTBs, without requiring any source copying.
+# Upstream DTBs, built by make dtbs. No source copying needed, just
+# verify and package alongside the custom DTBs.
 EXTRA_DTB_PATHS = [
     "arch/arm64/boot/dts/rockchip/rk3588s-radxa-cm5-io.dtb",
 ]
@@ -92,7 +92,6 @@ class BuildConfig:
                build_dir: Optional[Path] = None,
                jobs: Optional[int] = None,
                localversion_rev: Optional[int] = None):
-        """Create build configuration with sensible defaults."""
         if build_dir is None:
             build_dir = Path.home() / "mnt-build"
 
@@ -112,11 +111,10 @@ class BuildConfig:
             f"{DEFAULT_LOCALVERSION_NAME}{localversion_rev}"
         )
 
-        # Extract major.minor version (e.g., "6.17" from "6.17.8")
         version_parts = version.split('.')
         major_minor = f"{version_parts[0]}.{version_parts[1]}"
 
-        # DTBs are only relevant for the current ARM64 Reform kernel flow.
+        # Only the ARM64 Reform kernel flow uses DTBs.
         dtb_files = []
         xtra_dtbs_dir = build_dir / "xtra-dtbs"
         if arch == "arm64":
@@ -163,5 +161,5 @@ class BuildConfig:
         )
 
     def failed_patch_log(self, suffix: str = "") -> Path:
-        """Path for a patch-failure log, named/located like the main build log."""
+        # Named/located like the main build log, not standalone.
         return self.build_dir / f"patch-failures{suffix}-{self.log_build_version}-{self.timestamp}.log"

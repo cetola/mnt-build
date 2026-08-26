@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# build-fsbl.sh
-#
 # Resolves a bootloader artifact for MNT sysimages.
 # - Sourceable API: get_fsbl_artifact
 # - Standalone CLI: build-fsbl.sh --sysimage ...
@@ -117,7 +115,6 @@ fsbl_init_logging() {
     exec 9>&1 10>&2
   fi
 
-  # Capture command output and explicit logging to file and console.
   exec > >(tee -a "$FSBL_LOGFILE") 2>&1
 
   # Prefix xtrace with file:line for reproducibility.
