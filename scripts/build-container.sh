@@ -7,6 +7,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ARM_STAGING="${SCRIPT_DIR}/arm-libs-staging"
 TMPWORK=""
 
+# Prefer an explicit override, then whichever of docker/podman is installed.
+if [ -z "${CONTAINER_ENGINE:-}" ]; then
+    if command -v docker >/dev/null 2>&1; then
+        CONTAINER_ENGINE=docker
+    elif command -v podman >/dev/null 2>&1; then
+        CONTAINER_ENGINE=podman
+    else
+        echo "ERROR: neither docker nor podman found in PATH." >&2
+        echo "       Install one, or set CONTAINER_ENGINE to point at a docker-compatible CLI." >&2
+        exit 1
+    fi
+fi
+
 # Always clean up intermediate download scratch space on exit.
 # ARM_STAGING is intentionally left behind on failure so the caller
 # can inspect what was (or wasn't) staged.
@@ -152,14 +165,14 @@ else
 fi
 
 if [ "${NO_CACHE}" = false ]; then
-    echo "WARNING: building with Docker layer cache enabled -- packages may be stale." >&2
+    echo "WARNING: building with ${CONTAINER_ENGINE} layer cache enabled -- packages may be stale." >&2
     echo "         Pass --no-cache to force a full rebuild from scratch." >&2
 fi
 
-DOCKER_BUILD_FLAGS=()
-[ "${NO_CACHE}" = true ] && DOCKER_BUILD_FLAGS+=("--no-cache")
+BUILD_FLAGS=()
+[ "${NO_CACHE}" = true ] && BUILD_FLAGS+=("--no-cache")
 
 cd "${SCRIPT_DIR}"
-docker build "${DOCKER_BUILD_FLAGS[@]}" -t arch-kernel-builder "${BUILD_ARGS[@]}" . 2>&1 | tee container-build.log
+"${CONTAINER_ENGINE}" build "${BUILD_FLAGS[@]}" -t arch-kernel-builder "${BUILD_ARGS[@]}" . 2>&1 | tee container-build.log
 
 rm -rf "${ARM_STAGING}"
