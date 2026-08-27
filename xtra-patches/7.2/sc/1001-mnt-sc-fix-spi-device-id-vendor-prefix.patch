@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Sat, 22 Aug 2026 18:00:00 -0700
+Subject: mnt-sc: strip vendor prefix in spi_device_id table
+
+mntsc_spi_dev_id[] carries the full "mntre,system-controller" compatible
+string as its id name. The SPI core strips the vendor prefix off the DT
+compatible string before matching against a driver's id_table (see the
+"Strip off any vendor prefix" block in __spi_register_driver(),
+drivers/spi/spi.c), so it looks up "system-controller", not
+"mntre,system-controller".
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/firmware/mnt-sc.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/firmware/mnt-sc.c b/drivers/firmware/mnt-sc.c
+index 8bcda2173b3b..1a2b3c4d5e6f 100644
+--- a/drivers/firmware/mnt-sc.c
++++ b/drivers/firmware/mnt-sc.c
+@@ -728,7 +728,7 @@ static const struct of_device_id of_mntre_sc_match[] = {
+ MODULE_DEVICE_TABLE(of, of_mntre_sc_match);
+
+ static struct spi_device_id mntsc_spi_dev_id[] = {
+-	{ "mntre,system-controller", 0 },
++	{ "system-controller", 0 },
+ 	{},
+ };
+ MODULE_DEVICE_TABLE(spi, mntsc_spi_dev_id);
+--
+2.43.0

@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Sun, 23 Aug 2026 12:05:00 -0700
+Subject: mnt-sc: fix show_firmware writing every reply into str1
+
+All three sc_cmdresp_retry calls wrote into str1; str2 and str3 were
+never written, then printed anyway, exposing uninitialized stack
+memory.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/firmware/mnt-sc.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/firmware/mnt-sc.c b/drivers/firmware/mnt-sc.c
+index 3c4d5e6f7081..4d5e6f708192 100644
+--- a/drivers/firmware/mnt-sc.c
++++ b/drivers/firmware/mnt-sc.c
+@@ -563,10 +563,10 @@ static ssize_t show_firmware(struct device *dev, struct device_attribute *attr
+ 	ret = sc_cmdresp_retry(mntsc, "(0f)", str1);
+ 	if (ret)
+ 		return 0;
+-	ret = sc_cmdresp_retry(mntsc, "(1f)", str1);
++	ret = sc_cmdresp_retry(mntsc, "(1f)", str2);
+ 	if (ret)
+ 		return 0;
+-	ret = sc_cmdresp_retry(mntsc, "(2f)", str1);
++	ret = sc_cmdresp_retry(mntsc, "(2f)", str3);
+ 	if (ret)
+ 		return 0;
+
+--
+2.47.3

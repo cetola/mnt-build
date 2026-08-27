@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Sat, 22 Aug 2026 18:10:00 -0700
+Subject: mnt-sc: fix inverted "err " response check
+
+sc_cmdresp_retry()'s response parser branches on whether the firmware's
+reply starts with "err " but strncmp() returns 0 when the strings match.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/firmware/mnt-sc.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/firmware/mnt-sc.c b/drivers/firmware/mnt-sc.c
+index 8bcda2173b3b..2b3c4d5e6f70 100644
+--- a/drivers/firmware/mnt-sc.c
++++ b/drivers/firmware/mnt-sc.c
+@@ -413,7 +413,7 @@ static int sc_cmdresp_retry(struct mntsc_driver_data *mntsc, const char *cmd,
+ 							ret = -EAGAIN;
+ 							break;
+ 						}
+-					} else if (vcount >= 4 && strncmp(rxbuf, "err ", 4)) {
++					} else if (vcount >= 4 && !strncmp(rxbuf, "err ", 4)) {
+ 						dev_err(&mntsc->spi->dev, "mntsc: error response: %s\n", rxbuf);
+ 						ret = -EAGAIN;
+ 						break;
+--
+2.43.0
