@@ -1,0 +1,60 @@
+Subject: [PATCH 3/5] ASoC: qcom: qdsp6: q6prm: add the missing MCLK clock
+ IDs
+From: Neil Armstrong <neil.armstrong@linaro.org>
+Date: Sun, 07 Jun 2026 02:58:19 +0800
+Message-Id: <20260607-rubikpi-next-20260605-v1-3-7f334e16fea6@thundersoft.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Add the missing MCLK ids for the q6prm DSP interface.
+
+Reviewed-by: Srinivas Kandagatla <srinivas.kandagatla@oss.qualcomm.com>
+Signed-off-by: Neil Armstrong <neil.armstrong@linaro.org>
+---
+ sound/soc/qcom/qdsp6/q6prm-clocks.c |  5 +++++
+ sound/soc/qcom/qdsp6/q6prm.h        | 11 +++++++++++
+ 2 files changed, 16 insertions(+)
+
+diff --git a/sound/soc/qcom/qdsp6/q6prm-clocks.c b/sound/soc/qcom/qdsp6/q6prm-clocks.c
+index 4c574b48ab00..51b131fa9531 100644
+--- a/sound/soc/qcom/qdsp6/q6prm-clocks.c
++++ b/sound/soc/qcom/qdsp6/q6prm-clocks.c
+@@ -42,6 +42,11 @@ static const struct q6dsp_clk_init q6prm_clks[] = {
+ 	Q6PRM_CLK(LPASS_CLK_ID_INT5_MI2S_IBIT),
+ 	Q6PRM_CLK(LPASS_CLK_ID_INT6_MI2S_IBIT),
+ 	Q6PRM_CLK(LPASS_CLK_ID_QUI_MI2S_OSR),
++	Q6PRM_CLK(LPASS_CLK_ID_MCLK_1),
++	Q6PRM_CLK(LPASS_CLK_ID_MCLK_2),
++	Q6PRM_CLK(LPASS_CLK_ID_MCLK_3),
++	Q6PRM_CLK(LPASS_CLK_ID_MCLK_4),
++	Q6PRM_CLK(LPASS_CLK_ID_MCLK_5),
+ 	Q6PRM_CLK(LPASS_CLK_ID_WSA_CORE_MCLK),
+ 	Q6PRM_CLK(LPASS_CLK_ID_WSA_CORE_NPL_MCLK),
+ 	Q6PRM_CLK(LPASS_CLK_ID_VA_CORE_MCLK),
+diff --git a/sound/soc/qcom/qdsp6/q6prm.h b/sound/soc/qcom/qdsp6/q6prm.h
+index a988a32086fe..6917e70bcb8a 100644
+--- a/sound/soc/qcom/qdsp6/q6prm.h
++++ b/sound/soc/qcom/qdsp6/q6prm.h
+@@ -52,6 +52,17 @@
+ /* Clock ID for QUINARY MI2S OSR CLK  */
+ #define Q6PRM_LPASS_CLK_ID_QUI_MI2S_OSR                         0x116
+ 
++/* Clock ID for MCLK1 */
++#define Q6PRM_LPASS_CLK_ID_MCLK_1                                 0x300
++/* Clock ID for MCLK2 */
++#define Q6PRM_LPASS_CLK_ID_MCLK_2                                 0x301
++/* Clock ID for MCLK3 */
++#define Q6PRM_LPASS_CLK_ID_MCLK_3                                 0x302
++/* Clock ID for MCLK4 */
++#define Q6PRM_LPASS_CLK_ID_MCLK_4                                 0x303
++/* Clock ID for MCLK5 */
++#define Q6PRM_LPASS_CLK_ID_MCLK_5                                 0x304
++
+ #define Q6PRM_LPASS_CLK_ID_WSA_CORE_MCLK			0x305
+ #define Q6PRM_LPASS_CLK_ID_WSA_CORE_NPL_MCLK			0x306
+ 
+
+-- 
+2.43.0
+

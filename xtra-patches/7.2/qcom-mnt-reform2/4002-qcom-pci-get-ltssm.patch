@@ -1,0 +1,60 @@
+From 2d01ae030d02c852752d977e602087dfe2452545 Mon Sep 17 00:00:00 2001
+From: Krishna Chaitanya Chundru <krishna.chundru@oss.qualcomm.com>
+Date: Wed, 11 Mar 2026 15:56:48 +0530
+Subject: [PATCH] PCI: qcom: Add .get_ltssm() helper
+
+For older targets like sc7280, we see reading DBI after sending PME
+turn off message is causing NOC error.
+
+To avoid unsafe DBI accesses, introduce qcom_pcie_get_ltssm(), which
+retrieves the LTSSM state from the PARF_LTSSM register instead.
+
+This helper is used in place of direct DBI-based link state checks in
+the D3cold path after sending PME turn-off message, ensuring the LTSSM
+state can be queried safely even after DBI access is no longer valid.
+
+Signed-off-by: Krishna Chaitanya Chundru <krishna.chundru@oss.qualcomm.com>
+---
+ drivers/pci/controller/dwc/pcie-qcom.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/drivers/pci/controller/dwc/pcie-qcom.c b/drivers/pci/controller/dwc/pcie-qcom.c
+index 5a318487b2b3..f80645d37d7f 100644
+--- a/drivers/pci/controller/dwc/pcie-qcom.c
++++ b/drivers/pci/controller/dwc/pcie-qcom.c
+@@ -131,6 +131,7 @@
+ 
+ /* PARF_LTSSM register fields */
+ #define LTSSM_EN				BIT(8)
++#define PARF_LTSSM_STATE_MASK			GENMASK(5, 0)
+ 
+ /* PARF_NO_SNOOP_OVERRIDE register fields */
+ #define WR_NO_SNOOP_OVERRIDE_EN			BIT(1)
+@@ -1260,6 +1261,16 @@ static bool qcom_pcie_link_up(struct dw_pcie *pci)
+ 	return val & PCI_EXP_LNKSTA_DLLLA;
+ }
+ 
++static enum dw_pcie_ltssm qcom_pcie_get_ltssm(struct dw_pcie *pci)
++{
++	struct qcom_pcie *pcie = to_qcom_pcie(pci);
++	u32 val;
++
++	val = readl(pcie->parf + PARF_LTSSM);
++
++	return (enum dw_pcie_ltssm)FIELD_GET(PARF_LTSSM_STATE_MASK, val);
++}
++
+ static void qcom_pcie_phy_power_off(struct qcom_pcie *pcie)
+ {
+ 	struct qcom_pcie_port *port;
+@@ -1512,6 +1523,7 @@ static const struct qcom_pcie_cfg cfg_fw_managed = {
+ static const struct dw_pcie_ops dw_pcie_ops = {
+ 	.link_up = qcom_pcie_link_up,
+ 	.start_link = qcom_pcie_start_link,
++	.get_ltssm = qcom_pcie_get_ltssm,
+ };
+ 
+ static int qcom_pcie_icc_init(struct qcom_pcie *pcie)
+-- 
+GitLab
+

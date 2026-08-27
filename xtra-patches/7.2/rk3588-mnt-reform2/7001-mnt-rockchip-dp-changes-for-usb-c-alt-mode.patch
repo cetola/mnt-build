@@ -1,0 +1,29 @@
+commit a921cb9427024442a495d55a72871f99b0f06d3f
+Author: Lucie L. Hartmann <lucie@mntre.com>
+Date:   Mon Aug 24 19:58:22 2026 +0200
+
+    rk3588: analogix edp: ignore panel/bridge lookup error to allow using dp-connector
+
+diff --git a/tmp/analogix_dp-rockchip.c b/drivers/gpu/drm/rockchip/analogix_dp-rockchip.c
+index 387fb62..a657c07 100644
+--- a/tmp/analogix_dp-rockchip.c
++++ b/drivers/gpu/drm/rockchip/analogix_dp-rockchip.c
+@@ -429,16 +429,14 @@ static int rockchip_dp_link_panel(struct drm_dp_aux *aux)
+ {
+ 	struct analogix_dp_plat_data *plat_data = analogix_dp_aux_to_plat_data(aux);
+ 	struct rockchip_dp_device *dp = pdata_encoder_to_dp(plat_data);
+-	int ret;
+ 
+ 	/*
+ 	 * If drm_of_find_panel_or_bridge() returns -ENODEV, there may be no valid panel
+ 	 * or bridge nodes. The driver should go on for the driver-free bridge or the DP
+ 	 * mode applications.
+ 	 */
+-	ret = drm_of_find_panel_or_bridge(dp->dev->of_node, 1, 0, &plat_data->panel, NULL);
+-	if (ret && ret != -ENODEV)
+-		return ret;
++	drm_of_find_panel_or_bridge(dp->dev->of_node, 1, 0,
++				    &plat_data->panel, NULL);
+ 
+ 	return component_add(dp->dev, &rockchip_dp_component_ops);
+ }

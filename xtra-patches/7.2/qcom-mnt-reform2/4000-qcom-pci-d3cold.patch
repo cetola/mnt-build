@@ -1,0 +1,105 @@
+From 86eb870d00cd4892018930926708ea0b6cb97cdb Mon Sep 17 00:00:00 2001
+From: Krishna Chaitanya Chundru <krishna.chundru@oss.qualcomm.com>
+Date: Wed, 11 Mar 2026 15:56:46 +0530
+Subject: [PATCH] PCI: host-common: Add helper to determine host bridge D3cold
+ eligibility
+
+Add a common helper, pci_host_common_d3cold_possible(), to determine
+whether a PCI host bridge can safely transition to D3cold.
+
+This helper is intended to be used by PCI host controller drivers to
+decide whether they may safely put the host bridge into D3cold based on
+the power state and wakeup capabilities of downstream endpoints.
+
+The helper walks all devices on the bridge's primary bus and only allows
+the host bridge to enter D3cold if all PCIe endpoints are already in
+PCI_D3hot. This ensures that we do not power off the host bridge while
+any active endpoint still requires the link to remain powered.
+
+For devices that may wake the system, the helper additionally requires
+that the device supports PME wake from D3cold (via WAKE#). Devices that
+do not have wakeup enabled are not restricted by this check and do not
+block the host bridge from entering D3cold.
+
+Devices without a bound driver and with PCI not enabled via sysfs are
+treated as inactive and therefore do not prevent the host bridge from
+entering D3cold. This allows controllers to power down more aggressively
+when there are no actively managed endpoints.
+
+Signed-off-by: Krishna Chaitanya Chundru <krishna.chundru@oss.qualcomm.com>
+---
+ drivers/pci/controller/pci-host-common.c | 47 ++++++++++++++++++++++++
+ drivers/pci/controller/pci-host-common.h |  2 +
+ 2 files changed, 49 insertions(+)
+
+diff --git a/drivers/pci/controller/pci-host-common.c b/drivers/pci/controller/pci-host-common.c
+index c473e7c03bac..cecc0df2c777 100644
+--- a/drivers/pci/controller/pci-host-common.c
++++ b/drivers/pci/controller/pci-host-common.c
+@@ -106,5 +106,52 @@ void pci_host_common_remove(struct platform_device *pdev)
+ }
+ EXPORT_SYMBOL_GPL(pci_host_common_remove);
+ 
++static int __pci_host_common_d3cold_possible(struct pci_dev *pdev, void *userdata)
++{
++	bool *d3cold_possible = userdata;
++
++	if (pci_pcie_type(pdev) != PCI_EXP_TYPE_ENDPOINT)
++		return 0;
++
++	if (!pdev->dev.driver && !pci_is_enabled(pdev))
++		return 0;
++
++	if (pdev->current_state != PCI_D3hot)
++		goto exit;
++
++	if (device_may_wakeup(&pdev->dev) && !pci_pme_capable(pdev, PCI_D3cold))
++		goto exit;
++
++	return 0;
++
++exit:
++	*d3cold_possible = false;
++
++	return -EOPNOTSUPP;
++}
++
++/**
++ * pci_host_common_d3cold_possible - Determine whether a host bridge can enter D3cold
++ * @bridge: PCI host bridge to check
++ *
++ * Walk downstream PCIe endpoint devices and determine whether the host bridge
++ * is permitted to transition to D3cold.
++ *
++ * The host bridge can enter D3cold only if all active PCIe endpoints are in
++ * PCI_D3hot and any wakeup-enabled endpoint is capable of generating PME from
++ * D3cold. Inactive endpoints are ignored.
++ *
++ * Return: %true if the host bridge may enter D3cold, otherwise %false.
++ */
++bool pci_host_common_d3cold_possible(struct pci_host_bridge *bridge)
++{
++	bool d3cold_allow = true;
++
++	pci_walk_bus(bridge->bus, __pci_host_common_d3cold_possible, &d3cold_allow);
++
++	return d3cold_allow;
++}
++EXPORT_SYMBOL_GPL(pci_host_common_d3cold_possible);
++
+ MODULE_DESCRIPTION("Common library for PCI host controller drivers");
+ MODULE_LICENSE("GPL v2");
+diff --git a/drivers/pci/controller/pci-host-common.h b/drivers/pci/controller/pci-host-common.h
+index b5075d4bd7eb..c0ef2a2bf399 100644
+--- a/drivers/pci/controller/pci-host-common.h
++++ b/drivers/pci/controller/pci-host-common.h
+@@ -20,4 +20,6 @@ void pci_host_common_remove(struct platform_device *pdev);
+ 
+ struct pci_config_window *pci_host_common_ecam_create(struct device *dev,
+ 	struct pci_host_bridge *bridge, const struct pci_ecam_ops *ops);
++
++bool pci_host_common_d3cold_possible(struct pci_host_bridge *bridge);
+ #endif
+-- 
+GitLab
+

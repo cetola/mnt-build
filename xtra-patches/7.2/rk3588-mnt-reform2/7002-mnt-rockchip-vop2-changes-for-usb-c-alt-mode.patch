@@ -1,0 +1,63 @@
+From: "Lucie L. Hartmann" <lucie@mntre.com>
+Date: Wed, 26 Aug 2026 01:44:00 +0200
+Subject: rk3588/vop2: work around cluster/esmart config bugs with 3 displays
+---
+
+diff --git a/tmp/rockchip_vop2_reg.c b/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
+index 02a788a..20a7f3a 100644
+--- a/tmp/rockchip_vop2_reg.c
++++ b/drivers/gpu/drm/rockchip/rockchip_vop2_reg.c
+@@ -1149,7 +1148,7 @@ static const struct vop2_win_data rk3588_vop_win_data[] = {
+ 		.layer_sel_id = { 1, 1, 1, 1 },
+ 		.supported_rotations = DRM_MODE_ROTATE_90 | DRM_MODE_ROTATE_270 |
+ 				       DRM_MODE_REFLECT_X | DRM_MODE_REFLECT_Y,
+-		.type = DRM_PLANE_TYPE_PRIMARY,
++		.type = DRM_PLANE_TYPE_OVERLAY,
+ 		.axi_bus_id = 0,
+ 		.axi_yrgb_r_id = 6,
+ 		.axi_uv_r_id = 7,
+@@ -1168,7 +1167,7 @@ static const struct vop2_win_data rk3588_vop_win_data[] = {
+ 		.layer_sel_id = { 4, 4, 4, 4 },
+ 		.supported_rotations = DRM_MODE_ROTATE_90 | DRM_MODE_ROTATE_270 |
+ 				       DRM_MODE_REFLECT_X | DRM_MODE_REFLECT_Y,
+-		.type = DRM_PLANE_TYPE_PRIMARY,
++		.type = DRM_PLANE_TYPE_OVERLAY,
+ 		.axi_bus_id = 1,
+ 		.axi_yrgb_r_id = 2,
+ 		.axi_uv_r_id = 3,
+@@ -1187,7 +1186,7 @@ static const struct vop2_win_data rk3588_vop_win_data[] = {
+ 		.layer_sel_id =  { 5, 5, 5, 5 },
+ 		.supported_rotations = DRM_MODE_ROTATE_90 | DRM_MODE_ROTATE_270 |
+ 				       DRM_MODE_REFLECT_X | DRM_MODE_REFLECT_Y,
+-		.type = DRM_PLANE_TYPE_PRIMARY,
++		.type = DRM_PLANE_TYPE_OVERLAY,
+ 		.axi_bus_id = 1,
+ 		.axi_yrgb_r_id = 6,
+ 		.axi_uv_r_id = 7,
+@@ -1205,7 +1204,7 @@ static const struct vop2_win_data rk3588_vop_win_data[] = {
+ 		.base = 0x1800,
+ 		.layer_sel_id = { 2, 2, 2, 2 },
+ 		.supported_rotations = DRM_MODE_REFLECT_Y,
+-		.type = DRM_PLANE_TYPE_OVERLAY,
++		.type = DRM_PLANE_TYPE_PRIMARY,
+ 		.axi_bus_id = 0,
+ 		.axi_yrgb_r_id = 0x0a,
+ 		.axi_uv_r_id = 0x0b,
+@@ -1222,7 +1221,7 @@ static const struct vop2_win_data rk3588_vop_win_data[] = {
+ 		.base = 0x1a00,
+ 		.layer_sel_id = { 3, 3, 3, 3 },
+ 		.supported_rotations = DRM_MODE_REFLECT_Y,
+-		.type = DRM_PLANE_TYPE_OVERLAY,
++		.type = DRM_PLANE_TYPE_PRIMARY,
+ 		.axi_bus_id = 0,
+ 		.axi_yrgb_r_id = 0x0c,
+ 		.axi_uv_r_id = 0x01,
+@@ -1239,7 +1238,7 @@ static const struct vop2_win_data rk3588_vop_win_data[] = {
+ 		.format_modifiers = format_modifiers,
+ 		.layer_sel_id =  { 6, 6, 6, 6 },
+ 		.supported_rotations = DRM_MODE_REFLECT_Y,
+-		.type = DRM_PLANE_TYPE_OVERLAY,
++		.type = DRM_PLANE_TYPE_PRIMARY,
+ 		.axi_bus_id = 1,
+ 		.axi_yrgb_r_id = 0x0a,
+ 		.axi_uv_r_id = 0x0b,
