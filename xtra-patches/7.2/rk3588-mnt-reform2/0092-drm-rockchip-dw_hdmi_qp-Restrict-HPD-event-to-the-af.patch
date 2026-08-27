@@ -53,9 +53,8 @@ index fbbe26f8730c..d6338195a5b7 100644
  	struct drm_encoder *encoder;
  	struct rockchip_hdmi_qp *hdmi;
  	struct resource *res;
-@@ -589,12 +588,12 @@ static int dw_hdmi_qp_rockchip_bind(struct device *dev, struct device *master,
+@@ -589,11 +588,11 @@ static int dw_hdmi_qp_rockchip_bind(struct device *dev, struct device *master,
  				     "Failed to bind dw-hdmi-qp");
- 	}
  
 -	connector = drm_bridge_connector_init(drm, encoder);
 -	if (IS_ERR(connector))
@@ -65,15 +64,12 @@ index fbbe26f8730c..d6338195a5b7 100644
 +		return dev_err_probe(hdmi->dev, PTR_ERR(hdmi->connector),
  				     "Failed to init bridge connector\n");
  
--	return drm_connector_attach_encoder(connector, encoder);
-+	return drm_connector_attach_encoder(hdmi->connector, encoder);
+ 	return 0;
  }
  
  static void dw_hdmi_qp_rockchip_unbind(struct device *dev,
-@@ -612,6 +611,8 @@ static void dw_hdmi_qp_rockchip_unbind(struct device *dev,
+@@ -612,2 +611,4 @@ static void dw_hdmi_qp_rockchip_unbind(struct device *dev,
  	cancel_delayed_work_sync(&hdmi->hpd_work);
- 
- 	drm_encoder_cleanup(&hdmi->encoder.encoder);
 +
 +	hdmi->connector = NULL;
  }

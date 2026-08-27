@@ -49,12 +49,11 @@ index d649a1cf07f5..c482a8e7da25 100644
  #include <drm/drm_connector.h>
  #include <drm/drm_edid.h>
  #include <drm/drm_modes.h>
-@@ -39,7 +42,9 @@
+@@ -39,5 +42,8 @@
  #define DDC_SEGMENT_ADDR	0x30
  
- #define HDMI14_MAX_TMDSCLK	340000000
 +#define HDMI20_MAX_TMDSRATE	600000000
- 
++
 +#define SCDC_MAX_SOURCE_VERSION	0x1
  #define SCRAMB_POLL_DELAY_MS	3000
  
@@ -169,7 +168,7 @@ index d649a1cf07f5..c482a8e7da25 100644
 +}
 +
  static void dw_hdmi_qp_bridge_atomic_enable(struct drm_bridge *bridge,
- 					    struct drm_atomic_state *state)
+ 					    struct drm_atomic_commit *state)
  {
  	struct dw_hdmi_qp *hdmi = bridge->driver_private;
  	struct drm_connector_state *conn_state;
@@ -196,7 +195,7 @@ index d649a1cf07f5..c482a8e7da25 100644
  		op_mode = 0;
  		hdmi->tmds_char_rate = conn_state->hdmi.tmds_char_rate;
 +
-+		if (conn_state->hdmi.tmds_char_rate > HDMI14_MAX_TMDSCLK)
++		if (conn_state->hdmi.tmds_char_rate > HDMI_1_3_TMDS_CHAR_RATE_MAX_HZ)
 +			dw_hdmi_qp_enable_scramb(hdmi);
  	} else {
  		dev_dbg(hdmi->dev, "%s mode=DVI\n", __func__);
@@ -291,10 +290,10 @@ index d649a1cf07f5..c482a8e7da25 100644
 -	/*
 -	 * TODO: when hdmi->no_hpd is 1 we must not support modes that
 -	 * require scrambling, including every mode with a clock above
--	 * HDMI14_MAX_TMDSCLK.
+-	 * HDMI_1_3_TMDS_CHAR_RATE_MAX_HZ.
 -	 */
--	if (rate > HDMI14_MAX_TMDSCLK) {
-+	if (hdmi->no_hpd && rate > HDMI14_MAX_TMDSCLK) {
+-	if (rate > HDMI_1_3_TMDS_CHAR_RATE_MAX_HZ) {
++	if (hdmi->no_hpd && rate > HDMI_1_3_TMDS_CHAR_RATE_MAX_HZ) {
 +		dev_dbg(hdmi->dev, "Unsupported TMDS char rate in no_hpd mode: %lld\n", rate);
 +		return MODE_CLOCK_HIGH;
 +	}

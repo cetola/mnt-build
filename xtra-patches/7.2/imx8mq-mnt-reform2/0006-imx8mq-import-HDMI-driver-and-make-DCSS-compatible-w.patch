@@ -6671,7 +6671,7 @@ index 3633e8f3aff60..b1507f00fa405 100644
  	int ret;
  
  	ret = drm_of_find_panel_or_bridge(ddev->dev->of_node, 0, 0,
-@@ -92,23 +94,23 @@ static int dcss_kms_bridge_connector_init(struct dcss_kms_dev *kms)
+@@ -92,21 +94,23 @@ static int dcss_kms_bridge_connector_init(struct dcss_kms_dev *kms)
  		return ret;
  	}
  
@@ -6692,8 +6692,8 @@ index 3633e8f3aff60..b1507f00fa405 100644
 +	drm_connector_list_iter_begin(ddev, &iter);
 +	kms->connector = drm_connector_list_iter_next(&iter);
 +	drm_connector_list_iter_end(&iter);
- 
- 	drm_connector_attach_encoder(kms->connector, encoder);
++
++	drm_connector_attach_encoder(kms->connector, encoder);
  
  	return 0;
  }

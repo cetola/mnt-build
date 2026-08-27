@@ -4,14 +4,18 @@ Date:   Mon Aug 24 19:58:22 2026 +0200
 
     rk3588: analogix edp: ignore panel/bridge lookup error to allow using dp-connector
 
-diff --git a/tmp/analogix_dp-rockchip.c b/drivers/gpu/drm/rockchip/analogix_dp-rockchip.c
-index 387fb62..a657c07 100644
---- a/tmp/analogix_dp-rockchip.c
-+++ b/drivers/gpu/drm/rockchip/analogix_dp-rockchip.c
-@@ -429,16 +429,14 @@ static int rockchip_dp_link_panel(struct drm_dp_aux *aux)
- {
- 	struct analogix_dp_plat_data *plat_data = analogix_dp_aux_to_plat_data(aux);
- 	struct rockchip_dp_device *dp = pdata_encoder_to_dp(plat_data);
+    Rebased for v7.2: the panel/bridge lookup this originally patched in
+    rockchip_dp_link_panel() has since moved upstream into the shared
+    analogix_dp_aux_done_probing() helper.
+
+diff --git a/drivers/gpu/drm/bridge/analogix/analogix_dp_core.c b/drivers/gpu/drm/bridge/analogix/analogix_dp_core.c
+index a1b2c3d4e5f6..0f1e2d3c4b5a 100644
+--- a/drivers/gpu/drm/bridge/analogix/analogix_dp_core.c
++++ b/drivers/gpu/drm/bridge/analogix/analogix_dp_core.c
+@@ -1571,17 +1571,14 @@ static int analogix_dp_aux_done_probing(struct drm_dp_aux *aux)
+ 	struct analogix_dp_device *dp = to_dp(aux);
+ 	struct analogix_dp_plat_data *plat_data = dp->plat_data;
+ 	int port = plat_data->dev_type == EXYNOS_DP ? 0 : 1;
 -	int ret;
  
  	/*
@@ -19,11 +23,12 @@ index 387fb62..a657c07 100644
  	 * or bridge nodes. The driver should go on for the driver-free bridge or the DP
  	 * mode applications.
  	 */
--	ret = drm_of_find_panel_or_bridge(dp->dev->of_node, 1, 0, &plat_data->panel, NULL);
+-	ret = drm_of_find_panel_or_bridge(dp->dev->of_node, port, 0,
+-					  &plat_data->panel, &plat_data->next_bridge);
 -	if (ret && ret != -ENODEV)
 -		return ret;
-+	drm_of_find_panel_or_bridge(dp->dev->of_node, 1, 0,
-+				    &plat_data->panel, NULL);
++	drm_of_find_panel_or_bridge(dp->dev->of_node, port, 0,
++				    &plat_data->panel, &plat_data->next_bridge);
  
- 	return component_add(dp->dev, &rockchip_dp_component_ops);
+ 	return component_add(dp->dev, plat_data->ops);
  }
