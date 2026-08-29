@@ -17,6 +17,8 @@ from logging_setup import Colors
 # marker. Their text is logged as the skip reason, truncated to this length.
 MNT_OVERRIDE_SKIP_REASON_MAX_LEN = 200
 
+STABLE_KERNEL_REMOTE_URL = "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
+
 
 class KernelBuilder:
     def __init__(self, config: BuildConfig, logger: logging.Logger,
@@ -711,12 +713,10 @@ class KernelBuilder:
 
         remotes = self.run_command(['git', 'remote'], cwd=self.config.linux_dir).stdout.split()
         if remote not in remotes:
-            raise BuildError(
-                f"Remote '{remote}' not found in {self.config.linux_dir}. "
-                f"Expected a remote pointing at the real upstream kernel.org "
-                f"release tags, e.g.:\n"
-                f"  git -C {self.config.linux_dir} remote add {remote} "
-                f"https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
+            self.logger.info(f"Remote '{remote}' not found, adding it...")
+            self.run_command(
+                ['git', 'remote', 'add', remote, STABLE_KERNEL_REMOTE_URL],
+                cwd=self.config.linux_dir
             )
 
         self.logger.info(f"Deleting local tag {tag} (if repointed by a prior build)...")
