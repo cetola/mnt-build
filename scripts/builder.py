@@ -793,11 +793,25 @@ class KernelBuilder:
             ['git', 'rev-parse', '--verify', '--quiet', f'refs/heads/{branch}'],
             cwd=self.config.linux_dir, check=False
         ).returncode == 0
+
         if not local_exists:
+            self.logger.info(f"No local branch {branch}, checking origin...")
+            fetch_result = self.run_command(
+                ['git', 'fetch', 'origin', f'{branch}:refs/remotes/origin/{branch}'],
+                cwd=self.config.linux_dir, check=False
+            )
+            if fetch_result.returncode == 0:
+                self.run_command(
+                    ['git', 'switch', '--create', branch, '--track', f'origin/{branch}'],
+                    cwd=self.config.linux_dir
+                )
+                self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Checked out {branch} from origin")
+                return
             raise BuildError(
-                f"Branch '{branch}' does not exist in {self.config.linux_dir}. "
-                f"--kversion is currently {self.config.version} -- pass the --kversion "
-                f"this fork was actually branched at, or create the branch first, e.g.:\n"
+                f"Branch '{branch}' does not exist locally or on origin in "
+                f"{self.config.linux_dir}. --kversion is currently "
+                f"{self.config.version} -- pass the --kversion this fork was "
+                f"actually branched at, or create the branch first, e.g.:\n"
                 f"  git -C {self.config.linux_dir} fetch stable v{self.config.version}\n"
                 f"  git -C {self.config.linux_dir} switch --create {branch} v{self.config.version}"
             )
