@@ -46,12 +46,16 @@ _mnt_build() {
         '--with-headers[generate extmod headers tree]' \
         '(--dtbs-only --modules-only)--kernel-only[build kernel image only]' \
         '(--kernel-only --modules-only)--dtbs-only[build DTBs only (ARM64)]' \
-        '(--kernel-only --dtbs-only)--modules-only[build and install in-tree modules only]'
+        '(--kernel-only --dtbs-only)--modules-only[build and install in-tree modules only]' \
+        '--kernel=[kernel checkout dir under build_dir, e.g. mnt-linux]:kernel:' \
+        '--verruckt[commit each successfully applied patch]'
       ;;
     clean)
       _arguments -s \
         '--help[show clean help]' \
-        '--build-dir=[build directory]:directory:_files -/'
+        '--build-dir=[build directory]:directory:_files -/' \
+        '--kernel=[kernel checkout dir under build_dir; use mnt-linux to repair its version tag]:kernel:' \
+        '--kversion=[kernel version whose tag to repair; only relevant with --kernel mnt-linux]:kversion:'
       ;;
     uboot)
       _arguments -s \

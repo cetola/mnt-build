@@ -39,7 +39,21 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
               with_headers: bool = False,
               kernel_only: bool = DEFAULT_KERNEL_ONLY,
               dtbs_only: bool = False,
-              modules_only: bool = False) -> int:
+              modules_only: bool = False,
+              kernel: str = "linux",
+              verruckt: bool = False) -> int:
+    if verruckt and kernel != "mnt-linux":
+        print(
+            "Error: --verruckt is currently only supported with --kernel mnt-linux.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if verruckt:
+        # mnt-linux's checkout always runs regardless of this flag, so
+        # forcing it on here has no effect on build behavior.
+        skip_git_operations = True
+
     if cross_compile is None:
         cross_compile = DEFAULT_CROSS_COMPILE
     normalized_cross_compile = cross_compile.strip()
@@ -52,6 +66,7 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         build_dir=build_dir,
         jobs=jobs,
         localversion_rev=localversion_rev,
+        kernel=kernel,
     )
 
     config.build_dir.mkdir(parents=True, exist_ok=True)
@@ -65,6 +80,7 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         kernel_only=kernel_only,
         dtbs_only=dtbs_only,
         modules_only=modules_only,
+        verruckt=verruckt,
     )
 
     try:
@@ -84,6 +100,8 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         logger.info(f"Cross compile prefix: {normalized_cross_compile if normalized_cross_compile else '(native/no prefix)'}")
         logger.info(f"Generate extmod headers tree: {'yes' if with_headers else 'no'}")
         logger.info(f"Kernel only mode: {'yes (skipping modules and tarball)' if kernel_only else 'no'}")
+        if verruckt:
+            logger.info("Verruckt mode: yes (committing each applied patch; implies --skip-git-ops)")
         logger.info("=" * 60)
 
         start_time = datetime.now()
@@ -91,13 +109,13 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         builder.log_phase("Preflight")
         builder.check_prerequisites(run_olddefconfig=run_olddefconfig)
 
-        if dry_run and not skip_git_operations:
+        if dry_run and (kernel == "mnt-linux" or not skip_git_operations):
             builder.log_phase("Source Prep")
             logger.info(
                 "Dry run mode: syncing kernel repository to target version "
                 f"v{config.version} (same checkout behavior as build)."
             )
-            builder.checkout_kernel_version()
+            builder.sync_kernel_checkout()
 
         if dry_run and run_olddefconfig:
             logger.info(
@@ -185,8 +203,9 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         return 1
 
 
-def run_clean(build_dir: Optional[Path] = None) -> int:
-    config = BuildConfig.create(version=DEFAULT_KERNEL_VERSION, build_dir=build_dir)
+def run_clean(build_dir: Optional[Path] = None, kernel: str = "linux",
+              version: str = DEFAULT_KERNEL_VERSION) -> int:
+    config = BuildConfig.create(version=version, build_dir=build_dir, kernel=kernel)
     config.build_dir.mkdir(parents=True, exist_ok=True)
     logger = setup_logging(config.log_file)
     builder = KernelBuilder(config, logger)
@@ -200,7 +219,10 @@ def run_clean(build_dir: Optional[Path] = None) -> int:
         logger.info("=" * 60)
 
         builder.log_phase("Clean")
-        builder.clean_kernel_repo()
+        if kernel == "mnt-linux":
+            builder.reset_mnt_linux_branch()
+        else:
+            builder.clean_kernel_repo()
 
         builder.log_phase("Summary")
         logger.info("=" * 60)
@@ -429,6 +451,15 @@ def build_parser() -> argparse.ArgumentParser:
         help='Build directory (default: ~/mnt-build)'
     )
     build_parser.add_argument(
+        '--kernel',
+        default='linux',
+        help='Kernel checkout to use, as a directory name under build_dir '
+             '(default: linux). Use this to point at an alternate checkout, '
+             'e.g. --kernel mnt-linux, to test xtra-patches against it. With '
+             '--kernel mnt-linux, the checkout is always switched to branch '
+             'mnt-v{kversion} first, regardless of --skip-git-ops.'
+    )
+    build_parser.add_argument(
         '-j', '--jobs',
         type=int,
         help='Number of parallel jobs (default: number of CPUs)'
@@ -463,6 +494,15 @@ def build_parser() -> argparse.ArgumentParser:
         action='store_true',
         help='After --olddefconfig --dry-run, run make mrproper to remove in-tree '
              'Kbuild artifacts while keeping the patched checkout.'
+    )
+    build_parser.add_argument(
+        '--verruckt',
+        action='store_true',
+        help='After each patch applies successfully, commit it (git add -A + '
+             'git commit), using the author/date/message parsed from the patch '
+             'file when possible. Turns a patch stack into real git history. '
+             'Typically used with --dry-run --skip-git-ops --kernel <name> '
+             'against a git-based kernel checkout.'
     )
     build_parser.add_argument(
         '--skip-git-ops',
@@ -515,6 +555,21 @@ def build_parser() -> argparse.ArgumentParser:
         '--build-dir',
         type=Path,
         help='Build directory (default: ~/mnt-build)'
+    )
+    clean_parser.add_argument(
+        '--kernel',
+        default='linux',
+        help='Kernel checkout dir under build_dir to clean (default: linux). '
+             'Use "mnt-linux" to repair the v{kversion} tag from the "stable" '
+             'remote, then hard-reset branch mnt-v{kversion} to it. This '
+             'discards every commit on that branch, including verruckt '
+             'commits, instead of resyncing branches/tags against origin.'
+    )
+    clean_parser.add_argument(
+        '--kversion',
+        default=DEFAULT_KERNEL_VERSION,
+        help=f'Kernel version whose v{{kversion}} tag to target (default: {DEFAULT_KERNEL_VERSION}). '
+             'Only relevant with --kernel mnt-linux.'
     )
 
     uboot_parser = subparsers.add_parser('uboot', help='U-Boot development workflow')
@@ -618,10 +673,12 @@ def main(argv: Optional[list[str]] = None) -> int:
             kernel_only=args.kernel_only,
             dtbs_only=args.dtbs_only,
             modules_only=args.modules_only,
+            kernel=args.kernel,
+            verruckt=args.verruckt,
         )
 
     if args.command == 'clean':
-        return run_clean(build_dir=args.build_dir)
+        return run_clean(build_dir=args.build_dir, kernel=args.kernel, version=args.kversion)
 
     if args.command == 'uboot':
         if args.list == 'sysimage':

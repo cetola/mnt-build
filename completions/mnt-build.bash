@@ -32,23 +32,26 @@ _mnt_build_complete() {
 
   case "$subcmd" in
     build)
-      local build_opts="--help --kversion --build-dir -j --jobs --localversion-rev --dry-run --olddefconfig --defconfig --post-clean --skip-git-ops --arch --cross-compile --with-headers --kernel-only --dtbs-only --modules-only"
+      local build_opts="--help --kversion --build-dir -j --jobs --localversion-rev --dry-run --olddefconfig --defconfig --post-clean --skip-git-ops --arch --cross-compile --with-headers --kernel-only --dtbs-only --modules-only --kernel --verruckt"
       case "$prev" in
         --build-dir)
           COMPREPLY=( $(compgen -d -- "$cur") )
           return 0
           ;;
-        --kversion|--arch|--cross-compile|--localversion-rev|-j|--jobs)
+        --kversion|--arch|--cross-compile|--localversion-rev|-j|--jobs|--kernel)
           return 0
           ;;
       esac
       COMPREPLY=( $(compgen -W "$build_opts" -- "$cur") )
       ;;
     clean)
-      local clean_opts="--help --build-dir"
+      local clean_opts="--help --build-dir --kernel --kversion"
       case "$prev" in
         --build-dir)
           COMPREPLY=( $(compgen -d -- "$cur") )
+          return 0
+          ;;
+        --kernel|--kversion)
           return 0
           ;;
       esac

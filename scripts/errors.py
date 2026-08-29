@@ -15,6 +15,7 @@ class PatchStats:
         self.xtra_failed = 0
         self.xtra_failed_patches = []
         self.xtra_found = 0
+        self.verruckt_no_author = []
 
     @property
     def total(self) -> int:
@@ -63,3 +64,6 @@ class PatchStats:
 
     def set_xtra_found(self, count: int):
         self.xtra_found = count
+
+    def add_verruckt_no_author(self, patch_name: str):
+        self.verruckt_no_author.append(patch_name)

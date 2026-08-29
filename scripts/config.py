@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-DEFAULT_KERNEL_VERSION = '7.1.10'
+DEFAULT_KERNEL_VERSION = '7.2.1'
 DEFAULT_LOCALVERSION_NAME = 'reform'
 DEFAULT_LOCALVERSION_REV = 1
 DEFAULT_CROSS_COMPILE = "aarch64-linux-gnu-"
@@ -66,6 +66,7 @@ class BuildConfig:
     kernel_release: str
     localversion: str
     arch: str
+    kernel: str
     build_dir: Path
     linux_dir: Path
     qcacld_dir: Path
@@ -91,7 +92,8 @@ class BuildConfig:
     def create(cls, version: str, arch: str = "arm64",
                build_dir: Optional[Path] = None,
                jobs: Optional[int] = None,
-               localversion_rev: Optional[int] = None):
+               localversion_rev: Optional[int] = None,
+               kernel: str = "linux"):
         if build_dir is None:
             build_dir = Path.home() / "mnt-build"
 
@@ -101,7 +103,7 @@ class BuildConfig:
         if localversion_rev is None:
             localversion_rev = DEFAULT_LOCALVERSION_REV
 
-        linux_dir = build_dir / "linux"
+        linux_dir = build_dir / kernel
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         localversion = f"-{DEFAULT_LOCALVERSION_NAME}{localversion_rev}"
         kernel_release = f"{version}{localversion}"
@@ -138,6 +140,7 @@ class BuildConfig:
             kernel_release=kernel_release,
             localversion=localversion,
             arch=arch,
+            kernel=kernel,
             build_dir=build_dir,
             linux_dir=linux_dir,
             qcacld_dir=build_dir / "qcacld2",
