@@ -27,7 +27,7 @@ jobs:
           submodules: false
 
       - name: Checkout submodules
-        run: git submodule update --init --recursive --depth 1
+        run: git submodule update --init --depth 1 -- linux qcacld2 reform-tools reform-debian-packages
 
       - name: Resolve build configuration
         id: build_config

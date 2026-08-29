@@ -204,7 +204,7 @@ jobs:
             cd mnt-build
             git fetch --depth 1 origin ${{ github.sha }}
             git checkout ${{ github.sha }}
-            git submodule update --init --recursive --depth 1
+            git submodule update --init --depth 1 -- linux qcacld2 reform-tools reform-debian-packages
           EOF
 
       - name: Build the container 
