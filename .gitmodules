@@ -20,5 +20,5 @@
 	branch = main
 [submodule "mnt-linux"]
 	path = mnt-linux
-	url = git@source.mnt.re:josch/linux.git
+	url = https://source.mnt.re/josch/linux.git
 	ignore = dirty
