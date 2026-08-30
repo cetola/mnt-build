@@ -477,7 +477,7 @@ class KernelBuilder:
 
         diff_start = len(lines)
         for i, line in enumerate(lines):
-            if line.startswith("diff --git ") or line.startswith("@@ -"):
+            if line.startswith("diff --git ") or line.startswith("@@ -") or line.startswith("--- a/"):
                 diff_start = i
                 break
         header_lines = lines[:diff_start]

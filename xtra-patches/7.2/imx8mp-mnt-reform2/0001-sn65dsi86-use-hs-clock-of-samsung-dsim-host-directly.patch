@@ -1,9 +1,7 @@
 From d9686ba780834f5d728bda8aff9dc585f51380a7
 From: "Lucie L. Hartmann" <lucie@mntre.com>
-Subject: sn65dsi86-use-hs-clock-of-samsung-dsim-host-directly
+Subject: ti-sn65dsi86: use HS clock of samsung dsim host directly
 Date:   Thu May 30 14:46:50 2024 +0200
-
-    ti-sn65dsi86: use HS clock of samsung dsim host directly
 
 --- a/drivers/gpu/drm/bridge/ti-sn65dsi86.c
 +++ b/drivers/gpu/drm/bridge/ti-sn65dsi86.c
