@@ -408,7 +408,7 @@ class KernelBuilder:
                 patch_content = f.read()
 
             dry_run_result = self.run_command(
-                ['patch', '-p1', '--dry-run'],
+                ['patch', '-p1', '--no-backup-if-mismatch', '--dry-run'],
                 cwd=target_dir,
                 input_data=patch_content,
                 check=False,
@@ -417,7 +417,7 @@ class KernelBuilder:
 
             if dry_run_result.returncode == 0:
                 apply_result = self.run_command(
-                    ['patch', '-p1'],
+                    ['patch', '-p1', '--no-backup-if-mismatch'],
                     cwd=target_dir,
                     input_data=patch_content,
                     check=False,
