@@ -11,10 +11,15 @@ on the affected connector.
 This avoids unnecessary work and redundant detect calls on unrelated
 connectors.
 
+Also folds in collabora-rockchip-devel commit 8775f48114d8 ("drm/rockchip:
+dw_hdmi_qp: Register HPD IRQ after connector setup"), hand-adapted to this
+tree's hdmi->dev convention.
+
 Tested-by: Diederik de Haas <diederik@cknow-tech.com>
 Tested-by: Maud Spierings <maud_spierings@hotmail.com>
 Reviewed-by: Heiko Stuebner <heiko@sntech.de>
 Signed-off-by: Cristian Ciocaltea <cristian.ciocaltea@collabora.com>
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---
  .../gpu/drm/rockchip/dw_hdmi_qp-rockchip.c    | 21 ++++++++++---------
  1 file changed, 11 insertions(+), 10 deletions(-)
@@ -53,7 +58,29 @@ index fbbe26f8730c..d6338195a5b7 100644
  	struct drm_encoder *encoder;
  	struct rockchip_hdmi_qp *hdmi;
  	struct resource *res;
-@@ -589,11 +588,11 @@ static int dw_hdmi_qp_rockchip_bind(struct device *dev, struct device *master,
+@@ -577,33 +576,29 @@ static int dw_hdmi_qp_rockchip_bind(struct device *dev, struct device *master,
+ 	irq = platform_get_irq_byname(pdev, "hpd");
+ 	if (irq < 0)
+ 		return irq;
+ 
+-	ret = devm_request_threaded_irq(hdmi->dev, irq,
+-					cfg->ctrl_ops->hardirq_callback,
+-					cfg->ctrl_ops->irq_callback,
+-					IRQF_SHARED, "dw-hdmi-qp-hpd",
+-					hdmi);
+-	if (ret)
+-		return ret;
+-
+ 	drm_encoder_helper_add(encoder, &dw_hdmi_qp_rockchip_encoder_helper_funcs);
+ 	ret = drmm_encoder_init(drm, encoder, NULL, DRM_MODE_ENCODER_TMDS, NULL);
+ 	if (ret)
+ 		return dev_err_probe(hdmi->dev, ret, "Failed to init encoder");
+ 
+ 	platform_set_drvdata(pdev, hdmi);
+ 
+ 	hdmi->hdmi = dw_hdmi_qp_bind(pdev, encoder, &plat_data);
+ 	if (IS_ERR(hdmi->hdmi))
+ 		return dev_err_probe(hdmi->dev, PTR_ERR(hdmi->hdmi),
  				     "Failed to bind dw-hdmi-qp");
  
 -	connector = drm_bridge_connector_init(drm, encoder);
@@ -64,7 +91,12 @@ index fbbe26f8730c..d6338195a5b7 100644
 +		return dev_err_probe(hdmi->dev, PTR_ERR(hdmi->connector),
  				     "Failed to init bridge connector\n");
  
- 	return 0;
+-	return 0;
++	return devm_request_threaded_irq(hdmi->dev, irq,
++					 cfg->ctrl_ops->hardirq_callback,
++					 cfg->ctrl_ops->irq_callback,
++					 IRQF_SHARED, "dw-hdmi-qp-hpd",
++					 hdmi);
  }
  
  static void dw_hdmi_qp_rockchip_unbind(struct device *dev,
@@ -88,4 +120,4 @@ index fbbe26f8730c..d6338195a5b7 100644
  }
 -- 
 2.47.3
-
+ 
