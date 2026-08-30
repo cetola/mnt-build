@@ -21,7 +21,7 @@ index 8bcda2173b3b..3c4d5e6f7081 100644
  		(struct mntsc_driver_data *)dev_get_drvdata(dev);
  	char cmd[64];
 -	snprintf(cmd, (count > 64 ? count : 64), "%s", buf);
-+	snprintf(cmd, sizeof(cmd), "%s", buf); // was unbounded for count > 64
++	snprintf(cmd, sizeof(cmd), "%s", buf);
  	cmd[63] = 0;
  	sc_cmdresp_retry(mntsc, cmd, uart_resp);
  	return count;
