@@ -4,6 +4,8 @@ Date: Sun, 9 Jul 2023 20:36:19 +0200
 Subject: [PATCH] imx8mq: import HDMI driver and make DCSS compatible with both
  HDMI and LCDIF
 
+Signed-off-by: Lucie L. Hartmann <lucie@mntre.com>
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---
  drivers/gpu/drm/bridge/cadence/Kconfig        |   27 +
  drivers/gpu/drm/bridge/cadence/Makefile       |    9 +

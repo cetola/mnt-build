@@ -4,6 +4,9 @@ Date:   Tue Jul 28 21:22:00 2026 +0100
 
     pocket: add v6 of auto-detecting multi display driver
 
+Signed-off-by: Lucie L. Hartmann <lucie@mntre.com>
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+
 diff --git a/drivers/gpu/drm/panel/Kconfig b/drivers/gpu/drm/panel/Kconfig
 index 9f49b01..6a80933 100644
 --- a/drivers/gpu/drm/panel/Kconfig
