@@ -18,7 +18,8 @@ Releases will contain the following artifacts:
 - Linux headers for building out of tree modules
 - MNT's LPC module
 - QCOM's Wi-Fi module (i.MX8M Plus)
-- System images, bmap files, and SHAs for tested platforms
+
+Releases with system images for SD Card are available at [mntar.ch](https://mntar.ch/). These releases will include everything listed above as well as: System images, bmap files, and SHAs for tested platforms.
 
 See [the docs](https://github.com/yoctoproject/bmaptool) for more info on `bmaptool`, and see [Images](#floppy_disk-images) for details on which images you can download.
 
