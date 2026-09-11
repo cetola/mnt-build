@@ -1,6 +1,6 @@
 #
 # Automatically generated file; DO NOT EDIT.
-# Linux/arm64 7.2.3 Kernel Configuration
+# Linux/arm64 7.2.5 Kernel Configuration
 #
 CONFIG_CC_VERSION_TEXT="aarch64-linux-gnu-gcc (GCC) 16.1.0"
 CONFIG_CC_IS_GCC=y
@@ -10211,7 +10211,6 @@ CONFIG_IMX9_BLK_CTRL=y
 CONFIG_MTK_SCPSYS=y
 CONFIG_MTK_SCPSYS_PM_DOMAINS=y
 CONFIG_MTK_MFG_PM_DOMAIN=y
-# CONFIG_AIROHA_CPU_PM_DOMAIN is not set
 # end of MediaTek PM Domains
 
 #
