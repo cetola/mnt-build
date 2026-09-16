@@ -5,8 +5,8 @@ Subject: [PATCH 096/157] [DEBUG] phy: rockchip: samsung-hdptx: Add verbose
  logging
 
 ---
- .../phy/rockchip/phy-rockchip-samsung-hdptx.c | 27 +++++++++++++++++--
- 1 file changed, 25 insertions(+), 2 deletions(-)
+ .../phy/rockchip/phy-rockchip-samsung-hdptx.c | 33 +++++++++++++++++++++----
+ 1 file changed, 29 insertions(+), 4 deletions(-)
 
 diff --git a/drivers/phy/rockchip/phy-rockchip-samsung-hdptx.c b/drivers/phy/rockchip/phy-rockchip-samsung-hdptx.c
 index 3bde7fbb34b1..0684e1a0d1a1 100644
@@ -48,8 +48,11 @@ index 3bde7fbb34b1..0684e1a0d1a1 100644
  	rk_hdptx_phy_consumer_put(hdptx, true);
  }
  
-@@ -2292,11 +2292,15 @@ static unsigned long rk_hdptx_phy_clk_recalc_rate(struct clk_hw *hw,
+@@ -2337,12 +2337,19 @@ static unsigned long rk_hdptx_phy_clk_recalc_rate(struct clk_hw *hw,
+ 	struct rk_hdptx_phy *hdptx = to_rk_hdptx_phy(hw);
+ 	u32 status;
  	int ret;
++	u64 rate;
  
  	ret = regmap_read(hdptx->grf, GRF_HDPTX_CON0, &status);
 -	if (ret || !(status & HDPTX_I_PLL_EN))
@@ -58,29 +61,33 @@ index 3bde7fbb34b1..0684e1a0d1a1 100644
  		return 0;
 +	}
  
- 	rate = rk_hdptx_phy_clk_calc_rate_from_pll_cfg(hdptx);
- 
+-	return rk_hdptx_phy_clk_calc_rate_from_pll_cfg(hdptx);
++	rate = rk_hdptx_phy_clk_calc_rate_from_pll_cfg(hdptx);
++
 +	dev_dbg(hdptx->dev, "%s from_pll=%llu\n", __func__, rate);
 +
- 	if (hdptx->hdmi_cfg.mode == PHY_HDMI_MODE_FRL)
- 		return rate;
++	return rate;
+ }
  
-@@ -2308,6 +2312,9 @@ static int rk_hdptx_phy_clk_determine_rate(struct clk_hw *hw,
+ static int rk_hdptx_phy_clk_determine_rate(struct clk_hw *hw,
+@@ -2350,6 +2357,10 @@ static int rk_hdptx_phy_clk_determine_rate(struct clk_hw *hw,
  {
  	struct rk_hdptx_phy *hdptx = to_rk_hdptx_phy(hw);
  
-+	dev_dbg(hdptx->dev, "%s req=%lu par=%lu cfg=%llu\n", __func__,
-+		req->rate, req->best_parent_rate, hdptx->hdmi_cfg.rate);
++	dev_dbg(hdptx->dev, "%s req=%lu par=%lu cfg=%llu dirty=%d\n", __func__,
++		req->rate, req->best_parent_rate, hdptx->hdmi_cfg.rate,
++		hdptx->pll_config_dirty);
 +
- 	if (hdptx->hdmi_cfg.mode == PHY_HDMI_MODE_FRL)
- 		return hdptx->hdmi_cfg.rate;
+ 	/*
+ 	 * Invalidate current clock rate to ensure rk_hdptx_phy_clk_set_rate()
+ 	 * will be invoked to commit PLL configuration.
+@@ -2394,6 +2402,10 @@ static int rk_hdptx_phy_clk_set_rate(struct clk_hw *hw, unsigned long rate,
+ {
+ 	struct rk_hdptx_phy *hdptx = to_rk_hdptx_phy(hw);
  
-@@ -2353,6 +2360,9 @@ static int rk_hdptx_phy_clk_set_rate(struct clk_hw *hw, unsigned long rate,
- 		hdptx->hdmi_cfg.rate = link_rate;
- 	}
- 
-+	dev_dbg(hdptx->dev, "%s req=%lu par=%lu cfg=%llu\n", __func__,
-+		rate, parent_rate, hdptx->hdmi_cfg.rate);
++	dev_dbg(hdptx->dev, "%s req=%lu par=%lu cfg=%llu dirty=%d\n", __func__,
++		rate, parent_rate, hdptx->hdmi_cfg.rate,
++		hdptx->pll_config_dirty);
 +
  	/*
  	 * The link rate would be normally programmed in HW during

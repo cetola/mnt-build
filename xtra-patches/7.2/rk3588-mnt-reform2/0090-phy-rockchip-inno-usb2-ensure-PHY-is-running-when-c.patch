@@ -1,0 +1,83 @@
+From: Sebastian Reichel <sebastian.reichel@collabora.com>
+Date: Tue, 08 Sep 2026 18:07:42 +0200
+Subject: [PATCH] phy: rockchip: inno-usb2: ensure PHY is running when clock
+ is requested
+
+On RK3588 the OHCI controller registers can only be accessed when the
+PHY's 480MHz clock is running. After system suspend the controller is
+resumed before the PHY. The controller requests the clock, which opens
+the gate in the PHY's clock prepare function. But with the PHY suspended
+this just results in a dead clock being routed. The OHCI driver will
+then continue to access its registers resulting in a board hang.
+
+Fix this by resuming the suspended PHY in the clock's prepare function,
+so that the clock is really prepared once the function returns.
+
+Signed-off-by: Sebastian Reichel <sebastian.reichel@collabora.com>
+---
+This was noticed on RK3588 EVB1 when resuming from system suspend. This
+is technically a fix, but its unclear when the bug was introduced and
+system suspend is broken on RK3588 for quite a while and not just due
+to this problem. So I think this fix can be merged the normal way via
+linux-next.
+---
+ drivers/phy/rockchip/phy-rockchip-inno-usb2.c | 37 +++++++++++++++++++++++++++
+ 1 file changed, 37 insertions(+)
+
+diff --git a/drivers/phy/rockchip/phy-rockchip-inno-usb2.c b/drivers/phy/rockchip/phy-rockchip-inno-usb2.c
+index 7d8a533f24ae..07d400967def 100644
+--- a/drivers/phy/rockchip/phy-rockchip-inno-usb2.c
++++ b/drivers/phy/rockchip/phy-rockchip-inno-usb2.c
+@@ -332,6 +332,39 @@ rockchip_usb2phy_clk480m_clkout_ctl(struct clk_hw *hw, struct regmap **base,
+ 	}
+ }
+ 
++static int rockchip_usb2phy_clk480m_leave_suspend(struct clk_hw *hw)
++{
++	struct rockchip_usb2phy *rphy = container_of(hw, struct rockchip_usb2phy, clk480m_hw);
++	bool relock = false;
++	int ret, i;
++
++	/* Limit to single port; it's unclear how multi-port should be handled */
++	if (rphy->phy_cfg->num_ports > 1)
++		return 0;
++
++	for (i = 0; i < rphy->phy_cfg->num_ports; i++) {
++		struct rockchip_usb2phy_port *rport = &rphy->ports[i];
++		const struct rockchip_usb2phy_port_cfg *port_cfg = rport->port_cfg;
++
++		if (!rport->phy || !port_cfg || !port_cfg->phy_sus.enable)
++			continue;
++		if (property_enabled(rphy->grf, &port_cfg->phy_sus)) {
++			property_enable(rphy->grf, &port_cfg->phy_sus,
++					false);
++			relock = true;
++		}
++	}
++
++	if (relock) {
++		ret = rockchip_usb2phy_reset(rphy);
++		if (ret)
++			return ret;
++		usleep_range(1500, 2000);
++	}
++
++	return 0;
++}
++
+ static int rockchip_usb2phy_clk480m_prepare(struct clk_hw *hw)
+ {
+ 	const struct usb2phy_reg *clkout_ctl;
+@@ -340,6 +373,10 @@ static int rockchip_usb2phy_clk480m_prepare(struct clk_hw *hw)
+ 
+ 	rockchip_usb2phy_clk480m_clkout_ctl(hw, &base, &clkout_ctl);
+ 
++	ret = rockchip_usb2phy_clk480m_leave_suspend(hw);
++	if (ret)
++		return ret;
++
+ 	/* turn on 480m clk output if it is off */
+ 	if (!property_enabled(base, clkout_ctl)) {
+ 		ret = property_enable(base, clkout_ctl, true);
+
+---
