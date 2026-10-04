@@ -12,6 +12,9 @@ DEFAULT_CROSS_COMPILE = "aarch64-linux-gnu-"
 DEFAULT_KERNEL_ONLY = False
 DEFAULT_DEV_KERNEL = "mnt-linux"
 KERNEL_REMOTES_FILE = "kernel-remotes.data"
+# Remotes to look for an mnt-v{version} branch on, in order of preference.
+# Names are as listed in kernel-remotes.data.
+KERNEL_BRANCH_REMOTES = ("cetola", "mnt")
 
 
 def defconfig_name_for_arch(arch: str) -> str:
@@ -38,6 +41,14 @@ def load_kernel_remotes(path: Path) -> list[tuple[str, str, Optional[str]]]:
             )
         remotes.append((fields[0], fields[1], fields[2] if len(fields) == 3 else None))
     return remotes
+
+
+def version_key(version: str) -> Optional[tuple]:
+    """Sort key for a kernel release like 7.2 or 7.2.9. None for anything else (e.g. an -rc)."""
+    parts = version.split('.')
+    if len(parts) not in (2, 3) or not all(part.isdigit() for part in parts):
+        return None
+    return tuple(int(part) for part in parts)
 
 
 def normalize_git_url(url: str) -> str:

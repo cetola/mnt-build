@@ -11,7 +11,8 @@ from typing import Callable, List, Optional
 
 from config import (
     BuildConfig, DEFAULT_CROSS_COMPILE, DEFAULT_KERNEL_ONLY, DTS_CONFIGS, EXTRA_DTB_PATHS,
-    KERNEL_REMOTES_FILE, VENDOR_CONFIG_MAP, load_kernel_remotes, normalize_git_url,
+    KERNEL_BRANCH_REMOTES, KERNEL_REMOTES_FILE, VENDOR_CONFIG_MAP, load_kernel_remotes,
+    normalize_git_url, version_key,
 )
 from errors import BuildError, PatchStats
 from logging_setup import Colors, Spinner
@@ -23,6 +24,8 @@ MNT_OVERRIDE_SKIP_REASON_MAX_LEN = 200
 STABLE_KERNEL_REMOTE_URL = "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
 # Seconds to wait for a remote to answer a status check before calling it unreachable.
 REMOTE_STATUS_TIMEOUT = 10
+# Seconds to wait for a single-branch fetch before giving up on that remote.
+REMOTE_FETCH_TIMEOUT = 600
 
 
 class KernelBuilder:
@@ -43,6 +46,11 @@ class KernelBuilder:
         self.verruckt = verruckt
         self.patch_dirs_used: List[Path] = []
         self.patch_stats: Optional[PatchStats] = None
+        # Untracked files in the kernel tree before source prep. None until the
+        # tree has been verified clean, so restore_kernel_tree() never runs on
+        # a tree that held someone's uncommitted work.
+        self._untracked_before: Optional[set] = None
+        self._created_files: set = set()
 
     def log_phase(self, name: str):
         self.logger.info("=" * 60)
@@ -217,13 +225,16 @@ class KernelBuilder:
             xtra_patch_count = self._apply_xtra_patch_sets(stats)
             stats.set_xtra_found(xtra_patch_count)
 
-        if not stats.has_any:
+        if not stats.has_any and self.config.kernel == "mnt-linux":
+            self.logger.info("No patches to apply. Building the branch as committed.")
+        elif not stats.has_any:
             raise BuildError(
                 "No kernel patches found in either "
                 f"{self.config.patches_dir} or {self.config.xtra_patches_dir}"
             )
 
         self.patch_stats = stats
+        self._record_created_files()
 
         self.logger.info("Patch application complete!")
         if stats.has_xtra:
@@ -726,6 +737,33 @@ class KernelBuilder:
             ).stdout.strip()
         return wanted, existing
 
+    def _ls_remote(self, name: str, *args: str) -> Optional[dict]:
+        """Return {ref: sha} from git ls-remote, or None if the remote did not answer."""
+        flags = [a for a in args if a.startswith('-')]
+        patterns = [a for a in args if not a.startswith('-')]
+        cmd = ['git', 'ls-remote', *flags, name, *patterns]
+        # Not run_command: needs a timeout and must never stop for a password prompt.
+        self.logger.debug(f"$ {' '.join(cmd)}")
+        try:
+            result = subprocess.run(
+                cmd, cwd=self.config.linux_dir, capture_output=True, text=True,
+                timeout=REMOTE_STATUS_TIMEOUT,
+                env={**os.environ, 'GIT_TERMINAL_PROMPT': '0',
+                     'GIT_SSH_COMMAND': os.environ.get('GIT_SSH_COMMAND', 'ssh -o BatchMode=yes')},
+            )
+        except subprocess.TimeoutExpired:
+            self.logger.debug(f"No answer from {name} in {REMOTE_STATUS_TIMEOUT}s")
+            return None
+        if result.returncode != 0:
+            self.logger.debug(f"stderr: {result.stderr.strip()}")
+            return None
+
+        refs = {}
+        for line in result.stdout.splitlines():
+            sha, ref = line.split(None, 1)
+            refs[ref] = sha
+        return refs
+
     def _kernel_remote_state(self, name: str, offline: bool) -> str:
         linux_dir = self.config.linux_dir
         local = {}
@@ -744,25 +782,10 @@ class KernelBuilder:
                 return "never fetched"
             return f"fetched ({len(local)} branches), not checked"
 
-        # Not run_command: needs a timeout and must never stop for a password prompt.
-        self.logger.debug(f"$ git ls-remote --heads {name}")
-        try:
-            result = subprocess.run(
-                ['git', 'ls-remote', '--heads', name],
-                cwd=linux_dir, capture_output=True, text=True, timeout=REMOTE_STATUS_TIMEOUT,
-                env={**os.environ, 'GIT_TERMINAL_PROMPT': '0',
-                     'GIT_SSH_COMMAND': os.environ.get('GIT_SSH_COMMAND', 'ssh -o BatchMode=yes')},
-            )
-        except subprocess.TimeoutExpired:
-            return f"{Colors.RED}unreachable (no answer in {REMOTE_STATUS_TIMEOUT}s){Colors.RESET}"
-        if result.returncode != 0:
-            self.logger.debug(f"stderr: {result.stderr.strip()}")
+        remote = self._ls_remote(name, '--heads')
+        if remote is None:
             return f"{Colors.RED}unreachable{Colors.RESET}"
-
-        remote = {}
-        for line in result.stdout.splitlines():
-            sha, ref = line.split(None, 1)
-            remote[ref[len('refs/heads/'):]] = sha
+        remote = {ref[len('refs/heads/'):]: sha for ref, sha in remote.items()}
 
         if not remote and not local:
             return "empty remote"
@@ -950,13 +973,333 @@ class KernelBuilder:
         else:
             self.checkout_kernel_version()
 
+    def _resolve_kernel_remote(self, listed: str) -> Optional[str]:
+        """Name in the checkout of a remote listed in kernel-remotes.data, if it is set up."""
+        wanted, existing = self._load_kernel_remotes()
+        url = {name: url for name, url, _ in wanted}.get(listed)
+        if url is None:
+            return None
+        if listed in existing:
+            return listed
+        # The same repo may already be here under another name (e.g. origin).
+        return next(
+            (n for n, u in existing.items() if normalize_git_url(u) == normalize_git_url(url)),
+            None
+        )
+
+    def _kernel_branch_remotes(self) -> List[str]:
+        """Remotes in the checkout to look for mnt-v branches on, in order of preference."""
+        remotes = [self._resolve_kernel_remote(listed) for listed in KERNEL_BRANCH_REMOTES]
+        return [r for r in remotes if r]
+
+    def _ref_exists(self, ref: str) -> bool:
+        return self.run_command(
+            ['git', 'rev-parse', '--verify', '--quiet', f'{ref}^{{commit}}'],
+            cwd=self.config.linux_dir, check=False, log_cmd=False
+        ).returncode == 0
+
+    def _series(self) -> str:
+        parts = self.config.version.split('.')
+        return f"{parts[0]}.{parts[1]}"
+
+    def _mnt_linux_branches(self, remotes: List[str]) -> List[tuple]:
+        """mnt-v branches of this kernel series known here, newest first.
+
+        Returns (version_key, ref) pairs. For one version, the local branch
+        sorts ahead of the remotes, which sort in order of preference.
+        """
+        series = self._series()
+        places = ['refs/heads/'] + [f'refs/remotes/{r}/' for r in remotes]
+        found = []
+        for rank, place in enumerate(places):
+            refs = self.run_command(
+                ['git', 'for-each-ref', '--format=%(refname)', f'{place}mnt-v{series}.*'],
+                cwd=self.config.linux_dir, log_cmd=False
+            ).stdout.split()
+            for ref in refs:
+                key = version_key(ref[len(place) + len('mnt-v'):])
+                if key is not None:
+                    short = ref.removeprefix('refs/heads/').removeprefix('refs/remotes/')
+                    found.append((key, rank, short))
+        found.sort(key=lambda f: (tuple(-n for n in f[0]), f[1]))
+        return [(key, short) for key, _, short in found]
+
+    def _latest_stable_version(self, offline: bool) -> Optional[str]:
+        """Newest stable release of this kernel series, as tagged on the stable remote."""
+        series = self._series()
+        stable = self._resolve_kernel_remote("stable")
+        tags = None
+        if not offline and stable:
+            refs = self._ls_remote(stable, '--tags', '--refs', f'v{series}', f'v{series}.*')
+            if refs is not None:
+                tags = [ref[len('refs/tags/'):] for ref in refs]
+        if tags is None:
+            tags = self.run_command(
+                ['git', 'tag', '-l', f'v{series}', f'v{series}.*'],
+                cwd=self.config.linux_dir, log_cmd=False
+            ).stdout.split()
+        versions = [t[1:] for t in tags if version_key(t[1:]) is not None]
+        return max(versions, key=version_key, default=None)
+
+    def show_kernel_versions(self, offline: bool = False):
+        """Report whether an mnt-v branch exists for the latest stable kernel of this series."""
+        series = self._series()
+        remotes = self._kernel_branch_remotes()
+
+        if offline:
+            latest = self._latest_stable_version(offline)
+        else:
+            with Spinner("Checking stable..."):
+                latest = self._latest_stable_version(offline)
+        if latest is None:
+            self.logger.warning(
+                f"No stable v{series} tags known. Run: mnt-build dev-kernel fetch"
+            )
+            return
+        source = "tags fetched earlier, not checked" if offline else "stable remote"
+        self.logger.info(f"Latest stable {series}: v{latest} ({source})")
+
+        branch = f"mnt-v{latest}"
+        have = []
+        if self._ref_exists(f'refs/heads/{branch}'):
+            have.append("local")
+        for remote in remotes:
+            if offline:
+                found = self._ref_exists(f'refs/remotes/{remote}/{branch}')
+            else:
+                with Spinner(f"Checking {remote}..."):
+                    refs = self._ls_remote(remote, '--heads', branch)
+                if refs is None:
+                    found = self._ref_exists(f'refs/remotes/{remote}/{branch}')
+                    self.logger.warning(
+                        f"Could not reach {remote}. Going by what was fetched earlier."
+                    )
+                else:
+                    found = bool(refs)
+            if found:
+                have.append(remote)
+
+        if have:
+            self.logger.info(
+                f"{Colors.GREEN}✓{Colors.RESET} {branch} is available ({', '.join(have)}). "
+                f"Build with: mnt-build build --kernel {self.config.kernel} --kversion {latest}"
+            )
+            return
+
+        where = ' or '.join(['locally', *(f'on {r}' for r in remotes)])
+        self.logger.info(f"{Colors.YELLOW}{branch} does not exist{Colors.RESET} {where}")
+        known = self._mnt_linux_branches(remotes)
+        if known:
+            self.logger.info(f"Newest {series} branch known here: {known[0][1]}")
+            self.logger.info(f"Rebase it with: mnt-build dev-kernel rebase --kversion {latest}")
+        else:
+            self.logger.info(
+                f"No mnt-v{series}.x branch is known here. Run: mnt-build dev-kernel fetch"
+            )
+
+    def _ensure_stable_tag(self, tag: str):
+        """Make sure a stable release tag is in the checkout, fetching it if needed."""
+        if self._ref_exists(f'refs/tags/{tag}'):
+            return
+        stable = self._resolve_kernel_remote("stable")
+        if stable is None:
+            raise BuildError(
+                f"Tag {tag} is not in {self.config.linux_dir} and no 'stable' remote is set up "
+                "to fetch it from. Run: mnt-build dev-kernel add-remotes"
+            )
+        self.logger.info(f"Fetching {tag} from '{stable}'...")
+        result = self.run_command(
+            ['git', 'fetch', '--no-progress', stable, f'refs/tags/{tag}:refs/tags/{tag}'],
+            cwd=self.config.linux_dir, check=False
+        )
+        if result.returncode != 0:
+            raise BuildError(
+                f"Could not fetch tag {tag} from '{stable}'. Has it been released? "
+                f"git said:\n{result.stderr.strip()}"
+            )
+
+    def _rebase_in_progress(self) -> bool:
+        for name in ('rebase-merge', 'rebase-apply'):
+            path = self.run_command(
+                ['git', 'rev-parse', '--git-path', name],
+                cwd=self.config.linux_dir, log_cmd=False
+            ).stdout.strip()
+            if (self.config.linux_dir / path).exists():
+                return True
+        return False
+
+    def rebase_mnt_linux_branch(self, source: Optional[str] = None):
+        """Create mnt-v{version} by rebasing an existing mnt-v branch onto v{version}.
+
+        Always works on a new local branch. The source branch is not modified
+        and nothing is pushed. On a conflict the rebase is left in progress.
+        """
+        linux_dir = self.config.linux_dir
+        if not (linux_dir / ".git").exists():
+            raise BuildError(f"Not a git repository: {linux_dir}")
+
+        version = self.config.version
+        tag = f"v{version}"
+        branch = f"mnt-v{version}"
+
+        # A rebase writes new commits. Without an identity it stops on the first one.
+        if self.run_command(
+            ['git', 'var', 'GIT_COMMITTER_IDENT'], cwd=linux_dir, check=False, log_cmd=False
+        ).returncode != 0:
+            raise BuildError(
+                "git has no committer identity here, so it cannot rebase. Set one with:\n"
+                '  git config --global user.name "Your Name"\n'
+                '  git config --global user.email "you@example.com"'
+            )
+        self.require_clean_kernel_tree()
+        # Nothing here is taken back out afterwards.
+        self._untracked_before = None
+
+        remotes = self._kernel_branch_remotes()
+        for ref in [f'refs/heads/{branch}'] + [f'refs/remotes/{r}/{branch}' for r in remotes]:
+            if self._ref_exists(ref):
+                short = ref.removeprefix('refs/heads/').removeprefix('refs/remotes/')
+                raise BuildError(
+                    f"{branch} already exists ({short}). Nothing to rebase. Build it with: "
+                    f"mnt-build build --kernel {self.config.kernel} --kversion {version}"
+                )
+
+        if source is None:
+            known = [ref for key, ref in self._mnt_linux_branches(remotes)]
+            if not known:
+                raise BuildError(
+                    f"No mnt-v{self._series()}.x branch is known in {linux_dir} to rebase from. "
+                    "Run 'mnt-build dev-kernel fetch', or name a branch with --from."
+                )
+            source = known[0]
+        elif not self._ref_exists(source):
+            raise BuildError(f"--from {source}: no such branch or commit in {linux_dir}")
+
+        # The stable tag the source branch sits on.
+        match = re.search(r'mnt-v(\d+\.\d+(?:\.\d+)?)$', source)
+        if match:
+            old_tag = f"v{match.group(1)}"
+            self._ensure_stable_tag(old_tag)
+        else:
+            old_tag = self.run_command(
+                ['git', 'describe', '--tags', '--abbrev=0', '--match', 'v[0-9]*', source],
+                cwd=linux_dir, check=False
+            ).stdout.strip()
+            if not old_tag:
+                raise BuildError(f"Could not find the stable tag that {source} is based on.")
+        is_base = self.run_command(
+            ['git', 'merge-base', '--is-ancestor', old_tag, source], cwd=linux_dir, check=False
+        ).returncode == 0
+        if not is_base:
+            raise BuildError(f"{source} is not based on {old_tag}. Refusing to guess its base.")
+        if old_tag == tag:
+            raise BuildError(f"{source} is already based on {tag}.")
+
+        self._ensure_stable_tag(tag)
+
+        def count(rev_range: str) -> int:
+            return int(self.run_command(
+                ['git', 'rev-list', '--count', '--no-merges', rev_range],
+                cwd=linux_dir, log_cmd=False
+            ).stdout.strip())
+
+        before = count(f'{old_tag}..{source}')
+        self.logger.info(
+            f"Rebasing {before} commits from {source} ({old_tag}) onto {tag} as new branch {branch}..."
+        )
+        self.run_command(['git', 'switch', '--no-track', '--create', branch, source], cwd=linux_dir)
+        result = self.run_command(
+            ['git', 'rebase', '--onto', tag, old_tag], cwd=linux_dir,
+            check=False, stream_output=True
+        )
+        if result.returncode != 0:
+            raise BuildError(
+                f"The rebase stopped. {linux_dir} is on {branch} with the rebase in progress.\n"
+                "Resolve it there:\n"
+                "  git status                # what is in conflict\n"
+                "  git rebase --continue     # after fixing and 'git add'\n"
+                "  git rebase --skip         # drop this commit, e.g. it went upstream\n"
+                "To give up instead:\n"
+                f"  git rebase --abort && git switch - && git branch -D {branch}"
+            )
+
+        after = count(f'{tag}..{branch}')
+        self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} {branch} created: {after} commits on {tag}")
+        if after != before:
+            self.logger.info(
+                f"{before - after} commit(s) from {source} were dropped as already in {tag}"
+            )
+        self.logger.info("The branch is local only. Nothing was pushed.")
+        self.logger.info(
+            f"Next: mnt-build build --kernel {self.config.kernel} --kversion {version} --olddefconfig"
+        )
+
+    def _untracked_files(self) -> set:
+        return set(self.run_command(
+            ['git', 'ls-files', '--others', '--exclude-standard', '-z'],
+            cwd=self.config.linux_dir, log_cmd=False
+        ).stdout.split('\0')) - {''}
+
+    def require_clean_kernel_tree(self):
+        """Refuse to build on a persistent kernel checkout with uncommitted changes.
+
+        xtra-patches and custom DTS files are applied to the working tree and
+        taken back out by restore_kernel_tree(). That is only safe if nothing
+        else was modified first.
+        """
+        if self._rebase_in_progress():
+            raise BuildError(
+                f"A rebase is in progress in {self.config.linux_dir}. Finish it with "
+                "'git rebase --continue' or drop it with 'git rebase --abort'."
+            )
+        changed = self.run_command(
+            ['git', 'status', '--porcelain', '--untracked-files=no'],
+            cwd=self.config.linux_dir, log_cmd=False
+        ).stdout.splitlines()
+        if changed:
+            shown = '\n'.join(f"  {line}" for line in changed[:10])
+            more = f"\n  ... and {len(changed) - 10} more" if len(changed) > 10 else ""
+            raise BuildError(
+                f"{self.config.linux_dir} has uncommitted changes:\n{shown}{more}\n"
+                "Commit, stash, or discard them before building. If a previous build "
+                "was killed before it could take its patches back out, discard them with:\n"
+                f"  git -C {self.config.linux_dir} checkout HEAD -- ."
+            )
+        self._untracked_before = self._untracked_files()
+
+    def _record_created_files(self):
+        """Note files that patching or DTS setup added to a persistent kernel checkout."""
+        if self._untracked_before is None:
+            return
+        self._created_files |= self._untracked_files() - self._untracked_before
+
+    def restore_kernel_tree(self):
+        """Take xtra-patches and custom DTS files back out of a persistent kernel checkout."""
+        if self._untracked_before is None or self.verruckt:
+            return
+        self._untracked_before = None
+
+        self.logger.info(f"Restoring {self.config.linux_dir} to its committed state...")
+        self.run_command(['git', 'checkout', 'HEAD', '--', '.'], cwd=self.config.linux_dir)
+        for name in sorted(self._created_files):
+            (self.config.linux_dir / name).unlink(missing_ok=True)
+        self.logger.info(
+            f"{Colors.GREEN}✓{Colors.RESET} Kernel tree restored "
+            f"({len(self._created_files)} added file(s) removed)"
+        )
+        self._created_files = set()
+
     def checkout_mnt_linux_branch(self):
         """Switch to the mnt-v{version} branch named by --kversion.
 
-        Never force-resets or force-checks-out.
+        Uses the local branch if there is one, otherwise the first of
+        KERNEL_BRANCH_REMOTES that has it. Never force-resets, force-checks-out
+        or rebases.
         """
         if not (self.config.linux_dir / ".git").exists():
             raise BuildError(f"Not a git repository: {self.config.linux_dir}")
+
+        self.require_clean_kernel_tree()
 
         branch = f"mnt-v{self.config.version}"
 
@@ -975,37 +1318,102 @@ class KernelBuilder:
         ).returncode == 0
 
         if not local_exists:
-            self.logger.info(f"No local branch {branch}, checking origin...")
-            fetch_result = self.run_command(
-                ['git', 'fetch', 'origin', f'{branch}:refs/remotes/origin/{branch}'],
-                cwd=self.config.linux_dir, check=False
-            )
-            if fetch_result.returncode == 0:
-                self.run_command(
-                    ['git', 'switch', '--create', branch, '--track', f'origin/{branch}'],
-                    cwd=self.config.linux_dir
+            remotes = self._kernel_branch_remotes()
+            if not remotes:
+                raise BuildError(
+                    f"None of the remotes that carry mnt-v branches "
+                    f"({', '.join(KERNEL_BRANCH_REMOTES)}) are set up in "
+                    f"{self.config.linux_dir}. Run: mnt-build dev-kernel add-remotes"
                 )
-                self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Checked out {branch} from origin")
-                return
-            raise BuildError(
-                f"Branch '{branch}' does not exist locally or on origin in "
-                f"{self.config.linux_dir}. --kversion is currently "
-                f"{self.config.version} -- pass the --kversion this fork was "
-                f"actually branched at, or create the branch first, e.g.:\n"
-                f"  git -C {self.config.linux_dir} fetch stable v{self.config.version}\n"
-                f"  git -C {self.config.linux_dir} switch --create {branch} v{self.config.version}"
-            )
+            for remote in remotes:
+                if self._fetch_mnt_linux_branch(remote, branch):
+                    self.run_command(
+                        ['git', 'switch', '--create', branch, '--track', f'{remote}/{branch}'],
+                        cwd=self.config.linux_dir
+                    )
+                    self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Checked out {branch} from {remote}")
+                    return
+            raise BuildError(self._missing_mnt_linux_branch_message(branch, remotes))
 
         checkout_result = self.run_command(
             ['git', 'checkout', branch], cwd=self.config.linux_dir, check=False
         )
         if checkout_result.returncode != 0:
             raise BuildError(
-                f"Could not switch to {branch} in {self.config.linux_dir} "
-                f"(uncommitted changes on {current}?). git said:\n{checkout_result.stderr}"
+                f"Could not switch to {branch} in {self.config.linux_dir}. "
+                f"git said:\n{checkout_result.stderr}"
             )
 
         self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Checked out {branch}")
+
+    def _fetch_mnt_linux_branch(self, remote: str, branch: str) -> bool:
+        """Fetch branch from remote. True if refs/remotes/{remote}/{branch} is usable."""
+        self.logger.info(f"No local branch {branch}, checking {remote}...")
+        cmd = ['git', 'fetch', remote, f'+refs/heads/{branch}:refs/remotes/{remote}/{branch}']
+        # Not run_command: needs a timeout and must never stop for a password prompt.
+        self.logger.debug(f"$ {' '.join(cmd)}")
+        try:
+            result = subprocess.run(
+                cmd, cwd=self.config.linux_dir, capture_output=True, text=True,
+                timeout=REMOTE_FETCH_TIMEOUT,
+                # LC_ALL=C: the "no such branch" check below matches git's English message.
+                env={**os.environ, 'GIT_TERMINAL_PROMPT': '0', 'LC_ALL': 'C',
+                     'GIT_SSH_COMMAND': os.environ.get('GIT_SSH_COMMAND', 'ssh -o BatchMode=yes')},
+            )
+            if result.returncode == 0:
+                return True
+            self.logger.debug(f"stderr: {result.stderr.strip()}")
+            # "couldn't find remote ref" means the remote answered and has no such branch.
+            reachable = "couldn't find remote ref" in result.stderr
+        except subprocess.TimeoutExpired:
+            self.logger.debug(f"No answer from {remote} in {REMOTE_FETCH_TIMEOUT}s")
+            reachable = False
+
+        if reachable:
+            self.logger.info(f"{remote} has no {branch}")
+            return False
+
+        fetched_before = self.run_command(
+            ['git', 'rev-parse', '--verify', '--quiet', f'refs/remotes/{remote}/{branch}'],
+            cwd=self.config.linux_dir, check=False, log_cmd=False
+        ).returncode == 0
+        if fetched_before:
+            self.logger.warning(
+                f"Could not reach {remote}. Using the copy of {branch} fetched earlier, "
+                "which may be out of date."
+            )
+            return True
+        self.logger.warning(f"Could not reach {remote}, and {branch} was never fetched from it")
+        return False
+
+    def _missing_mnt_linux_branch_message(self, branch: str, remotes: List[str]) -> str:
+        version_parts = self.config.version.split('.')
+        series = f"mnt-v{version_parts[0]}.{version_parts[1]}."
+        refs = self.run_command(
+            ['git', 'for-each-ref', '--format=%(refname:short)', '--sort=-version:refname',
+             f'refs/heads/{series}*', *(f'refs/remotes/{r}/{series}*' for r in remotes)],
+            cwd=self.config.linux_dir, log_cmd=False
+        ).stdout.split()
+
+        message = (
+            f"No {branch} branch locally or on {' or '.join(remotes)}. "
+            f"mnt-build does not rebase the MNT patch stack as part of a build.\n"
+        )
+        if refs:
+            message += (
+                f"Branches known here for this series: {', '.join(refs)}\n"
+                f"Rebase the newest one onto v{self.config.version}, then build again:\n"
+                f"  mnt-build dev-kernel rebase --kversion {self.config.version}\n"
+            )
+        else:
+            message += (
+                f"No {series}x branch is known here either. Run "
+                "'mnt-build dev-kernel fetch', then build again. "
+            )
+        message += (
+            "Or pass the --kversion of a branch that exists."
+        )
+        return message
 
     def checkout_kernel_version(self):
         """Reset the git repo and check out the target kernel version."""
@@ -1036,7 +1444,10 @@ class KernelBuilder:
 
         # Build unified list of (source_path, name, vendor, config_sym)
         all_dts: list[tuple] = []
-        for dts_config in DTS_CONFIGS:
+        # mnt-linux branches carry these files as commits. Copying the
+        # reform-debian-packages versions in would overwrite newer ones.
+        base_dts = [] if self.config.kernel == "mnt-linux" else DTS_CONFIGS
+        for dts_config in base_dts:
             source = self.config.build_dir / f"reform-debian-packages/linux/{dts_config['name']}"
             all_dts.append((source, dts_config['name'], dts_config['vendor'], dts_config['config']))
 
@@ -1052,7 +1463,7 @@ class KernelBuilder:
                     continue
                 for dts_file in sorted(vendor_dir.glob("*.dts")):
                     all_dts.append((dts_file, dts_file.name, vendor, config_sym))
-            xtra_count = len(all_dts) - len(DTS_CONFIGS)
+            xtra_count = len(all_dts) - len(base_dts)
             if xtra_count:
                 self.logger.info(f"Found {xtra_count} extra DTS file(s) in {xtra_dir}")
 
@@ -1091,6 +1502,8 @@ class KernelBuilder:
             self.logger.info(f"Also shipping {len(EXTRA_DTB_PATHS)} upstream DTB(s) (built by kernel, not copied):")
             for path in EXTRA_DTB_PATHS:
                 self.logger.info(f"  {Path(path).name}")
+
+        self._record_created_files()
 
     # ------------------------------------------------------------------
     # Config management

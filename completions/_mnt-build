@@ -62,9 +62,11 @@ _mnt_build() {
         '--help[show dev-kernel help]' \
         '--build-dir=[build directory]:directory:_files -/' \
         '--kernel=[kernel checkout dir under build_dir (default: mnt-linux)]:kernel:' \
+        '--kversion=[kernel version: series for the status report, target for rebase]:kversion:' \
+        '--from=[with rebase: branch to rebase from (default: newest mnt-v branch of the series)]:branch:' \
         '--offline[do not contact the remotes]' \
         '--log[also write output to a log file in the build directory]' \
-        '2::action:(add-remotes fetch)'
+        '2::action:(add-remotes fetch rebase)'
       ;;
     uboot)
       _arguments -s \

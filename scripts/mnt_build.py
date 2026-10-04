@@ -169,7 +169,8 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         builder.log_phase("Summary")
         logger.info("=" * 60)
         logger.info(f"{Colors.GREEN}✓ Build completed successfully in {elapsed:.0f} seconds!{Colors.RESET}")
-        if builder.patch_stats is not None and builder.patch_stats.no_mnt_patches:
+        if (kernel != "mnt-linux" and builder.patch_stats is not None
+                and builder.patch_stats.no_mnt_patches):
             logger.warning("!" * 60)
             logger.warning("No MNT Patches")
             logger.warning(f"No patches were found in: {config.patches_dir}")
@@ -202,6 +203,11 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
     except Exception as e:
         logger.exception(f"Unexpected error: {e}")
         return 1
+    finally:
+        try:
+            builder.restore_kernel_tree()
+        except BuildError as e:
+            logger.error(f"Could not restore the kernel tree: {e}")
 
 
 def run_clean(build_dir: Optional[Path] = None, kernel: str = "linux",
@@ -244,8 +250,9 @@ def run_clean(build_dir: Optional[Path] = None, kernel: str = "linux",
 
 def run_dev_kernel(build_dir: Optional[Path] = None, kernel: str = DEFAULT_DEV_KERNEL,
                    action: Optional[str] = None, offline: bool = False,
-                   log: bool = False) -> int:
-    config = BuildConfig.create(version=DEFAULT_KERNEL_VERSION, build_dir=build_dir, kernel=kernel)
+                   log: bool = False, version: str = DEFAULT_KERNEL_VERSION,
+                   source: Optional[str] = None) -> int:
+    config = BuildConfig.create(version=version, build_dir=build_dir, kernel=kernel)
     if log:
         config.build_dir.mkdir(parents=True, exist_ok=True)
     else:
@@ -262,6 +269,11 @@ def run_dev_kernel(build_dir: Optional[Path] = None, kernel: str = DEFAULT_DEV_K
             logger.info(f"Log file: {config.log_file}")
         logger.info("=" * 60)
 
+        if action == 'rebase':
+            builder.log_phase("Rebase")
+            builder.rebase_mnt_linux_branch(source=source)
+            return 0
+
         builder.log_phase("Remotes")
         if action == 'add-remotes':
             builder.ensure_kernel_remotes()
@@ -269,6 +281,8 @@ def run_dev_kernel(build_dir: Optional[Path] = None, kernel: str = DEFAULT_DEV_K
             builder.fetch_kernel_remotes()
         else:
             builder.show_kernel_remotes(offline=offline)
+            builder.log_phase("Versions")
+            builder.show_kernel_versions(offline=offline)
         return 0
     except BuildError as e:
         logger.error(f"dev-kernel failed: {e}")
@@ -623,11 +637,29 @@ def build_parser() -> argparse.ArgumentParser:
     dev_kernel_parser.add_argument(
         'action',
         nargs='?',
-        choices=['add-remotes', 'fetch'],
+        choices=['add-remotes', 'fetch', 'rebase'],
         help='With no action, list the remotes in the checkout and whether each '
-             'is fetched and up to date. add-remotes: add any remote listed in '
+             'is fetched and up to date, then report whether an mnt-v branch '
+             'exists for the latest stable kernel. add-remotes: add any remote listed in '
              'kernel-remotes.data that the checkout lacks (nothing is fetched). '
-             'fetch: fetch the latest from every remote in the checkout.'
+             'fetch: fetch the latest from every remote in the checkout. '
+             'rebase: create local branch mnt-v{kversion} by rebasing the newest '
+             'mnt-v branch of the same series onto stable tag v{kversion}. Works '
+             'from what is already fetched, pushes nothing, and leaves the rebase '
+             'in progress on a conflict.'
+    )
+    dev_kernel_parser.add_argument(
+        '--kversion',
+        default=DEFAULT_KERNEL_VERSION,
+        help='Kernel version. Picks the series (X.Y) the status report covers, '
+             f'and is the version rebase targets (default: {DEFAULT_KERNEL_VERSION})'
+    )
+    dev_kernel_parser.add_argument(
+        '--from',
+        dest='source',
+        metavar='BRANCH',
+        help='With rebase: the branch to rebase from, e.g. mnt/mnt-v7.2.6 '
+             '(default: the newest mnt-v branch of the same series).'
     )
     dev_kernel_parser.add_argument(
         '--build-dir',
@@ -762,7 +794,8 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if args.command == 'dev-kernel':
         return run_dev_kernel(build_dir=args.build_dir, kernel=args.kernel,
-                              action=args.action, offline=args.offline, log=args.log)
+                              action=args.action, offline=args.offline, log=args.log,
+                              version=args.kversion, source=args.source)
 
     if args.command == 'uboot':
         if args.list == 'sysimage':

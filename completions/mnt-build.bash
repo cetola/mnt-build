@@ -58,13 +58,13 @@ _mnt_build_complete() {
       COMPREPLY=( $(compgen -W "$clean_opts" -- "$cur") )
       ;;
     dev-kernel)
-      local dev_kernel_opts="add-remotes fetch --help --build-dir --kernel --offline --log"
+      local dev_kernel_opts="add-remotes fetch rebase --help --build-dir --kernel --kversion --from --offline --log"
       case "$prev" in
         --build-dir)
           COMPREPLY=( $(compgen -d -- "$cur") )
           return 0
           ;;
-        --kernel)
+        --kernel|--kversion|--from)
           return 0
           ;;
       esac
