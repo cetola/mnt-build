@@ -22,7 +22,7 @@ _mnt_build() {
   if (( CURRENT == 2 )); then
     _arguments -s \
       $global_opts \
-      '1:subcommand:(build clean uboot)'
+      '1:subcommand:(build clean dev-kernel uboot)'
     return
   fi
 
@@ -57,6 +57,15 @@ _mnt_build() {
         '--kernel=[kernel checkout dir under build_dir; use mnt-linux to repair its version tag]:kernel:' \
         '--kversion=[kernel version whose tag to repair; only relevant with --kernel mnt-linux]:kversion:'
       ;;
+    dev-kernel)
+      _arguments -s \
+        '--help[show dev-kernel help]' \
+        '--build-dir=[build directory]:directory:_files -/' \
+        '--kernel=[kernel checkout dir under build_dir (default: mnt-linux)]:kernel:' \
+        '--offline[do not contact the remotes]' \
+        '--log[also write output to a log file in the build directory]' \
+        '2::action:(add-remotes fetch)'
+      ;;
     uboot)
       _arguments -s \
         '--help[show uboot help]' \
@@ -69,7 +78,7 @@ _mnt_build() {
         '--reset[reset inner u-boot/ sub-repo to the SHA expected by build.sh]'
       ;;
     *)
-      _message 'subcommand' 'build clean uboot'
+      _message 'subcommand' 'build clean dev-kernel uboot'
       ;;
   esac
 }

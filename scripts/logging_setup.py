@@ -2,7 +2,9 @@
 import logging
 import re
 import sys
+import threading
 from pathlib import Path
+from typing import Optional
 
 
 class Colors:
@@ -36,7 +38,8 @@ class PlainFormatter(logging.Formatter):
         return self.ANSI_RE.sub('', rendered)
 
 
-def setup_logging(log_file: Path) -> logging.Logger:
+def setup_logging(log_file: Optional[Path]) -> logging.Logger:
+    """Set up console logging, plus file logging when log_file is given."""
     logger = logging.getLogger('kernel_build')
     logger.setLevel(logging.DEBUG)
     logger.handlers.clear()
@@ -45,14 +48,48 @@ def setup_logging(log_file: Path) -> logging.Logger:
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(ColoredFormatter())
 
-    file_handler = logging.FileHandler(log_file)
-    file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(
-        PlainFormatter('%(levelname)s %(asctime)s - %(message)s',
-                       datefmt='%Y-%m-%d %H:%M:%S')
-    )
-
     logger.addHandler(console_handler)
-    logger.addHandler(file_handler)
+
+    if log_file is not None:
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(
+            PlainFormatter('%(levelname)s %(asctime)s - %(message)s',
+                           datefmt='%Y-%m-%d %H:%M:%S')
+        )
+        logger.addHandler(file_handler)
 
     return logger
+
+
+class Spinner:
+    FRAMES = '|/-\\'
+
+    def __init__(self, message: str, interval: float = 0.1):
+        self.message = message
+        self.interval = interval
+        self.enabled = sys.stdout.isatty()
+        self._stop = threading.Event()
+        self._thread = None
+
+    def _spin(self):
+        i = 0
+        while not self._stop.is_set():
+            sys.stdout.write(f"\r{self.FRAMES[i % len(self.FRAMES)]} {self.message}")
+            sys.stdout.flush()
+            i += 1
+            self._stop.wait(self.interval)
+
+    def __enter__(self):
+        if self.enabled:
+            self._thread = threading.Thread(target=self._spin, daemon=True)
+            self._thread.start()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self._thread:
+            self._stop.set()
+            self._thread.join()
+            sys.stdout.write("\r\033[K")
+            sys.stdout.flush()
+        return False

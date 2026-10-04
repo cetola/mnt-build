@@ -15,6 +15,7 @@ from builder import KernelBuilder
 from config import (
     BuildConfig,
     DEFAULT_CROSS_COMPILE,
+    DEFAULT_DEV_KERNEL,
     DEFAULT_KERNEL_ONLY,
     DEFAULT_KERNEL_VERSION,
     DEFAULT_LOCALVERSION_NAME,
@@ -235,6 +236,49 @@ def run_clean(build_dir: Optional[Path] = None, kernel: str = "linux",
         return 1
     except KeyboardInterrupt:
         logger.warning("Clean interrupted by user")
+        return 130
+    except Exception as e:
+        logger.exception(f"Unexpected error: {e}")
+        return 1
+
+
+def run_dev_kernel(build_dir: Optional[Path] = None, kernel: str = DEFAULT_DEV_KERNEL,
+                   action: Optional[str] = None, offline: bool = False,
+                   log: bool = False) -> int:
+    config = BuildConfig.create(version=DEFAULT_KERNEL_VERSION, build_dir=build_dir, kernel=kernel)
+    if log:
+        config.build_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        config.log_file = None
+    logger = setup_logging(config.log_file)
+    builder = KernelBuilder(config, logger)
+
+    try:
+        logger.info("=" * 60)
+        logger.info("Kernel development checkout")
+        logger.info(f"Build directory: {config.build_dir}")
+        logger.info(f"Kernel directory: {config.linux_dir}")
+        if log:
+            logger.info(f"Log file: {config.log_file}")
+        logger.info("=" * 60)
+
+        builder.log_phase("Remotes")
+        if action == 'add-remotes':
+            builder.ensure_kernel_remotes()
+        elif action == 'fetch':
+            builder.fetch_kernel_remotes()
+        else:
+            builder.show_kernel_remotes(offline=offline)
+        return 0
+    except BuildError as e:
+        logger.error(f"dev-kernel failed: {e}")
+        if log:
+            logger.error(f"Check log file for details: {config.log_file}")
+        else:
+            logger.error("Re-run with --log to capture details in a log file.")
+        return 1
+    except KeyboardInterrupt:
+        logger.warning("dev-kernel interrupted by user")
         return 130
     except Exception as e:
         logger.exception(f"Unexpected error: {e}")
@@ -572,6 +616,42 @@ def build_parser() -> argparse.ArgumentParser:
              'Only relevant with --kernel mnt-linux.'
     )
 
+    dev_kernel_parser = subparsers.add_parser(
+        'dev-kernel',
+        help='Show the git remotes of a kernel checkout and their status'
+    )
+    dev_kernel_parser.add_argument(
+        'action',
+        nargs='?',
+        choices=['add-remotes', 'fetch'],
+        help='With no action, list the remotes in the checkout and whether each '
+             'is fetched and up to date. add-remotes: add any remote listed in '
+             'kernel-remotes.data that the checkout lacks (nothing is fetched). '
+             'fetch: fetch the latest from every remote in the checkout.'
+    )
+    dev_kernel_parser.add_argument(
+        '--build-dir',
+        type=Path,
+        help='Build directory (default: ~/mnt-build)'
+    )
+    dev_kernel_parser.add_argument(
+        '--kernel',
+        default=DEFAULT_DEV_KERNEL,
+        help=f'Kernel checkout dir under build_dir (default: {DEFAULT_DEV_KERNEL}).'
+    )
+    dev_kernel_parser.add_argument(
+        '--offline',
+        action='store_true',
+        help='Do not contact the remotes. Reports only whether each one has '
+             'been fetched, not whether it is up to date.'
+    )
+    dev_kernel_parser.add_argument(
+        '--log',
+        action='store_true',
+        help='Also write the output to a log file in the build directory '
+             '(default: console only).'
+    )
+
     uboot_parser = subparsers.add_parser('uboot', help='U-Boot development workflow')
     uboot_parser.add_argument(
         '--list',
@@ -679,6 +759,10 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if args.command == 'clean':
         return run_clean(build_dir=args.build_dir, kernel=args.kernel, version=args.kversion)
+
+    if args.command == 'dev-kernel':
+        return run_dev_kernel(build_dir=args.build_dir, kernel=args.kernel,
+                              action=args.action, offline=args.offline, log=args.log)
 
     if args.command == 'uboot':
         if args.list == 'sysimage':

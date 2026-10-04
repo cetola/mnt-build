@@ -9,15 +9,20 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, List, Optional
 
-from config import BuildConfig, DEFAULT_CROSS_COMPILE, DEFAULT_KERNEL_ONLY, DTS_CONFIGS, EXTRA_DTB_PATHS, VENDOR_CONFIG_MAP
+from config import (
+    BuildConfig, DEFAULT_CROSS_COMPILE, DEFAULT_KERNEL_ONLY, DTS_CONFIGS, EXTRA_DTB_PATHS,
+    KERNEL_REMOTES_FILE, VENDOR_CONFIG_MAP, load_kernel_remotes, normalize_git_url,
+)
 from errors import BuildError, PatchStats
-from logging_setup import Colors
+from logging_setup import Colors, Spinner
 
 # mnt-overrides files that don't look like a real patch are treated as a skip
 # marker. Their text is logged as the skip reason, truncated to this length.
 MNT_OVERRIDE_SKIP_REASON_MAX_LEN = 200
 
 STABLE_KERNEL_REMOTE_URL = "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
+# Seconds to wait for a remote to answer a status check before calling it unreachable.
+REMOTE_STATUS_TIMEOUT = 10
 
 
 class KernelBuilder:
@@ -116,7 +121,8 @@ class KernelBuilder:
                 raise BuildError(f"Command failed: {cmd_str}") from e
 
         # stream_output is True here. Use Popen, stream lines to logger + file.
-        logfile_path = Path(self.config.log_file)
+        # log_file is None when file logging is off
+        logfile_path = Path(self.config.log_file or os.devnull)
         with open(logfile_path, "a", buffering=1) as logfile:
             proc = subprocess.Popen(
                 cmd,
@@ -698,6 +704,180 @@ class KernelBuilder:
         self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Kernel repo cleaned")
         self.logger.info(f"Deleted local-only branches: {len(deleted_branches)}")
         self.logger.info(f"Deleted local-only tags: {len(deleted_tags)}")
+
+    def _load_kernel_remotes(self):
+        """Return (wanted, existing): kernel-remotes.data entries and the checkout's remotes."""
+        linux_dir = self.config.linux_dir
+        if not (linux_dir / ".git").exists():
+            raise BuildError(f"Not a git repository: {linux_dir}")
+
+        remotes_file = self.config.build_dir / KERNEL_REMOTES_FILE
+        if not remotes_file.is_file():
+            raise BuildError(f"Kernel remotes file not found: {remotes_file}")
+        try:
+            wanted = load_kernel_remotes(remotes_file)
+        except ValueError as e:
+            raise BuildError(str(e))
+
+        existing = {}
+        for name in self.run_command(['git', 'remote'], cwd=linux_dir, log_cmd=False).stdout.split():
+            existing[name] = self.run_command(
+                ['git', 'remote', 'get-url', name], cwd=linux_dir, log_cmd=False
+            ).stdout.strip()
+        return wanted, existing
+
+    def _kernel_remote_state(self, name: str, offline: bool) -> str:
+        linux_dir = self.config.linux_dir
+        local = {}
+        refs = self.run_command(
+            ['git', 'for-each-ref', '--format=%(objectname) %(refname)', f'refs/remotes/{name}/'],
+            cwd=linux_dir, log_cmd=False
+        ).stdout.splitlines()
+        for line in refs:
+            sha, ref = line.split(' ', 1)
+            branch = ref[len(f'refs/remotes/{name}/'):]
+            if branch != 'HEAD':
+                local[branch] = sha
+
+        if offline:
+            if not local:
+                return "never fetched"
+            return f"fetched ({len(local)} branches), not checked"
+
+        # Not run_command: needs a timeout and must never stop for a password prompt.
+        self.logger.debug(f"$ git ls-remote --heads {name}")
+        try:
+            result = subprocess.run(
+                ['git', 'ls-remote', '--heads', name],
+                cwd=linux_dir, capture_output=True, text=True, timeout=REMOTE_STATUS_TIMEOUT,
+                env={**os.environ, 'GIT_TERMINAL_PROMPT': '0',
+                     'GIT_SSH_COMMAND': os.environ.get('GIT_SSH_COMMAND', 'ssh -o BatchMode=yes')},
+            )
+        except subprocess.TimeoutExpired:
+            return f"{Colors.RED}unreachable (no answer in {REMOTE_STATUS_TIMEOUT}s){Colors.RESET}"
+        if result.returncode != 0:
+            self.logger.debug(f"stderr: {result.stderr.strip()}")
+            return f"{Colors.RED}unreachable{Colors.RESET}"
+
+        remote = {}
+        for line in result.stdout.splitlines():
+            sha, ref = line.split(None, 1)
+            remote[ref[len('refs/heads/'):]] = sha
+
+        if not remote and not local:
+            return "empty remote"
+        if not local:
+            return f"{Colors.YELLOW}never fetched{Colors.RESET} ({len(remote)} branches on remote)"
+        differing = sum(1 for b in set(local) | set(remote) if local.get(b) != remote.get(b))
+        if differing:
+            return (f"{Colors.YELLOW}out of date{Colors.RESET} "
+                    f"({differing} of {len(set(local) | set(remote))} branches differ)")
+        return f"{Colors.GREEN}up to date{Colors.RESET} ({len(local)} branches)"
+
+    def show_kernel_remotes(self, offline: bool = False):
+        wanted, existing = self._load_kernel_remotes()
+        by_name = {name: url for name, url, _ in wanted}
+        by_repo = {normalize_git_url(url): name for name, url, _ in wanted}
+
+        rows = []
+        covered = set()
+        for name, url in existing.items():
+            if offline:
+                state = self._kernel_remote_state(name, offline)
+            else:
+                with Spinner(f"Checking {name}..."):
+                    state = self._kernel_remote_state(name, offline)
+            if name in by_name:
+                covered.add(name)
+                if normalize_git_url(by_name[name]) != normalize_git_url(url):
+                    state += f", {Colors.RED}URL differs from {KERNEL_REMOTES_FILE}{Colors.RESET}"
+            elif normalize_git_url(url) in by_repo:
+                listed_as = by_repo[normalize_git_url(url)]
+                covered.add(listed_as)
+                state += f", listed as '{listed_as}'"
+            else:
+                state += f", not in {KERNEL_REMOTES_FILE}"
+            rows.append((name, url, state))
+        for name, url, _ in wanted:
+            if name not in covered:
+                rows.append((name, url, f"{Colors.YELLOW}not added{Colors.RESET}"))
+
+        name_w = max((len(r[0]) for r in rows), default=0)
+        url_w = max((len(r[1]) for r in rows), default=0)
+        for name, url, state in rows:
+            self.logger.info(f"{name:<{name_w}}  {url:<{url_w}}  {state}")
+
+        missing = sum(1 for name, _, _ in wanted if name not in covered)
+        if missing:
+            self.logger.info(
+                f"{missing} remote(s) from {KERNEL_REMOTES_FILE} not added. "
+                "Run: mnt-build dev-kernel add-remotes"
+            )
+
+    def fetch_kernel_remotes(self):
+        linux_dir = self.config.linux_dir
+        _, existing = self._load_kernel_remotes()
+
+        failed = []
+        for name in existing:
+            self.logger.info(f"Fetching '{name}'...")
+            result = self.run_command(
+                ['git', 'fetch', '--no-progress', name],
+                cwd=linux_dir, check=False, stream_output=True
+            )
+            if result.returncode != 0:
+                failed.append(name)
+                self.logger.error(f"Fetch from '{name}' failed")
+            else:
+                self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} {name}: fetched")
+
+        if failed:
+            raise BuildError(f"Could not fetch from: {', '.join(failed)}")
+
+    def ensure_kernel_remotes(self):
+        linux_dir = self.config.linux_dir
+        wanted, existing = self._load_kernel_remotes()
+        remotes_file = self.config.build_dir / KERNEL_REMOTES_FILE
+
+        added = 0
+        for name, url, push_url in wanted:
+            target = name
+            if name in existing:
+                if normalize_git_url(existing[name]) != normalize_git_url(url):
+                    raise BuildError(
+                        f"Remote '{name}' in {linux_dir} points at {existing[name]}, "
+                        f"but {remotes_file.name} expects {url}. Fix one of them by hand."
+                    )
+                self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} {name}: present")
+            else:
+                # The same repo may already be here under another name (e.g. origin).
+                alias = next(
+                    (n for n, u in existing.items()
+                     if normalize_git_url(u) == normalize_git_url(url)),
+                    None
+                )
+                if alias:
+                    target = alias
+                    self.logger.info(
+                        f"{Colors.GREEN}✓{Colors.RESET} {name}: present as '{alias}'"
+                    )
+                else:
+                    self.run_command(['git', 'remote', 'add', name, url], cwd=linux_dir)
+                    existing[name] = url
+                    added += 1
+                    self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} {name}: added ({url})")
+
+            if push_url:
+                current_push = self.run_command(
+                    ['git', 'remote', 'get-url', '--push', target], cwd=linux_dir, log_cmd=False
+                ).stdout.strip()
+                if current_push != push_url:
+                    self.run_command(
+                        ['git', 'remote', 'set-url', '--push', target, push_url], cwd=linux_dir
+                    )
+                    self.logger.info(f"  {target}: push URL set to {push_url}")
+
+        self.logger.info(f"Remotes added: {added}")
 
     def repair_kernel_version_tag(self, remote: str = "stable"):
         """Restore the v{version} tag on a persistent kernel checkout (mnt-linux).

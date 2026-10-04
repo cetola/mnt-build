@@ -10,6 +10,8 @@ DEFAULT_LOCALVERSION_NAME = 'reform'
 DEFAULT_LOCALVERSION_REV = 1
 DEFAULT_CROSS_COMPILE = "aarch64-linux-gnu-"
 DEFAULT_KERNEL_ONLY = False
+DEFAULT_DEV_KERNEL = "mnt-linux"
+KERNEL_REMOTES_FILE = "kernel-remotes.data"
 
 
 def defconfig_name_for_arch(arch: str) -> str:
@@ -22,6 +24,37 @@ def log_arch_name_for_arch(arch: str) -> str:
         "arm64": "aarch64",
     }
     return arch_aliases.get(arch, arch)
+
+
+def load_kernel_remotes(path: Path) -> list[tuple[str, str, Optional[str]]]:
+    remotes = []
+    for lineno, line in enumerate(path.read_text().splitlines(), start=1):
+        fields = line.split('#', 1)[0].split()
+        if not fields:
+            continue
+        if len(fields) not in (2, 3):
+            raise ValueError(
+                f"{path}:{lineno}: expected '<name> <fetch-url> [push-url]', got: {line.strip()}"
+            )
+        remotes.append((fields[0], fields[1], fields[2] if len(fields) == 3 else None))
+    return remotes
+
+
+def normalize_git_url(url: str) -> str:
+    """Reduce a git URL to host/path so HTTPS and SSH forms of one repo compare equal."""
+    url = url.strip()
+    if '://' in url:
+        url = url.split('://', 1)[1]
+        url = url.split('@', 1)[-1] if '@' in url.split('/', 1)[0] else url
+    elif '@' in url and ':' in url:
+        # scp-like syntax: user@host:path
+        host, path = url.split('@', 1)[1].split(':', 1)
+        url = f"{host}/{path.lstrip('/')}"
+    host, _, path = url.partition('/')
+    path = path.rstrip('/')
+    if path.endswith('.git'):
+        path = path[:-4]
+    return f"{host.lower()}/{path}"
 
 DTS_CONFIGS = [
     {
