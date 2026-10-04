@@ -1,0 +1,4 @@
+mnt               https://source.mnt.re/reform/linux.git
+cetola              https://git.sr.ht/~stephano/mnt-linux
+collabora-rk3588  https://gitlab.collabora.com/hardware-enablement/rockchip-3588/linux.git
+stable            https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git

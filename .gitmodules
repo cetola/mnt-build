@@ -18,7 +18,3 @@
 	url = https://source.mnt.re/reform/reform-debian-packages.git
 	ignore = dirty
 	branch = main
-[submodule "mnt-linux"]
-	path = mnt-linux
-	url = https://source.mnt.re/josch/linux.git
-	ignore = dirty
