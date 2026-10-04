@@ -40,22 +40,20 @@ _mnt_build() {
         '--olddefconfig[run olddefconfig and persist config]' \
         '--defconfig[alias for --olddefconfig]' \
         '--post-clean[run mrproper after olddefconfig dry-run]' \
-        '--skip-git-ops[skip git reset/checkout/tag ops]' \
+        '--skip-git-ops[do not switch branches; build the kernel checkout as it stands]' \
         '--arch=[kernel ARCH]:arch:' \
         '--cross-compile=[cross compile prefix]:prefix:' \
         '--with-headers[generate extmod headers tree]' \
         '(--dtbs-only --modules-only)--kernel-only[build kernel image only]' \
         '(--kernel-only --modules-only)--dtbs-only[build DTBs only (ARM64)]' \
         '(--kernel-only --dtbs-only)--modules-only[build and install in-tree modules only]' \
-        '--kernel=[kernel checkout dir under build_dir, e.g. mnt-linux]:kernel:' \
-        '--verruckt[commit each successfully applied patch]'
+        '--kernel=[kernel checkout dir under build_dir (default: mnt-linux)]:kernel:'
       ;;
     clean)
       _arguments -s \
         '--help[show clean help]' \
         '--build-dir=[build directory]:directory:_files -/' \
-        '--kernel=[kernel checkout dir under build_dir; use mnt-linux to repair its version tag]:kernel:' \
-        '--kversion=[kernel version whose tag to repair; only relevant with --kernel mnt-linux]:kversion:'
+        '--kernel=[kernel checkout dir under build_dir (default: mnt-linux)]:kernel:'
       ;;
     dev-kernel)
       _arguments -s \

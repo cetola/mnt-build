@@ -7,21 +7,16 @@ import subprocess
 import tarfile
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import List, Optional
 
 from config import (
-    BuildConfig, DEFAULT_CROSS_COMPILE, DEFAULT_KERNEL_ONLY, DTS_CONFIGS, EXTRA_DTB_PATHS,
+    BuildConfig, DEFAULT_CROSS_COMPILE, DEFAULT_KERNEL_ONLY, EXTRA_DTB_PATHS,
     KERNEL_BRANCH_REMOTES, KERNEL_REMOTES_FILE, VENDOR_CONFIG_MAP, load_kernel_remotes,
     normalize_git_url, version_key,
 )
 from errors import BuildError, PatchStats
 from logging_setup import Colors, Spinner
 
-# mnt-overrides files that don't look like a real patch are treated as a skip
-# marker. Their text is logged as the skip reason, truncated to this length.
-MNT_OVERRIDE_SKIP_REASON_MAX_LEN = 200
-
-STABLE_KERNEL_REMOTE_URL = "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
 # Seconds to wait for a remote to answer a status check before calling it unreachable.
 REMOTE_STATUS_TIMEOUT = 10
 # Seconds to wait for a single-branch fetch before giving up on that remote.
@@ -34,8 +29,7 @@ class KernelBuilder:
                  cross_compile: str = DEFAULT_CROSS_COMPILE,
                  kernel_only: bool = DEFAULT_KERNEL_ONLY,
                  dtbs_only: bool = False,
-                 modules_only: bool = False,
-                 verruckt: bool = False):
+                 modules_only: bool = False):
         self.config = config
         self.logger = logger
         self.arch = arch
@@ -43,7 +37,6 @@ class KernelBuilder:
         self.kernel_only = kernel_only
         self.dtbs_only = dtbs_only
         self.modules_only = modules_only
-        self.verruckt = verruckt
         self.patch_dirs_used: List[Path] = []
         self.patch_stats: Optional[PatchStats] = None
         # Untracked files in the kernel tree before source prep. None until the
@@ -200,69 +193,23 @@ class KernelBuilder:
     # ------------------------------------------------------------------
 
     def apply_patches(self) -> PatchStats:
-        """Apply kernel patches from patches_dir, then xtra_patches_dir if present."""
+        """Apply xtra-patches, if there are any, on top of the checked-out branch."""
         stats = PatchStats()
 
-        failed_log_path = self.config.failed_patch_log()
-        self.logger.info("Applying MNT kernel patches...")
-        mnt_patch_count = self._apply_patch_set(
-            self.config.patches_dir,
-            self.config.linux_dir,
-            failed_log_path,
-            label="",
-            on_success=stats.add_success,
-            on_failure=stats.add_failure,
-            overrides_dir=self.config.mnt_overrides_dir,
-            on_skip=stats.add_skipped,
-            on_verruckt_no_author=stats.add_verruckt_no_author,
-        )
-        stats.set_mnt_found(mnt_patch_count)
-
-        xtra_dir = getattr(self.config, 'xtra_patches_dir', None)
-        xtra_patch_count = 0
-        if xtra_dir is not None:
-            self.logger.info("Applying extra kernel patches...")
-            xtra_patch_count = self._apply_xtra_patch_sets(stats)
-            stats.set_xtra_found(xtra_patch_count)
-
-        if not stats.has_any and self.config.kernel == "mnt-linux":
-            self.logger.info("No patches to apply. Building the branch as committed.")
-        elif not stats.has_any:
-            raise BuildError(
-                "No kernel patches found in either "
-                f"{self.config.patches_dir} or {self.config.xtra_patches_dir}"
-            )
+        self.logger.info("Applying extra kernel patches...")
+        stats.set_found(self._apply_xtra_patch_sets(stats))
 
         self.patch_stats = stats
         self._record_created_files()
 
-        self.logger.info("Patch application complete!")
-        if stats.has_xtra:
-            self.logger.info(f"Succeeded: {stats.success}, Succeeded Extra: {stats.xtra_success}")
-            self.logger.info(f"Failed:    {stats.failed}, Failed Extra: {stats.xtra_failed}")
-            self.logger.info(f"Total:     {stats.total}, Extra Total: {stats.xtra_total}")
-        else:
-            self.logger.info(f"Succeeded: {stats.success}")
-            self.logger.info(f"Failed:    {stats.failed}")
-            self.logger.info(f"Total:     {stats.total}")
-        if stats.skipped:
-            self.logger.info(f"Skipped (mnt-overrides): {stats.skipped} ({', '.join(stats.skipped_patches)})")
+        if not stats.found:
+            self.logger.info("No patches to apply. Building the branch as committed.")
+            return stats
 
-        if self.verruckt:
-            committed = stats.success + stats.xtra_success
-            missing = len(stats.verruckt_no_author)
-            if missing:
-                self.logger.warning(
-                    f"verruckt: {missing} of {committed} commits had no author/date in "
-                    "their patch header, committed with the local git identity instead:"
-                )
-                for patch_name in stats.verruckt_no_author:
-                    self.logger.warning(f"  - {patch_name}")
-            else:
-                self.logger.info(
-                    f"{Colors.GREEN}✓{Colors.RESET} verruckt: all {committed} commits got a "
-                    "proper author/date from their patch header"
-                )
+        self.logger.info("Patch application complete!")
+        self.logger.info(f"Succeeded: {stats.success}")
+        self.logger.info(f"Failed:    {stats.failed}")
+        self.logger.info(f"Total:     {stats.total}")
 
         return stats
 
@@ -270,7 +217,7 @@ class KernelBuilder:
         """Apply versioned extra patches to linux or supported sibling trees."""
         xtra_dir = self.config.xtra_patches_dir
         if not xtra_dir.exists():
-            self.logger.warning(f"No patches found in {xtra_dir} (directory does not exist)")
+            self.logger.info(f"No patches found in {xtra_dir} (directory does not exist)")
             return 0
 
         target_map = {
@@ -319,10 +266,9 @@ class KernelBuilder:
                 spec["target_dir"],
                 spec["failed_log_path"],
                 spec["label"],
-                on_success=stats.add_xtra_success,
-                on_failure=stats.add_xtra_failure,
+                on_success=stats.add_success,
+                on_failure=stats.add_failure,
                 patch_files=spec["patch_files"],
-                on_verruckt_no_author=stats.add_verruckt_no_author,
             )
 
         return total_patch_count
@@ -336,9 +282,6 @@ class KernelBuilder:
         on_success,
         on_failure,
         patch_files: Optional[List[Path]] = None,
-        overrides_dir: Optional[Path] = None,
-        on_skip: Optional[Callable[[str], None]] = None,
-        on_verruckt_no_author: Optional[Callable[[str], None]] = None,
     ) -> int:
         """Apply all *.patch files from patches_dir, recording results via callbacks.
 
@@ -350,17 +293,6 @@ class KernelBuilder:
                               Pass an empty string for the primary patch set.
             on_success:       Callable invoked (no args) for each successful patch.
             on_failure:       Callable invoked (patch_name) for each failed patch.
-            overrides_dir:    Optional mnt-overrides tree, mirroring patches_dir's relative
-                              layout. A file at the same relative path that looks like a real
-                              patch (contains a unified-diff hunk header) replaces the upstream
-                              patch's content. Any other file there (including an empty one)
-                              skips the upstream patch entirely. Its text is logged as the skip
-                              reason, truncated to MNT_OVERRIDE_SKIP_REASON_MAX_LEN characters.
-            on_skip:          Callable invoked (patch_name) for each patch skipped via a
-                              non-patch override file.
-            on_verruckt_no_author: Callable invoked (patch_name), only when self.verruckt
-                              is set, for each committed patch whose author/date couldn't
-                              be parsed from its own header.
         """
         qualifier = f" ({label})" if label else ""
         if patch_files is None and not patches_dir.exists():
@@ -392,36 +324,7 @@ class KernelBuilder:
             patch_name = str(patch_file.relative_to(patches_dir))
             self.logger.debug(f"Processing{qualifier} patch: {patch_name}")
 
-            patch_source = patch_file
-            if overrides_dir is not None:
-                override_file = overrides_dir / patch_name
-                if override_file.exists():
-                    with open(override_file, 'r') as f:
-                        override_content = f.read()
-
-                    if self._is_patch_content(override_content):
-                        self.logger.info(
-                            f"{Colors.YELLOW}↺{Colors.RESET} Using mnt-overrides patch for{qualifier}: {patch_name}"
-                        )
-                        patch_source = override_file
-                    else:
-                        reason = override_content.strip()
-                        if len(reason) > MNT_OVERRIDE_SKIP_REASON_MAX_LEN:
-                            reason = reason[:MNT_OVERRIDE_SKIP_REASON_MAX_LEN]
-                            self.logger.warning(
-                                f"mnt-overrides skip reason for {patch_name} exceeds "
-                                f"{MNT_OVERRIDE_SKIP_REASON_MAX_LEN} characters; truncated"
-                            )
-                        reason_suffix = f": {reason}" if reason else " (no reason given)"
-                        self.logger.info(
-                            f"{Colors.YELLOW}⊘{Colors.RESET} Skipping{qualifier} "
-                            f"(mnt-overrides) {patch_name}{reason_suffix}"
-                        )
-                        if on_skip is not None:
-                            on_skip(patch_name)
-                        continue
-
-            with open(patch_source, 'r') as f:
+            with open(patch_file, 'r') as f:
                 patch_content = f.read()
 
             dry_run_result = self.run_command(
@@ -442,10 +345,6 @@ class KernelBuilder:
                 )
                 if apply_result.returncode == 0:
                     self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Applied{qualifier}: {patch_name}")
-                    if self.verruckt:
-                        had_author = self._commit_patch(target_dir, patch_name, patch_content, qualifier)
-                        if not had_author and on_verruckt_no_author is not None:
-                            on_verruckt_no_author(patch_name)
                     on_success()
                 else:
                     self.logger.warning(f"{Colors.RED}✗{Colors.RESET} Failed to apply{qualifier}: {patch_name}")
@@ -463,11 +362,6 @@ class KernelBuilder:
 
         return len(patch_files)
 
-    @staticmethod
-    def _is_patch_content(content: str) -> bool:
-        """Guesses whether this looks like a real unified diff, not a skip-reason note."""
-        return content.startswith("@@ -") or "\n@@ -" in content
-
     def _format_failed_patch(self, patch_name: str, result: subprocess.CompletedProcess) -> str:
         return (
             f"{'=' * 60}\n"
@@ -479,242 +373,33 @@ class KernelBuilder:
 
     _PATCH_SUBJECT_PREFIX_RE = re.compile(r'^\[PATCH[^\]]*\]\s*')
 
-    @classmethod
-    def _parse_patch_metadata(cls, content: str, fallback_message: str) -> tuple:
-        """Best-effort extraction of (author, date, message) from a patch file.
-
-        This repo's patches use two header styles. One is git format-patch/am
-        mbox headers (From:/Date:/Subject:). The other is `git log -p`-style
-        headers (commit/Author:/Date: followed by an indented message). If
-        neither is recognizable, this falls back to (None, None,
-        fallback_message). The caller then commits with the local git
-        identity and no explicit date.
-        """
-        lines = content.splitlines()
-
-        diff_start = len(lines)
-        for i, line in enumerate(lines):
-            if line.startswith("diff --git ") or line.startswith("@@ -") or line.startswith("--- a/"):
-                diff_start = i
-                break
-        header_lines = lines[:diff_start]
-
-        # RFC 5322 header order isn't guaranteed. Some tools, or patches
-        # saved straight from an email, put Subject before From/Date. So
-        # scan the whole contiguous header block instead of assuming a
-        # fixed position for each field.
-        blank_idx = len(header_lines)
-        for i, line in enumerate(header_lines):
-            if not line.strip():
-                blank_idx = i
-                break
-        mbox_header_lines = header_lines[:blank_idx]
-
-        author = None
-        date = None
-        subject = None
-        for i, line in enumerate(mbox_header_lines):
-            if line.startswith("From:"):
-                author = line[len("From:"):].strip()
-            elif line.startswith("Date:"):
-                date = line[len("Date:"):].strip()
-            elif line.startswith("Subject:"):
-                subject = line[len("Subject:"):].strip()
-                j = i + 1
-                while j < len(mbox_header_lines) and mbox_header_lines[j].startswith(" "):
-                    subject += " " + mbox_header_lines[j].strip()
-                    j += 1
-                subject = cls._PATCH_SUBJECT_PREFIX_RE.sub('', subject).strip()
-
-        if subject:
-            j = blank_idx + 1
-            while j < len(header_lines) and not header_lines[j].strip():
-                j += 1
-            body_lines = []
-            while j < len(header_lines) and header_lines[j].strip() != "---":
-                body_lines.append(header_lines[j])
-                j += 1
-            body = "\n".join(body_lines).strip()
-
-            message = f"{subject}\n\n{body}" if body else subject
-            return (author, date, message)
-
-        for i, line in enumerate(header_lines):
-            if line.startswith("Author:"):
-                author = line[len("Author:"):].strip()
-                date = None
-                j = i + 1
-                if j < len(header_lines) and header_lines[j].startswith("Date:"):
-                    date = header_lines[j][len("Date:"):].strip()
-                    j += 1
-                while j < len(header_lines) and not header_lines[j].strip():
-                    j += 1
-                message_lines = [hl[4:] if hl.startswith("    ") else hl.strip()
-                                for hl in header_lines[j:]]
-                message = "\n".join(message_lines).strip()
-                if message:
-                    return (author, date, message)
-
-        return (None, None, fallback_message)
-
-    def _commit_patch(self, target_dir: Path, patch_name: str, patch_content: str, qualifier: str) -> bool:
-        """For --verruckt, turn a just-applied patch into a real git commit.
-
-        Returns True if a real author and date were extracted from the
-        patch. Returns False if it fell back to the local git identity and
-        a generic message. The caller uses this to report which patches
-        need a properly formatted header.
-        """
-        author, date, message = self._parse_patch_metadata(
-            patch_content, fallback_message=f"Apply {patch_name}"
-        )
-        had_author = author is not None
-
-        add_result = self.run_command(
-            ['git', 'add', '-A'], cwd=target_dir, check=False, log_cmd=False
-        )
-        if add_result.returncode != 0:
-            self.logger.warning(f"verruckt: git add failed for{qualifier} {patch_name}, not committing")
-            return had_author
-
-        commit_cmd = ['git', 'commit', '--quiet']
-        if author:
-            commit_cmd += ['--author', author]
-        if date:
-            commit_cmd += ['--date', date]
-        commit_cmd += ['-F', '-']
-
-        commit_result = self.run_command(
-            commit_cmd, cwd=target_dir, input_data=message, check=False, log_cmd=False
-        )
-        if commit_result.returncode != 0 and (author or date):
-            # Author/date from the patch may be in a form git's commit
-            # machinery rejects. Retry with just the message.
-            commit_result = self.run_command(
-                ['git', 'commit', '--quiet', '-F', '-'],
-                cwd=target_dir, input_data=message, check=False, log_cmd=False
-            )
-
-        if commit_result.returncode == 0:
-            self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} verruckt: committed{qualifier}: {patch_name}")
-        else:
-            self.logger.warning(
-                f"verruckt: nothing to commit for{qualifier} {patch_name} "
-                "(patch may not have changed any tracked files)"
-            )
-
-        return had_author
-
     # ------------------------------------------------------------------
-    # Git / source tree setup
+    # Kernel checkout
     # ------------------------------------------------------------------
-
-    def _resolve_origin_default_branch(self) -> str:
-        """Resolve default branch name from origin/HEAD (falls back to main or master)."""
-        head_ref = self.run_command(
-            ['git', 'symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'],
-            cwd=self.config.linux_dir,
-            check=False
-        )
-        if head_ref.returncode == 0:
-            ref = (head_ref.stdout or "").strip()
-            if ref.startswith("origin/"):
-                return ref.split("/", 1)[1]
-
-        for candidate in ("main", "master"):
-            exists = self.run_command(
-                ['git', 'rev-parse', '--verify', f'origin/{candidate}'],
-                cwd=self.config.linux_dir,
-                check=False
-            )
-            if exists.returncode == 0:
-                return candidate
-
-        raise BuildError("Could not resolve origin default branch (tried origin/HEAD, main, master).")
 
     def clean_kernel_repo(self):
-        """Return kernel repository to a clean development baseline.
+        """Discard uncommitted changes and untracked files in the kernel checkout.
 
-        - Syncs tags/refs from origin (force, prune)
-        - Resets local default branch to origin/<default>
-        - Removes untracked files
-        - Removes local-only branches (except default branch)
-        - Removes local-only tags
+        Leaves commits, branches and tags alone. Ignored files (build outputs,
+        .config) stay too.
         """
-        self.logger.info("Cleaning kernel repository state...")
+        linux_dir = self.config.linux_dir
+        if not (linux_dir / ".git").exists():
+            raise BuildError(f"Not a git repository: {linux_dir}")
+        if self._rebase_in_progress():
+            raise BuildError(
+                f"A rebase is in progress in {linux_dir}. Finish it with "
+                "'git rebase --continue' or drop it with 'git rebase --abort'."
+            )
 
-        if not (self.config.linux_dir / ".git").exists():
-            raise BuildError(f"Not a git repository: {self.config.linux_dir}")
-
-        self.logger.info("Fetching origin refs and tags (force/prune)...")
-        self.run_command(
-            ['git', 'fetch', 'origin', '--prune', '--prune-tags', '--tags', '--force'],
-            cwd=self.config.linux_dir
-        )
-
-        default_branch = self._resolve_origin_default_branch()
-
-        # Force clear local tracked/untracked changes before branch switch.
-        # This command is intentionally destructive as part of explicit `clean`.
         self.logger.info("Discarding local tracked/untracked changes...")
-        self.run_command(['git', 'reset', '--hard', 'HEAD'], cwd=self.config.linux_dir)
-        self.run_command(['git', 'clean', '-fd'], cwd=self.config.linux_dir)
+        self.run_command(['git', 'reset', '--hard', 'HEAD'], cwd=linux_dir)
+        self.run_command(['git', 'clean', '-fd'], cwd=linux_dir)
 
-        self.logger.info(f"Resetting local {default_branch} to origin/{default_branch}...")
-        self.run_command(
-            ['git', 'checkout', '-f', '-B', default_branch, f'origin/{default_branch}'],
-            cwd=self.config.linux_dir
-        )
-        self.run_command(['git', 'reset', '--hard', f'origin/{default_branch}'], cwd=self.config.linux_dir)
-        self.run_command(['git', 'clean', '-fd'], cwd=self.config.linux_dir)
-
-        remote_refs = self.run_command(
-            ['git', 'for-each-ref', '--format=%(refname:short)', 'refs/remotes/origin'],
-            cwd=self.config.linux_dir
-        ).stdout.splitlines()
-        remote_branch_names = {
-            ref.split('/', 1)[1]
-            for ref in remote_refs
-            if ref.startswith('origin/') and ref != 'origin/HEAD'
-        }
-
-        # Delete local branches not present on origin (except default branch).
-        local_branches = self.run_command(
-            ['git', 'for-each-ref', '--format=%(refname:short)', 'refs/heads'],
-            cwd=self.config.linux_dir
-        ).stdout.splitlines()
-        deleted_branches = []
-        for branch in local_branches:
-            if branch == default_branch:
-                continue
-            if branch not in remote_branch_names:
-                self.run_command(['git', 'branch', '-D', branch], cwd=self.config.linux_dir, check=False)
-                deleted_branches.append(branch)
-
-        # Remove local-only tags. Keep only tags that exist on origin.
-        remote_tags_output = self.run_command(
-            ['git', 'ls-remote', '--tags', '--refs', 'origin'],
-            cwd=self.config.linux_dir
-        ).stdout.splitlines()
-        remote_tags = {
-            line.split('\t', 1)[1].removeprefix('refs/tags/')
-            for line in remote_tags_output
-            if '\t' in line and line.split('\t', 1)[1].startswith('refs/tags/')
-        }
-
-        local_tags = self.run_command(['git', 'tag', '-l'], cwd=self.config.linux_dir).stdout.splitlines()
-        deleted_tags = []
-        for tag in local_tags:
-            if tag not in remote_tags:
-                self.run_command(['git', 'tag', '-d', tag], cwd=self.config.linux_dir, check=False)
-                deleted_tags.append(tag)
-
-        # Final tag sync to ensure local tag objects track origin exactly.
-        self.run_command(['git', 'fetch', 'origin', '--tags', '--force'], cwd=self.config.linux_dir)
-
-        self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Kernel repo cleaned")
-        self.logger.info(f"Deleted local-only branches: {len(deleted_branches)}")
-        self.logger.info(f"Deleted local-only tags: {len(deleted_tags)}")
+        branch = self.run_command(
+            ['git', 'rev-parse', '--abbrev-ref', 'HEAD'], cwd=linux_dir, log_cmd=False
+        ).stdout.strip()
+        self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Kernel repo cleaned, still on {branch}")
 
     def _load_kernel_remotes(self):
         """Return (wanted, existing): kernel-remotes.data entries and the checkout's remotes."""
@@ -902,77 +587,6 @@ class KernelBuilder:
 
         self.logger.info(f"Remotes added: {added}")
 
-    def repair_kernel_version_tag(self, remote: str = "stable"):
-        """Restore the v{version} tag on a persistent kernel checkout (mnt-linux).
-
-        Currently works differently for mnt-linux and linux stable. May change.
-        """
-        self.logger.info("Repairing kernel version tag from upstream remote...")
-
-        if not (self.config.linux_dir / ".git").exists():
-            raise BuildError(f"Not a git repository: {self.config.linux_dir}")
-
-        tag = f"v{self.config.version}"
-
-        remotes = self.run_command(['git', 'remote'], cwd=self.config.linux_dir).stdout.split()
-        if remote not in remotes:
-            self.logger.info(f"Remote '{remote}' not found, adding it...")
-            self.run_command(
-                ['git', 'remote', 'add', remote, STABLE_KERNEL_REMOTE_URL],
-                cwd=self.config.linux_dir
-            )
-
-        self.logger.info(f"Deleting local tag {tag} (if repointed by a prior build)...")
-        self.run_command(['git', 'tag', '-d', tag], cwd=self.config.linux_dir, check=False)
-
-        self.logger.info(f"Fetching {tag} from '{remote}'...")
-        fetch_result = self.run_command(
-            ['git', 'fetch', remote, '--force', f'refs/tags/{tag}:refs/tags/{tag}'],
-            cwd=self.config.linux_dir,
-            check=False
-        )
-        if fetch_result.returncode != 0:
-            raise BuildError(f"Could not fetch tag {tag} from remote '{remote}'.")
-
-        self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Tag {tag} restored from '{remote}'")
-
-    def reset_mnt_linux_branch(self, remote: str = "stable"):
-        """Hard-reset the mnt-linux fork's branch back to a pristine v{version}.
-
-        Note, this is destructive.
-        """
-        self.repair_kernel_version_tag(remote=remote)
-
-        tag = f"v{self.config.version}"
-        branch = f"mnt-v{self.config.version}"
-
-        local_exists = self.run_command(
-            ['git', 'rev-parse', '--verify', '--quiet', f'refs/heads/{branch}'],
-            cwd=self.config.linux_dir, check=False
-        ).returncode == 0
-        if not local_exists:
-            raise BuildError(
-                f"Branch '{branch}' does not exist in {self.config.linux_dir}. "
-                f"There is nothing to reset. Create the branch first, e.g.:\n"
-                f"  git -C {self.config.linux_dir} switch --create {branch} {tag}"
-            )
-
-        self.logger.info(f"Force-checking out {branch}...")
-        self.run_command(['git', 'checkout', '-f', branch], cwd=self.config.linux_dir)
-
-        self.logger.info(f"Hard-resetting {branch} to {tag}...")
-        self.run_command(['git', 'reset', '--hard', tag], cwd=self.config.linux_dir)
-        self.run_command(['git', 'clean', '-ffdx'], cwd=self.config.linux_dir)
-
-        self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} {branch} reset to {tag}")
-
-    def sync_kernel_checkout(self):
-        """Check out the branch/tag matching --kversion for self.config.kernel."""
-        if self.config.kernel == "mnt-linux":
-            self.checkout_mnt_linux_branch()
-        else:
-            self.checkout_kernel_version()
-
     def _resolve_kernel_remote(self, listed: str) -> Optional[str]:
         """Name in the checkout of a remote listed in kernel-remotes.data, if it is set up."""
         wanted, existing = self._load_kernel_remotes()
@@ -1082,7 +696,7 @@ class KernelBuilder:
         if have:
             self.logger.info(
                 f"{Colors.GREEN}✓{Colors.RESET} {branch} is available ({', '.join(have)}). "
-                f"Build with: mnt-build build --kernel {self.config.kernel} --kversion {latest}"
+                f"Build with: mnt-build build --kversion {latest}"
             )
             return
 
@@ -1161,7 +775,7 @@ class KernelBuilder:
                 short = ref.removeprefix('refs/heads/').removeprefix('refs/remotes/')
                 raise BuildError(
                     f"{branch} already exists ({short}). Nothing to rebase. Build it with: "
-                    f"mnt-build build --kernel {self.config.kernel} --kversion {version}"
+                    f"mnt-build build --kversion {version}"
                 )
 
         if source is None:
@@ -1230,9 +844,8 @@ class KernelBuilder:
                 f"{before - after} commit(s) from {source} were dropped as already in {tag}"
             )
         self.logger.info("The branch is local only. Nothing was pushed.")
-        self.logger.info(
-            f"Next: mnt-build build --kernel {self.config.kernel} --kversion {version} --olddefconfig"
-        )
+        olddefconfig = "" if self.config.config_file.exists() else " --olddefconfig"
+        self.logger.info(f"Next: mnt-build build --kversion {version}{olddefconfig}")
 
     def _untracked_files(self) -> set:
         return set(self.run_command(
@@ -1275,7 +888,7 @@ class KernelBuilder:
 
     def restore_kernel_tree(self):
         """Take xtra-patches and custom DTS files back out of a persistent kernel checkout."""
-        if self._untracked_before is None or self.verruckt:
+        if self._untracked_before is None:
             return
         self._untracked_before = None
 
@@ -1415,41 +1028,50 @@ class KernelBuilder:
         )
         return message
 
-    def checkout_kernel_version(self):
-        """Reset the git repo and check out the target kernel version."""
-        self.logger.info("Resetting repository state...")
-        self.run_command(['git', 'reset', '--hard', 'HEAD'], cwd=self.config.linux_dir)
-        self.run_command(['git', 'clean', '-fd'], cwd=self.config.linux_dir)
-        # Ensure we are not on the branch we may delete/recreate below.
-        self.run_command(['git', 'checkout', '--detach'], cwd=self.config.linux_dir, check=False)
-        self.run_command(['git', 'tag', '-d', f'v{self.config.version}'], cwd=self.config.linux_dir, check=False)
+    def prepare_kernel_source(self, skip_git_operations: bool = False):
+        """Get the kernel checkout onto the commit to build.
 
-        self.logger.info("Fetching git tags...")
-        self.run_command(['git', 'fetch', 'origin', '--prune', '--tags', '--force'], cwd=self.config.linux_dir)
+        Normally that is branch mnt-v{version}. With skip_git_operations the
+        checkout is built as it stands, e.g. a submodule pinned by CI.
+        """
+        if skip_git_operations:
+            if not (self.config.linux_dir / ".git").exists():
+                raise BuildError(f"Not a git repository: {self.config.linux_dir}")
+            self.require_clean_kernel_tree()
+            head = self.run_command(
+                ['git', 'log', '-1', '--format=%h %s'], cwd=self.config.linux_dir, log_cmd=False
+            ).stdout.strip()
+            self.logger.info(f"Skipping git checkout. Building what is checked out: {head}")
+        else:
+            self.checkout_mnt_linux_branch()
 
-        branch_name = f"mnt-reform-{self.config.version}"
-        self.logger.info(f"Checking out kernel version v{self.config.version}...")
+        result = self.run_command(
+            ['make', *self._make_kernel_vars(), 'kernelversion'],
+            cwd=self.config.linux_dir, log_cmd=False
+        )
+        found = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
 
-        self.run_command(['git', 'branch', '-D', branch_name], cwd=self.config.linux_dir, check=False)
-        self.run_command(['git', 'checkout', '-B', branch_name, f'tags/v{self.config.version}'], cwd=self.config.linux_dir)
+        def padded(version: str) -> Optional[tuple]:
+            key = version_key(version)
+            return key and (key + (0,))[:3]
+
+        if padded(found) != padded(self.config.version):
+            raise BuildError(
+                f"{self.config.linux_dir} is kernel {found or '(unknown)'}, but --kversion is "
+                f"{self.config.version}. Check out the matching commit or pass the right --kversion."
+            )
 
     def setup_custom_dts_files(self):
-        """Copy custom DTS files and update vendor Makefiles.
+        """Copy not-yet-committed DTS files from xtra-dtbs/ and update vendor Makefiles.
 
-        Sources are reform-debian-packages (DTS_CONFIGS) and xtra-dtbs/ (optional).
+        Board DTS files that MNT ships are commits in the kernel branch already.
         """
         if not self._uses_dtbs():
             self.logger.info(f"Skipping custom DTS setup for ARCH={self.arch}")
             return
 
-        # Build unified list of (source_path, name, vendor, config_sym)
+        # List of (source_path, name, vendor, config_sym)
         all_dts: list[tuple] = []
-        # mnt-linux branches carry these files as commits. Copying the
-        # reform-debian-packages versions in would overwrite newer ones.
-        base_dts = [] if self.config.kernel == "mnt-linux" else DTS_CONFIGS
-        for dts_config in base_dts:
-            source = self.config.build_dir / f"reform-debian-packages/linux/{dts_config['name']}"
-            all_dts.append((source, dts_config['name'], dts_config['vendor'], dts_config['config']))
 
         xtra_dir = self.config.xtra_dtbs_dir
         if xtra_dir.exists():
@@ -1463,9 +1085,8 @@ class KernelBuilder:
                     continue
                 for dts_file in sorted(vendor_dir.glob("*.dts")):
                     all_dts.append((dts_file, dts_file.name, vendor, config_sym))
-            xtra_count = len(all_dts) - len(base_dts)
-            if xtra_count:
-                self.logger.info(f"Found {xtra_count} extra DTS file(s) in {xtra_dir}")
+            if all_dts:
+                self.logger.info(f"Found {len(all_dts)} extra DTS file(s) in {xtra_dir}")
 
         self.logger.info(f"Adding {len(all_dts)} custom DTS files...")
 
@@ -1509,7 +1130,7 @@ class KernelBuilder:
     # Config management
     # ------------------------------------------------------------------
 
-    def update_config_with_olddefconfig(self, skip_git_operations: bool = False):
+    def update_config_with_olddefconfig(self):
         """Prepare the kernel like a normal build, run olddefconfig, then save
         the result back to the configs directory."""
         self.logger.info("Updating kernel config with olddefconfig...")
@@ -1551,16 +1172,15 @@ class KernelBuilder:
         """Build the Linux kernel.
 
         Args:
-            skip_git_operations: If True, skip git reset/checkout operations.
-                                  Assumes the kernel is already at the correct version.
+            skip_git_operations: If True, do not switch branches. Build the
+                                  kernel checkout as it stands.
             run_olddefconfig: If True, update config using olddefconfig before building.
         """
         self.logger.info(f"Building kernel {self.config.version}...")
         start_time = datetime.now()
 
         self.log_phase("Source Prep")
-        if self.config.kernel == "mnt-linux" or not skip_git_operations:
-            self.sync_kernel_checkout()
+        self.prepare_kernel_source(skip_git_operations)
 
         self.log_phase("Patching")
         patch_stats = self.apply_patches()
@@ -1578,26 +1198,10 @@ class KernelBuilder:
 
         if run_olddefconfig:
             self.log_phase("Config Update")
-            self.update_config_with_olddefconfig(skip_git_operations=skip_git_operations)
+            self.update_config_with_olddefconfig()
         else:
             self.logger.info("Copying kernel config...")
             shutil.copy2(self.config.config_file, self.config.linux_dir / '.config')
-
-        if self.config.kernel == "mnt-linux":
-            # Note the kernel release string may show -dirty or -g<hash>.
-            self.logger.info("Skipping Git Snapshot for mnt-linux (would commit/retag real history).")
-        else:
-            # Commit and tag so the kernel version string doesn't end up -dirty.
-            # Ideally we'd build outside a git repo entirely, but this works for now.
-            self.log_phase("Git Snapshot")
-            self.logger.info("Create git tag and commit.")
-            self.run_command(['git', 'add', '--all'], cwd=self.config.linux_dir)
-            self.run_command(['git', 'commit', '-s', '-m', f'MNT Reform Linux v{self.config.version}'], cwd=self.config.linux_dir)
-            self.run_command(['git', 'tag', '-d', f'v{self.config.version}'], cwd=self.config.linux_dir, check=False)
-            self.run_command(
-                ['git', 'tag', '-a', f'v{self.config.version}', '-m', f'MNT Reform Linux v{self.config.version}'],
-                cwd=self.config.linux_dir
-            )
 
         if self.kernel_only:
             self.logger.info(

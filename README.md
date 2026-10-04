@@ -91,7 +91,7 @@ Once the build is complete, you'll get a kernel tarball containing the kernel, c
 
 I will currently only release images for hardware that I can test. So today, that's the Pocket Reform with the A311D SoM. If you are willing to test other platforms / SoMs, [create an issue](https://github.com/cetola/mnt-build/issues) and I'll produce more images.
 
-The kernel is patched with all patches from `reform-debian-packages/linux/patches[ver]`. As such, it should boot on any MNT Reform platform, provided you use the correct DTB and have a U-Boot setup that works for your system.
+The kernel is built from the `mnt-vX.Y.Z` branch of [mnt-linux](https://git.sr.ht/~stephano/mnt-linux), which carries the MNT patch stack as commits on top of the matching stable release. As such, it should boot on any MNT Reform platform, provided you use the correct DTB and have a U-Boot setup that works for your system.
 
 ## :mirror::boot: U-Boot &amp; :bear::package: Barebox
 

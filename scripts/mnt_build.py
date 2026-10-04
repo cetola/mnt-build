@@ -15,7 +15,7 @@ from builder import KernelBuilder
 from config import (
     BuildConfig,
     DEFAULT_CROSS_COMPILE,
-    DEFAULT_DEV_KERNEL,
+    DEFAULT_KERNEL_DIR,
     DEFAULT_KERNEL_ONLY,
     DEFAULT_KERNEL_VERSION,
     DEFAULT_LOCALVERSION_NAME,
@@ -41,20 +41,7 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
               kernel_only: bool = DEFAULT_KERNEL_ONLY,
               dtbs_only: bool = False,
               modules_only: bool = False,
-              kernel: str = "linux",
-              verruckt: bool = False) -> int:
-    if verruckt and kernel != "mnt-linux":
-        print(
-            "Error: --verruckt is currently only supported with --kernel mnt-linux.",
-            file=sys.stderr,
-        )
-        return 1
-
-    if verruckt:
-        # mnt-linux's checkout always runs regardless of this flag, so
-        # forcing it on here has no effect on build behavior.
-        skip_git_operations = True
-
+              kernel: str = DEFAULT_KERNEL_DIR) -> int:
     if cross_compile is None:
         cross_compile = DEFAULT_CROSS_COMPILE
     normalized_cross_compile = cross_compile.strip()
@@ -81,7 +68,6 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         kernel_only=kernel_only,
         dtbs_only=dtbs_only,
         modules_only=modules_only,
-        verruckt=verruckt,
     )
 
     try:
@@ -92,7 +78,8 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         logger.info(f"Kernel release: {config.kernel_release}")
         logger.info(f"Kernel localversion: {config.localversion}")
         logger.info(f"Build directory: {config.build_dir}")
-        logger.info(f"Patches directory: {config.patches_dir}")
+        logger.info(f"Kernel directory: {config.linux_dir}")
+        logger.info(f"Extra patches directory: {config.xtra_patches_dir}")
         logger.info(f"Log file: {config.log_file}")
         logger.info(f"Parallel jobs: {config.jobs}")
         logger.info(f"Target arch: {arch}")
@@ -101,8 +88,6 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         logger.info(f"Cross compile prefix: {normalized_cross_compile if normalized_cross_compile else '(native/no prefix)'}")
         logger.info(f"Generate extmod headers tree: {'yes' if with_headers else 'no'}")
         logger.info(f"Kernel only mode: {'yes (skipping modules and tarball)' if kernel_only else 'no'}")
-        if verruckt:
-            logger.info("Verruckt mode: yes (committing each applied patch; implies --skip-git-ops)")
         logger.info("=" * 60)
 
         start_time = datetime.now()
@@ -110,13 +95,9 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         builder.log_phase("Preflight")
         builder.check_prerequisites(run_olddefconfig=run_olddefconfig)
 
-        if dry_run and (kernel == "mnt-linux" or not skip_git_operations):
+        if dry_run:
             builder.log_phase("Source Prep")
-            logger.info(
-                "Dry run mode: syncing kernel repository to target version "
-                f"v{config.version} (same checkout behavior as build)."
-            )
-            builder.sync_kernel_checkout()
+            builder.prepare_kernel_source(skip_git_operations)
 
         if dry_run and run_olddefconfig:
             logger.info(
@@ -126,13 +107,10 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
             builder.log_phase("Patching")
             builder.apply_patches()
             builder.log_phase("Config Update")
-            builder.update_config_with_olddefconfig(skip_git_operations=skip_git_operations)
+            builder.update_config_with_olddefconfig()
             if post_clean:
                 builder.log_phase("Cleanup")
-                logger.info(
-                    "Post-clean selected: removing in-tree kernel artifacts while "
-                    "keeping the patched checkout."
-                )
+                logger.info("Post-clean selected: removing in-tree kernel artifacts.")
                 builder.clean_in_tree_kernel_artifacts()
             logger.info("Dry run mode - config updated via olddefconfig; no build performed")
             return 0
@@ -169,13 +147,6 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         builder.log_phase("Summary")
         logger.info("=" * 60)
         logger.info(f"{Colors.GREEN}✓ Build completed successfully in {elapsed:.0f} seconds!{Colors.RESET}")
-        if (kernel != "mnt-linux" and builder.patch_stats is not None
-                and builder.patch_stats.no_mnt_patches):
-            logger.warning("!" * 60)
-            logger.warning("No MNT Patches")
-            logger.warning(f"No patches were found in: {config.patches_dir}")
-            logger.warning("Build completed using only xtra-patches.")
-            logger.warning("!" * 60)
         if kernel_only:
             logger.info(f"Kernel image: {builder.kernel_image_path()}")
         elif dtbs_only:
@@ -210,9 +181,8 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
             logger.error(f"Could not restore the kernel tree: {e}")
 
 
-def run_clean(build_dir: Optional[Path] = None, kernel: str = "linux",
-              version: str = DEFAULT_KERNEL_VERSION) -> int:
-    config = BuildConfig.create(version=version, build_dir=build_dir, kernel=kernel)
+def run_clean(build_dir: Optional[Path] = None, kernel: str = DEFAULT_KERNEL_DIR) -> int:
+    config = BuildConfig.create(version=DEFAULT_KERNEL_VERSION, build_dir=build_dir, kernel=kernel)
     config.build_dir.mkdir(parents=True, exist_ok=True)
     logger = setup_logging(config.log_file)
     builder = KernelBuilder(config, logger)
@@ -226,10 +196,7 @@ def run_clean(build_dir: Optional[Path] = None, kernel: str = "linux",
         logger.info("=" * 60)
 
         builder.log_phase("Clean")
-        if kernel == "mnt-linux":
-            builder.reset_mnt_linux_branch()
-        else:
-            builder.clean_kernel_repo()
+        builder.clean_kernel_repo()
 
         builder.log_phase("Summary")
         logger.info("=" * 60)
@@ -248,7 +215,7 @@ def run_clean(build_dir: Optional[Path] = None, kernel: str = "linux",
         return 1
 
 
-def run_dev_kernel(build_dir: Optional[Path] = None, kernel: str = DEFAULT_DEV_KERNEL,
+def run_dev_kernel(build_dir: Optional[Path] = None, kernel: str = DEFAULT_KERNEL_DIR,
                    action: Optional[str] = None, offline: bool = False,
                    log: bool = False, version: str = DEFAULT_KERNEL_VERSION,
                    source: Optional[str] = None) -> int:
@@ -510,12 +477,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     build_parser.add_argument(
         '--kernel',
-        default='linux',
+        default=DEFAULT_KERNEL_DIR,
         help='Kernel checkout to use, as a directory name under build_dir '
-             '(default: linux). Use this to point at an alternate checkout, '
-             'e.g. --kernel mnt-linux, to test xtra-patches against it. With '
-             '--kernel mnt-linux, the checkout is always switched to branch '
-             'mnt-v{kversion} first, regardless of --skip-git-ops.'
+             f'(default: {DEFAULT_KERNEL_DIR}). The build switches it to branch '
+             'mnt-v{kversion}, taking the branch from the first remote that has it.'
     )
     build_parser.add_argument(
         '-j', '--jobs',
@@ -531,7 +496,8 @@ def build_parser() -> argparse.ArgumentParser:
     build_parser.add_argument(
         '--dry-run',
         action='store_true',
-        help='Check prerequisites and apply patches, do not build. '
+        help='Check prerequisites, check out the kernel branch and apply '
+             'xtra-patches, do not build. The patches are taken back out afterwards. '
              'If combined with --olddefconfig, updates config and exits without building.'
     )
     build_parser.add_argument(
@@ -551,26 +517,16 @@ def build_parser() -> argparse.ArgumentParser:
         '--post-clean',
         action='store_true',
         help='After --olddefconfig --dry-run, run make mrproper to remove in-tree '
-             'Kbuild artifacts while keeping the patched checkout.'
-    )
-    build_parser.add_argument(
-        '--verruckt',
-        action='store_true',
-        help='After each patch applies successfully, commit it (git add -A + '
-             'git commit), using the author/date/message parsed from the patch '
-             'file when possible. Turns a patch stack into real git history. '
-             'Typically used with --dry-run --skip-git-ops --kernel <name> '
-             'against a git-based kernel checkout.'
+             'Kbuild artifacts.'
     )
     build_parser.add_argument(
         '--skip-git-ops',
         action='store_true',
         default=False,
-        help='Skip git reset, checkout, and tag operations. '
-             'Assumes the kernel repository is already at the correct version and state. '
-             'Useful for automated builds or when you have manually prepared the repository. '
-             'When enabled, the script will not reset the repo, fetch tags, checkout the version, '
-             'or create git commits/tags during the build process.'
+        help='Do not switch branches or fetch. Build the kernel checkout as it stands. '
+             'Useful for automated builds that pin the kernel commit, or when you have '
+             'checked out something by hand. The checkout must still be free of '
+             'uncommitted changes and match --kversion.'
     )
     build_parser.add_argument(
         '--arch',
@@ -608,7 +564,10 @@ def build_parser() -> argparse.ArgumentParser:
         help='Build and install in-tree kernel modules only; skip kernel image, DTBs, and tarballs.'
     )
 
-    clean_parser = subparsers.add_parser('clean', help='Clean local kernel git state')
+    clean_parser = subparsers.add_parser(
+        'clean',
+        help='Discard uncommitted changes and untracked files in the kernel checkout'
+    )
     clean_parser.add_argument(
         '--build-dir',
         type=Path,
@@ -616,18 +575,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     clean_parser.add_argument(
         '--kernel',
-        default='linux',
-        help='Kernel checkout dir under build_dir to clean (default: linux). '
-             'Use "mnt-linux" to repair the v{kversion} tag from the "stable" '
-             'remote, then hard-reset branch mnt-v{kversion} to it. This '
-             'discards every commit on that branch, including verruckt '
-             'commits, instead of resyncing branches/tags against origin.'
-    )
-    clean_parser.add_argument(
-        '--kversion',
-        default=DEFAULT_KERNEL_VERSION,
-        help=f'Kernel version whose v{{kversion}} tag to target (default: {DEFAULT_KERNEL_VERSION}). '
-             'Only relevant with --kernel mnt-linux.'
+        default=DEFAULT_KERNEL_DIR,
+        help=f'Kernel checkout dir under build_dir to clean (default: {DEFAULT_KERNEL_DIR}). '
+             'Commits, branches and tags are left alone.'
     )
 
     dev_kernel_parser = subparsers.add_parser(
@@ -668,8 +618,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     dev_kernel_parser.add_argument(
         '--kernel',
-        default=DEFAULT_DEV_KERNEL,
-        help=f'Kernel checkout dir under build_dir (default: {DEFAULT_DEV_KERNEL}).'
+        default=DEFAULT_KERNEL_DIR,
+        help=f'Kernel checkout dir under build_dir (default: {DEFAULT_KERNEL_DIR}).'
     )
     dev_kernel_parser.add_argument(
         '--offline',
@@ -786,11 +736,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             dtbs_only=args.dtbs_only,
             modules_only=args.modules_only,
             kernel=args.kernel,
-            verruckt=args.verruckt,
         )
 
     if args.command == 'clean':
-        return run_clean(build_dir=args.build_dir, kernel=args.kernel, version=args.kversion)
+        return run_clean(build_dir=args.build_dir, kernel=args.kernel)
 
     if args.command == 'dev-kernel':
         return run_dev_kernel(build_dir=args.build_dir, kernel=args.kernel,

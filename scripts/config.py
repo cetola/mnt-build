@@ -10,7 +10,8 @@ DEFAULT_LOCALVERSION_NAME = 'reform'
 DEFAULT_LOCALVERSION_REV = 1
 DEFAULT_CROSS_COMPILE = "aarch64-linux-gnu-"
 DEFAULT_KERNEL_ONLY = False
-DEFAULT_DEV_KERNEL = "mnt-linux"
+# Directory under build_dir holding the kernel git checkout.
+DEFAULT_KERNEL_DIR = "mnt-linux"
 KERNEL_REMOTES_FILE = "kernel-remotes.data"
 # Remotes to look for an mnt-v{version} branch on, in order of preference.
 # Names are as listed in kernel-remotes.data.
@@ -67,6 +68,8 @@ def normalize_git_url(url: str) -> str:
         path = path[:-4]
     return f"{host.lower()}/{path}"
 
+# MNT board DTS files whose DTBs get packaged. The sources are commits in the
+# kernel branch.
 DTS_CONFIGS = [
     {
         "name": "imx8mp-mnt-pocket-reform.dts",
@@ -115,9 +118,7 @@ class BuildConfig:
     linux_dir: Path
     qcacld_dir: Path
     reform_tools_dir: Path
-    patches_dir: Path
     xtra_patches_dir: Path
-    mnt_overrides_dir: Path
     xtra_dtbs_dir: Path
     defconfig_file: Path
     config_file: Path
@@ -137,7 +138,7 @@ class BuildConfig:
                build_dir: Optional[Path] = None,
                jobs: Optional[int] = None,
                localversion_rev: Optional[int] = None,
-               kernel: str = "linux"):
+               kernel: str = DEFAULT_KERNEL_DIR):
         if build_dir is None:
             build_dir = Path.home() / "mnt-build"
 
@@ -189,9 +190,7 @@ class BuildConfig:
             linux_dir=linux_dir,
             qcacld_dir=build_dir / "qcacld2",
             reform_tools_dir=build_dir / "reform-tools",
-            patches_dir=build_dir / "reform-debian-packages" / "linux" / f"patches{major_minor}",
             xtra_patches_dir=build_dir / "xtra-patches" / major_minor,
-            mnt_overrides_dir=build_dir / "xtra-patches" / "mnt-overrides" / major_minor,
             xtra_dtbs_dir=xtra_dtbs_dir,
             defconfig_file=build_dir / "configs" / defconfig_name_for_arch(arch),
             config_file=build_dir / "configs" / f"config-{version}-mnt-reform-{arch}",

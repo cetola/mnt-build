@@ -8,19 +8,25 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_PY="${ROOT_DIR}/scripts/config.py"
 DEFAULT_KERNEL_VERSION="$(awk -F"'" '/^DEFAULT_KERNEL_VERSION[[:space:]]*=/ {print $2; exit}' "$CONFIG_PY")"
 BASELINE_CONFIG="${ROOT_DIR}/configs/config-${DEFAULT_KERNEL_VERSION}-mnt-reform-arm64"
-UPSTREAM_CONFIG="${ROOT_DIR}/reform-debian-packages/linux/config"
-KERNEL_DIR="${ROOT_DIR}/linux"
+# The fragment is linux/config in MNT's reform-debian-packages repo. By default
+# it is downloaded as a single file from the GitHub mirror of that repo, which
+# .github/workflows/mirror-submods.yml refreshes nightly.
+UPSTREAM_CONFIG=""
+UPSTREAM_CONFIG_URL="https://raw.githubusercontent.com/cetola/reform-debian-packages-mirror/main/linux/config"
+FETCHED_CONFIG=""
+KERNEL_DIR="${ROOT_DIR}/mnt-linux"
 ARCH="arm64"
 IGNORE_FILE="${ROOT_DIR}/configs/check-config-sync.ignore"
 
 usage() {
   cat <<USAGE
 Usage:
-  scripts/check-config-sync.sh [--baseline-config PATH] [--upstream-config PATH] [--kernel-dir PATH] [--arch ARCH] [--ignore-file PATH]
+  scripts/check-config-sync.sh [--upstream-config PATH] [--upstream-config-url URL] [--baseline-config PATH] [--kernel-dir PATH] [--arch ARCH] [--ignore-file PATH]
 
 Defaults:
   --baseline-config  ${BASELINE_CONFIG}
-  --upstream-config  ${UPSTREAM_CONFIG}
+  --upstream-config  (none: download from --upstream-config-url)
+  --upstream-config-url  ${UPSTREAM_CONFIG_URL}
   --kernel-dir       ${KERNEL_DIR}
   --arch             ${ARCH}
   --ignore-file      ${IGNORE_FILE}
@@ -42,6 +48,8 @@ while [[ $# -gt 0 ]]; do
       BASELINE_CONFIG="$2"; shift 2 ;;
     --upstream-config)
       UPSTREAM_CONFIG="$2"; shift 2 ;;
+    --upstream-config-url)
+      UPSTREAM_CONFIG_URL="$2"; shift 2 ;;
     --kernel-dir)
       KERNEL_DIR="$2"; shift 2 ;;
     --arch)
@@ -60,6 +68,22 @@ done
 if [[ -z "${DEFAULT_KERNEL_VERSION:-}" ]]; then
   echo "Could not parse DEFAULT_KERNEL_VERSION from: $CONFIG_PY" >&2
   exit 1
+fi
+
+if [[ -z "$UPSTREAM_CONFIG" ]]; then
+  FETCHED_CONFIG="$(mktemp)"
+  trap 'rm -f "$FETCHED_CONFIG"' EXIT
+  echo "Downloading upstream config fragment: $UPSTREAM_CONFIG_URL"
+  if ! curl -fsSL --max-time 60 -o "$FETCHED_CONFIG" "$UPSTREAM_CONFIG_URL"; then
+    echo "Could not download: $UPSTREAM_CONFIG_URL" >&2
+    echo "Pass a local copy with --upstream-config PATH instead." >&2
+    exit 1
+  fi
+  if ! grep -q '^CONFIG_' "$FETCHED_CONFIG"; then
+    echo "Downloaded file does not look like a config fragment: $UPSTREAM_CONFIG_URL" >&2
+    exit 1
+  fi
+  UPSTREAM_CONFIG="$FETCHED_CONFIG"
 fi
 
 for p in "$BASELINE_CONFIG" "$UPSTREAM_CONFIG"; do
@@ -147,7 +171,7 @@ fi
 echo
 
 tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
+trap 'rm -rf "$tmp"; [[ -z "$FETCHED_CONFIG" ]] || rm -f "$FETCHED_CONFIG"' EXIT
 
 base_o="$tmp/base"
 test_o="$tmp/test"
