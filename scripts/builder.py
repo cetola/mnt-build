@@ -11,8 +11,9 @@ from pathlib import Path
 from typing import List, Optional
 
 from config import (
-    BuildConfig, DEFAULT_CROSS_COMPILE, DEFAULT_KERNEL_ONLY, EXTRA_DTB_PATHS,
-    KERNEL_BRANCH_REMOTES, KERNEL_REMOTES_FILE, VENDOR_CONFIG_MAP, load_kernel_remotes,
+    BuildConfig, DEFAULT_CROSS_COMPILE, DEFAULT_KERNEL_ONLY, DEFAULT_KERNEL_VERSION, EXTRA_DTB_PATHS,
+    MNT_KERNEL_REMOTE, REMOTES_FILE, STABLE_KERNEL_REMOTE, VENDOR_CONFIG_MAP,
+    load_kernel_remotes,
     normalize_git_url, version_key,
 )
 from errors import BuildError, PatchStats
@@ -22,6 +23,11 @@ from logging_setup import Colors, Spinner
 REMOTE_STATUS_TIMEOUT = 10
 # Seconds to wait for a single-branch fetch before giving up on that remote.
 REMOTE_FETCH_TIMEOUT = 600
+
+
+def kversion_flag(version: str) -> str:
+    """The --kversion argument to show in a suggested command, if one is needed."""
+    return "" if version == DEFAULT_KERNEL_VERSION else f" --kversion {version}"
 
 
 class KernelBuilder:
@@ -404,14 +410,14 @@ class KernelBuilder:
         self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Kernel repo cleaned, still on {branch}")
 
     def _load_kernel_remotes(self):
-        """Return (wanted, existing): kernel-remotes.data entries and the checkout's remotes."""
+        """Return (wanted, existing): REMOTES_FILE entries and the checkout's remotes."""
         linux_dir = self.config.linux_dir
         if not (linux_dir / ".git").exists():
             raise BuildError(f"Not a git repository: {linux_dir}")
 
-        remotes_file = self.config.build_dir / KERNEL_REMOTES_FILE
+        remotes_file = self.config.build_dir / REMOTES_FILE
         if not remotes_file.is_file():
-            raise BuildError(f"Kernel remotes file not found: {remotes_file}")
+            raise BuildError(f"Remotes file not found: {remotes_file}")
         try:
             wanted = load_kernel_remotes(remotes_file)
         except ValueError as e:
@@ -423,6 +429,21 @@ class KernelBuilder:
                 ['git', 'remote', 'get-url', name], cwd=linux_dir, log_cmd=False
             ).stdout.strip()
         return wanted, existing
+
+    def check_origin_remote(self):
+        """Warn unless the checkout's remote 'origin' is the repo marked is-origin."""
+        wanted, existing = self._load_kernel_remotes()
+        wanted_origin = next((r for r in wanted if r.is_origin), None)
+        if wanted_origin is None:
+            return
+        origin = existing.get('origin')
+        if origin is not None and normalize_git_url(origin) == normalize_git_url(wanted_origin.url):
+            return
+
+        self.logger.warning(
+            f"origin is not {wanted_origin.name} ({wanted_origin.url}). "
+            f"Current origin is: {origin or 'not set'}"
+        )
 
     def _ls_remote(self, name: str, *args: str) -> Optional[dict]:
         """Return {ref: sha} from git ls-remote, or None if the remote did not answer."""
@@ -441,7 +462,7 @@ class KernelBuilder:
         REMOTE_STATUS_TIMEOUT seconds.
         """
         queries = [(name, ('--heads',)) for name in remotes]
-        stable = self._resolve_kernel_remote("stable")
+        stable = self._resolve_kernel_remote(STABLE_KERNEL_REMOTE)
         if stable:
             queries.append((stable, self._stable_tag_query()))
         with ThreadPoolExecutor(max_workers=len(queries) or 1) as pool:
@@ -509,8 +530,8 @@ class KernelBuilder:
 
     def show_kernel_remotes(self, offline: bool = False):
         wanted, existing = self._load_kernel_remotes()
-        by_name = {name: url for name, url, _ in wanted}
-        by_repo = {normalize_git_url(url): name for name, url, _ in wanted}
+        by_name = {r.name: r.url for r in wanted}
+        by_repo = {normalize_git_url(r.url): r.name for r in wanted}
 
         if not offline:
             with Spinner("Checking remotes..."):
@@ -523,27 +544,27 @@ class KernelBuilder:
             if name in by_name:
                 covered.add(name)
                 if normalize_git_url(by_name[name]) != normalize_git_url(url):
-                    state += f", {Colors.RED}URL differs from {KERNEL_REMOTES_FILE}{Colors.RESET}"
+                    state += f", {Colors.RED}URL differs from {REMOTES_FILE}{Colors.RESET}"
             elif normalize_git_url(url) in by_repo:
                 listed_as = by_repo[normalize_git_url(url)]
                 covered.add(listed_as)
                 state += f", listed as '{listed_as}'"
             else:
-                state += f", not in {KERNEL_REMOTES_FILE}"
+                state += f", not in {REMOTES_FILE}"
             rows.append((name, url, state))
-        for name, url, _ in wanted:
-            if name not in covered:
-                rows.append((name, url, f"{Colors.YELLOW}not added{Colors.RESET}"))
+        for r in wanted:
+            if r.name not in covered:
+                rows.append((r.name, r.url, f"{Colors.YELLOW}not added{Colors.RESET}"))
 
         name_w = max((len(r[0]) for r in rows), default=0)
         url_w = max((len(r[1]) for r in rows), default=0)
         for name, url, state in rows:
             self.logger.info(f"{name:<{name_w}}  {url:<{url_w}}  {state}")
 
-        missing = sum(1 for name, _, _ in wanted if name not in covered)
+        missing = sum(1 for r in wanted if r.name not in covered)
         if missing:
             self.logger.info(
-                f"{missing} remote(s) from {KERNEL_REMOTES_FILE} not added. "
+                f"{missing} remote(s) from {REMOTES_FILE} not added. "
                 "Run: mnt-build dev-kernel add-remotes"
             )
 
@@ -570,10 +591,13 @@ class KernelBuilder:
     def ensure_kernel_remotes(self):
         linux_dir = self.config.linux_dir
         wanted, existing = self._load_kernel_remotes()
-        remotes_file = self.config.build_dir / KERNEL_REMOTES_FILE
+        remotes_file = self.config.build_dir / REMOTES_FILE
 
         added = 0
-        for name, url, push_url in wanted:
+        for listed in wanted:
+            url, push_url = listed.url, listed.push_url
+            # The is-origin repo goes in as "origin", whatever it is listed as.
+            name = "origin" if listed.is_origin else listed.name
             target = name
             if name in existing:
                 if normalize_git_url(existing[name]) != normalize_git_url(url):
@@ -613,9 +637,9 @@ class KernelBuilder:
         self.logger.info(f"Remotes added: {added}")
 
     def _resolve_kernel_remote(self, listed: str) -> Optional[str]:
-        """Name in the checkout of a remote listed in kernel-remotes.data, if it is set up."""
+        """Name in the checkout of a remote listed in REMOTES_FILE, if it is set up."""
         wanted, existing = self._load_kernel_remotes()
-        url = {name: url for name, url, _ in wanted}.get(listed)
+        url = {r.name: r.url for r in wanted}.get(listed)
         if url is None:
             return None
         if listed in existing:
@@ -628,8 +652,14 @@ class KernelBuilder:
 
     def _kernel_branch_remotes(self) -> List[str]:
         """Remotes in the checkout to look for mnt-v branches on, in order of preference."""
-        remotes = [self._resolve_kernel_remote(listed) for listed in KERNEL_BRANCH_REMOTES]
-        return [r for r in remotes if r]
+        remotes = [self._resolve_kernel_remote(listed) for listed in self._kernel_branch_remote_names()]
+        return list(dict.fromkeys(r for r in remotes if r))
+
+    def _kernel_branch_remote_names(self) -> List[str]:
+        """Names in REMOTES_FILE of the repos that carry mnt-v branches: the origin, then MNT's."""
+        wanted, _ = self._load_kernel_remotes()
+        names = [r.name for r in wanted if r.is_origin] + [MNT_KERNEL_REMOTE]
+        return list(dict.fromkeys(names))
 
     def _ref_exists(self, ref: str) -> bool:
         return self.run_command(
@@ -666,7 +696,7 @@ class KernelBuilder:
     def _latest_stable_version(self, offline: bool) -> Optional[str]:
         """Newest stable release of this kernel series, as tagged on the stable remote."""
         series = self._series()
-        stable = self._resolve_kernel_remote("stable")
+        stable = self._resolve_kernel_remote(STABLE_KERNEL_REMOTE)
         tags = None
         if not offline and stable:
             refs = self._ls_remote(stable, *self._stable_tag_query())
@@ -716,7 +746,7 @@ class KernelBuilder:
         if have:
             self.logger.info(
                 f"{Colors.GREEN}✓{Colors.RESET} {branch} is available ({', '.join(have)}). "
-                f"Build with: mnt-build build --kversion {latest}"
+                f"Build with: mnt-build build{kversion_flag(latest)}"
             )
             return
 
@@ -725,7 +755,7 @@ class KernelBuilder:
         known = self._mnt_linux_branches(remotes)
         if known:
             self.logger.info(f"Newest {series} branch known here: {known[0][1]}")
-            self.logger.info(f"Rebase it with: mnt-build dev-kernel rebase --kversion {latest}")
+            self.logger.info(f"Rebase it with: mnt-build dev-kernel rebase{kversion_flag(latest)}")
         else:
             self.logger.info(
                 f"No mnt-v{series}.x branch is known here. Run: mnt-build dev-kernel fetch"
@@ -735,7 +765,7 @@ class KernelBuilder:
         """Make sure a stable release tag is in the checkout, fetching it if needed."""
         if self._ref_exists(f'refs/tags/{tag}'):
             return
-        stable = self._resolve_kernel_remote("stable")
+        stable = self._resolve_kernel_remote(STABLE_KERNEL_REMOTE)
         if stable is None:
             raise BuildError(
                 f"Tag {tag} is not in {self.config.linux_dir} and no 'stable' remote is set up "
@@ -795,7 +825,7 @@ class KernelBuilder:
                 short = ref.removeprefix('refs/heads/').removeprefix('refs/remotes/')
                 raise BuildError(
                     f"{branch} already exists ({short}). Nothing to rebase. Build it with: "
-                    f"mnt-build build --kversion {version}"
+                    f"mnt-build build{kversion_flag(version)}"
                 )
 
         if source is None:
@@ -871,7 +901,7 @@ class KernelBuilder:
             )
         self.logger.info("The branch is local only. Nothing was pushed.")
         olddefconfig = "" if self.config.config_file.exists() else " --olddefconfig"
-        self.logger.info(f"Next: mnt-build build --kversion {version}{olddefconfig}")
+        self.logger.info(f"Next: mnt-build build{kversion_flag(version)}{olddefconfig}")
 
     def _untracked_files(self) -> set:
         return set(self.run_command(
@@ -932,7 +962,7 @@ class KernelBuilder:
         """Switch to the mnt-v{version} branch named by --kversion.
 
         Uses the local branch if there is one, otherwise the first of
-        KERNEL_BRANCH_REMOTES that has it. Never force-resets, force-checks-out
+        the origin and MNT remotes that has it. Never force-resets, force-checks-out
         or rebases.
         """
         if not (self.config.linux_dir / ".git").exists():
@@ -961,7 +991,7 @@ class KernelBuilder:
             if not remotes:
                 raise BuildError(
                     f"None of the remotes that carry mnt-v branches "
-                    f"({', '.join(KERNEL_BRANCH_REMOTES)}) are set up in "
+                    f"({', '.join(self._kernel_branch_remote_names())}) are set up in "
                     f"{self.config.linux_dir}. Run: mnt-build dev-kernel add-remotes"
                 )
             for remote in remotes:
@@ -1042,7 +1072,7 @@ class KernelBuilder:
             message += (
                 f"Branches known here for this series: {', '.join(refs)}\n"
                 f"Rebase the newest one onto v{self.config.version}, then build again:\n"
-                f"  mnt-build dev-kernel rebase --kversion {self.config.version}\n"
+                f"  mnt-build dev-kernel rebase{kversion_flag(self.config.version)}\n"
             )
         else:
             message += (

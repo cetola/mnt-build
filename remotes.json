@@ -1,0 +1,27 @@
+{
+  "kernel": {
+    "remotes": [
+      {
+        "name": "cetola",
+        "url": "https://git.sr.ht/~stephano/mnt-linux",
+        "push-url": "git@git.sr.ht:~stephano/mnt-linux",
+        "is-origin": true
+      },
+      {
+        "name": "mnt",
+        "url": "https://source.mnt.re/reform/linux.git",
+        "is-origin": false
+      },
+      {
+        "name": "collabora-rk3588",
+        "url": "https://gitlab.collabora.com/hardware-enablement/rockchip-3588/linux.git",
+        "is-origin": false
+      },
+      {
+        "name": "stable",
+        "url": "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git",
+        "is-origin": false
+      }
+    ]
+  }
+}

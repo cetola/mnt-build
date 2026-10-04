@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: MIT
+import json
 import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import NamedTuple, Optional
 
 DEFAULT_KERNEL_VERSION = '7.2.9'
 DEFAULT_LOCALVERSION_NAME = 'reform'
@@ -12,10 +13,13 @@ DEFAULT_CROSS_COMPILE = "aarch64-linux-gnu-"
 DEFAULT_KERNEL_ONLY = False
 # Directory under build_dir holding the kernel git checkout.
 DEFAULT_KERNEL_DIR = "mnt-linux"
-KERNEL_REMOTES_FILE = "kernel-remotes.data"
-# Remotes to look for an mnt-v{version} branch on, in order of preference.
-# Names are as listed in kernel-remotes.data.
-KERNEL_BRANCH_REMOTES = ("cetola", "mnt")
+# Remotes of the kernel checkout. See load_kernel_remotes() for the format.
+REMOTES_FILE = "remotes.json"
+# Names in REMOTES_FILE with a fixed job: MNT's own kernel repo, which is the
+# fallback for mnt-v{version} branches, and upstream stable, which has the
+# release tags.
+MNT_KERNEL_REMOTE = "mnt"
+STABLE_KERNEL_REMOTE = "stable"
 
 
 def defconfig_name_for_arch(arch: str) -> str:
@@ -30,17 +34,58 @@ def log_arch_name_for_arch(arch: str) -> str:
     return arch_aliases.get(arch, arch)
 
 
-def load_kernel_remotes(path: Path) -> list[tuple[str, str, Optional[str]]]:
-    remotes = []
-    for lineno, line in enumerate(path.read_text().splitlines(), start=1):
-        fields = line.split('#', 1)[0].split()
-        if not fields:
-            continue
-        if len(fields) not in (2, 3):
-            raise ValueError(
-                f"{path}:{lineno}: expected '<name> <fetch-url> [push-url]', got: {line.strip()}"
-            )
-        remotes.append((fields[0], fields[1], fields[2] if len(fields) == 3 else None))
+class KernelRemote(NamedTuple):
+    name: str
+    url: str
+    push_url: Optional[str]
+    # The remote the kernel checkout must have as "origin". It is the first
+    # place to look for mnt-v{version} branches.
+    is_origin: bool
+
+
+def load_kernel_remotes(path: Path) -> list[KernelRemote]:
+    """Read the kernel remotes from REMOTES_FILE.
+
+    {"kernel": {"remotes": [
+        {"name": ..., "url": ..., "push-url": ..., "is-origin": true}, ...]}}
+
+    "push-url" and "is-origin" are optional. At most one remote may be the origin.
+    """
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError as e:
+        raise ValueError(f"{path}: not valid JSON: {e}")
+    try:
+        entries = data["kernel"]["remotes"]
+    except (KeyError, TypeError):
+        raise ValueError(f'{path}: expected {{"kernel": {{"remotes": [...]}}}}')
+    if not isinstance(entries, list):
+        raise ValueError(f'{path}: "kernel"."remotes" must be a list')
+
+    types = {"name": str, "url": str, "push-url": str, "is-origin": bool}
+    remotes: list[KernelRemote] = []
+    for index, entry in enumerate(entries):
+        where = f"{path}: kernel remote #{index + 1}"
+        if not isinstance(entry, dict):
+            raise ValueError(f"{where}: expected an object")
+        unknown = sorted(set(entry) - set(types))
+        if unknown:
+            raise ValueError(f"{where}: unknown key(s): {', '.join(unknown)}")
+        for key in ("name", "url"):
+            if key not in entry:
+                raise ValueError(f'{where}: missing "{key}"')
+        for key, value in entry.items():
+            if not isinstance(value, types[key]):
+                raise ValueError(f'{where}: "{key}" must be a {types[key].__name__}')
+        if any(r.name == entry["name"] for r in remotes):
+            raise ValueError(f'{where}: duplicate name "{entry["name"]}"')
+        remotes.append(KernelRemote(
+            entry["name"], entry["url"], entry.get("push-url"), entry.get("is-origin", False)
+        ))
+
+    origins = [r.name for r in remotes if r.is_origin]
+    if len(origins) > 1:
+        raise ValueError(f'{path}: more than one remote has "is-origin": true: {", ".join(origins)}')
     return remotes
 
 

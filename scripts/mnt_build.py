@@ -235,6 +235,8 @@ def run_dev_kernel(build_dir: Optional[Path] = None, kernel: str = DEFAULT_KERNE
             logger.info(f"Log file: {config.log_file}")
         logger.info("=" * 60)
 
+        builder.check_origin_remote()
+
         if action == 'rebase':
             builder.log_phase("Rebase")
             builder.rebase_mnt_linux_branch(source=source)
@@ -590,7 +592,8 @@ def build_parser() -> argparse.ArgumentParser:
         help='With no action, list the remotes in the checkout and whether each '
              'is fetched and up to date, then report whether an mnt-v branch '
              'exists for the latest stable kernel. add-remotes: add any remote listed in '
-             'kernel-remotes.data that the checkout lacks (nothing is fetched). '
+             'remotes.json that the checkout lacks (nothing is fetched). The '
+             'one marked is-origin is added as "origin". '
              'fetch: fetch the latest from every remote in the checkout. '
              'rebase: create local branch mnt-v{kversion} by rebasing the newest '
              'mnt-v branch of the same series onto stable tag v{kversion}. Works '
