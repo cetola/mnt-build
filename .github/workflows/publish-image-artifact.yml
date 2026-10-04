@@ -27,7 +27,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download workflow artifacts
         env:
@@ -144,7 +144,7 @@ jobs:
           printf 'Files to publish:\n%s\n' "${files[@]}"
 
       - name: Upload image files to tagged release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event.inputs.release_tag }}
           files: ${{ steps.collect_release_files.outputs.files }}

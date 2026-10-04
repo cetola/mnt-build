@@ -18,7 +18,6 @@ from config import (
     DEFAULT_KERNEL_DIR,
     DEFAULT_KERNEL_ONLY,
     DEFAULT_KERNEL_VERSION,
-    DEFAULT_LOCALVERSION_NAME,
     DEFAULT_LOCALVERSION_REV,
 )
 from errors import BuildError
@@ -276,10 +275,10 @@ def run_uboot_list() -> int:
         return 1
     if not infos:
         print("No supported sysimages found.", file=sys.stderr)
-        print(f"  Looked for machine configs in:", file=sys.stderr)
+        print("  Looked for machine configs in:", file=sys.stderr)
         print(f"    {mnt_build_root / 'local-machines'}", file=sys.stderr)
         print(f"    {mnt_build_root / 'reform-tools' / 'machines'}", file=sys.stderr)
-        print(f"  Looked for sysimage list in:", file=sys.stderr)
+        print("  Looked for sysimage list in:", file=sys.stderr)
         print(f"    {mnt_build_root / 'scripts' / 'sysimage-config.sh'}", file=sys.stderr)
         return 1
     print_sysimage_table(infos)

@@ -102,8 +102,6 @@ if [[ ! -x "$KERNEL_DIR/scripts/config" ]]; then
 fi
 
 require_clean_source_tree() {
-  local dirty=0
-
   if [[ -f "$KERNEL_DIR/.config" ]]; then
     echo "Removing in-tree .config: $KERNEL_DIR/.config"
     rm -f "$KERNEL_DIR/.config"

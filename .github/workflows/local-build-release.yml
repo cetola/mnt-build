@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
           submodules: false
@@ -93,7 +93,7 @@ jobs:
           echo "prerelease=${{ steps.build_config.outputs.prerelease }}"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Set permissions and build Docker container
         run: |
@@ -122,7 +122,7 @@ jobs:
 
       - name: Upload logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: build-logs
           path: release-artifacts/logs
@@ -165,7 +165,7 @@ jobs:
 
       - name: Upload artifacts
         if: ${{ steps.collect_artifacts.conclusion == 'success' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: build-artifacts
           path: |
@@ -178,7 +178,7 @@ jobs:
         if: >
           startsWith(github.ref, 'refs/tags/') &&
           steps.run_build.outcome == 'success'
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.build_config.outputs.release_tag }}
           name: ${{ steps.build_config.outputs.release_tag }}

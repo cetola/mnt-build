@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import tarfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
@@ -44,6 +45,9 @@ class KernelBuilder:
         # a tree that held someone's uncommitted work.
         self._untracked_before: Optional[set] = None
         self._created_files: set = set()
+        # git ls-remote answers, keyed by (remote, args). One status run asks
+        # each remote once, however many checks need the answer.
+        self._ls_remote_cache: dict = {}
 
     def log_phase(self, name: str):
         self.logger.info("=" * 60)
@@ -137,6 +141,7 @@ class KernelBuilder:
             )
 
             if input_data is not None:
+                assert proc.stdin is not None
                 try:
                     proc.stdin.write(input_data)
                     proc.stdin.close()
@@ -224,7 +229,8 @@ class KernelBuilder:
             "qcacld2": self.config.qcacld_dir,
             "reform-tools": self.config.reform_tools_dir,
         }
-        target_specs = []
+        # (patches_dir, target_dir, failed_log_path, label, patch_files)
+        target_specs: list[tuple[Path, Path, Path, str, list[Path]]] = []
         linux_patch_files: list[Path] = []
 
         for patch_file in sorted(xtra_dir.rglob("*.patch")):
@@ -236,39 +242,35 @@ class KernelBuilder:
 
             linux_patch_files.append(patch_file)
 
-        target_specs.append(
-            {
-                "patches_dir": xtra_dir,
-                "target_dir": self.config.linux_dir,
-                "failed_log_path": self.config.failed_patch_log("-xtra"),
-                "label": "extra",
-                "patch_files": linux_patch_files,
-            }
-        )
+        target_specs.append((
+            xtra_dir,
+            self.config.linux_dir,
+            self.config.failed_patch_log("-xtra"),
+            "extra",
+            linux_patch_files,
+        ))
 
         for bucket_name, target_dir in target_map.items():
             bucket_dir = xtra_dir / bucket_name
             bucket_patch_files = sorted(bucket_dir.rglob("*.patch")) if bucket_dir.exists() else []
-            target_specs.append(
-                {
-                    "patches_dir": bucket_dir,
-                    "target_dir": target_dir,
-                    "failed_log_path": self.config.failed_patch_log(f"-xtra-{bucket_name}"),
-                    "label": f"extra:{bucket_name}",
-                    "patch_files": bucket_patch_files,
-                }
-            )
+            target_specs.append((
+                bucket_dir,
+                target_dir,
+                self.config.failed_patch_log(f"-xtra-{bucket_name}"),
+                f"extra:{bucket_name}",
+                bucket_patch_files,
+            ))
 
         total_patch_count = 0
-        for spec in target_specs:
+        for patches_dir, target_dir, failed_log_path, label, patch_files in target_specs:
             total_patch_count += self._apply_patch_set(
-                spec["patches_dir"],
-                spec["target_dir"],
-                spec["failed_log_path"],
-                spec["label"],
+                patches_dir,
+                target_dir,
+                failed_log_path,
+                label,
                 on_success=stats.add_success,
                 on_failure=stats.add_failure,
-                patch_files=spec["patch_files"],
+                patch_files=patch_files,
             )
 
         return total_patch_count
@@ -424,6 +426,29 @@ class KernelBuilder:
 
     def _ls_remote(self, name: str, *args: str) -> Optional[dict]:
         """Return {ref: sha} from git ls-remote, or None if the remote did not answer."""
+        if (name, args) not in self._ls_remote_cache:
+            self._ls_remote_cache[(name, args)] = self._run_ls_remote(name, *args)
+        return self._ls_remote_cache[(name, args)]
+
+    def _stable_tag_query(self) -> tuple:
+        return ('--tags', '--refs', f'v{self._series()}', f'v{self._series()}.*')
+
+    def _prefetch_remote_refs(self, remotes: List[str]):
+        """Ask every remote for its branches, and stable for its tags, at the same time.
+
+        The status report needs all of these. Asked one after another, the
+        wait is the sum of the round trips; an unreachable remote alone costs
+        REMOTE_STATUS_TIMEOUT seconds.
+        """
+        queries = [(name, ('--heads',)) for name in remotes]
+        stable = self._resolve_kernel_remote("stable")
+        if stable:
+            queries.append((stable, self._stable_tag_query()))
+        with ThreadPoolExecutor(max_workers=len(queries) or 1) as pool:
+            answers = pool.map(lambda q: self._run_ls_remote(q[0], *q[1]), queries)
+        self._ls_remote_cache.update(zip(queries, answers))
+
+    def _run_ls_remote(self, name: str, *args: str) -> Optional[dict]:
         flags = [a for a in args if a.startswith('-')]
         patterns = [a for a in args if not a.startswith('-')]
         cmd = ['git', 'ls-remote', *flags, name, *patterns]
@@ -487,14 +512,14 @@ class KernelBuilder:
         by_name = {name: url for name, url, _ in wanted}
         by_repo = {normalize_git_url(url): name for name, url, _ in wanted}
 
+        if not offline:
+            with Spinner("Checking remotes..."):
+                self._prefetch_remote_refs(list(existing))
+
         rows = []
         covered = set()
         for name, url in existing.items():
-            if offline:
-                state = self._kernel_remote_state(name, offline)
-            else:
-                with Spinner(f"Checking {name}..."):
-                    state = self._kernel_remote_state(name, offline)
+            state = self._kernel_remote_state(name, offline)
             if name in by_name:
                 covered.add(name)
                 if normalize_git_url(by_name[name]) != normalize_git_url(url):
@@ -644,7 +669,7 @@ class KernelBuilder:
         stable = self._resolve_kernel_remote("stable")
         tags = None
         if not offline and stable:
-            refs = self._ls_remote(stable, '--tags', '--refs', f'v{series}', f'v{series}.*')
+            refs = self._ls_remote(stable, *self._stable_tag_query())
             if refs is not None:
                 tags = [ref[len('refs/tags/'):] for ref in refs]
         if tags is None:
@@ -652,19 +677,15 @@ class KernelBuilder:
                 ['git', 'tag', '-l', f'v{series}', f'v{series}.*'],
                 cwd=self.config.linux_dir, log_cmd=False
             ).stdout.split()
-        versions = [t[1:] for t in tags if version_key(t[1:]) is not None]
-        return max(versions, key=version_key, default=None)
+        versions = [(key, t[1:]) for t in tags if (key := version_key(t[1:])) is not None]
+        return max(versions)[1] if versions else None
 
     def show_kernel_versions(self, offline: bool = False):
         """Report whether an mnt-v branch exists for the latest stable kernel of this series."""
         series = self._series()
         remotes = self._kernel_branch_remotes()
 
-        if offline:
-            latest = self._latest_stable_version(offline)
-        else:
-            with Spinner("Checking stable..."):
-                latest = self._latest_stable_version(offline)
+        latest = self._latest_stable_version(offline)
         if latest is None:
             self.logger.warning(
                 f"No stable v{series} tags known. Run: mnt-build dev-kernel fetch"
@@ -681,15 +702,14 @@ class KernelBuilder:
             if offline:
                 found = self._ref_exists(f'refs/remotes/{remote}/{branch}')
             else:
-                with Spinner(f"Checking {remote}..."):
-                    refs = self._ls_remote(remote, '--heads', branch)
+                refs = self._ls_remote(remote, '--heads')
                 if refs is None:
                     found = self._ref_exists(f'refs/remotes/{remote}/{branch}')
                     self.logger.warning(
                         f"Could not reach {remote}. Going by what was fetched earlier."
                     )
                 else:
-                    found = bool(refs)
+                    found = f'refs/heads/{branch}' in refs
             if found:
                 have.append(remote)
 
@@ -779,13 +799,19 @@ class KernelBuilder:
                 )
 
         if source is None:
-            known = [ref for key, ref in self._mnt_linux_branches(remotes)]
-            if not known:
+            # Newest branch older than the target. A newer one would be rebased backwards.
+            target = version_key(version)
+            older = [
+                ref for key, ref in self._mnt_linux_branches(remotes)
+                if target is not None and key < target
+            ]
+            if not older:
                 raise BuildError(
-                    f"No mnt-v{self._series()}.x branch is known in {linux_dir} to rebase from. "
+                    f"No mnt-v{self._series()}.x branch older than {version} is known in "
+                    f"{linux_dir} to rebase from. "
                     "Run 'mnt-build dev-kernel fetch', or name a branch with --from."
                 )
-            source = known[0]
+            source = older[0]
         elif not self._ref_exists(source):
             raise BuildError(f"--from {source}: no such branch or commit in {linux_dir}")
 
