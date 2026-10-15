@@ -25,7 +25,7 @@ from logging_setup import Colors, setup_logging
 from barebox import BareboxManager, print_barebox_table
 from uboot import UBootManager, print_sysimage_table
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 
 def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] = None,
