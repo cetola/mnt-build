@@ -17,3 +17,4 @@ scripts/arm-libs-staging/
 /barebox/
 barebox*.log
 /dtbs/
+/mnt-linux/

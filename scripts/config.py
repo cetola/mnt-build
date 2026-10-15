@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 import json
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -11,15 +12,12 @@ DEFAULT_LOCALVERSION_NAME = 'reform'
 DEFAULT_LOCALVERSION_REV = 1
 DEFAULT_CROSS_COMPILE = "aarch64-linux-gnu-"
 DEFAULT_KERNEL_ONLY = False
-# Directory under build_dir holding the kernel git checkout.
 DEFAULT_KERNEL_DIR = "mnt-linux"
-# Remotes of the kernel checkout. See load_kernel_remotes() for the format.
 REMOTES_FILE = "remotes.json"
-# Names in REMOTES_FILE with a fixed job: MNT's own kernel repo, which is the
-# fallback for mnt-v{version} branches, and upstream stable, which has the
-# release tags.
 MNT_KERNEL_REMOTE = "mnt"
 STABLE_KERNEL_REMOTE = "stable"
+MNT_BASE_TRAILER = "MNT-Base"
+REBASED_FROM_TRAILER = "Rebased-From"
 
 
 def defconfig_name_for_arch(arch: str) -> str:
@@ -27,7 +25,6 @@ def defconfig_name_for_arch(arch: str) -> str:
 
 
 def log_arch_name_for_arch(arch: str) -> str:
-    # Used in build log filenames, not just internally.
     arch_aliases = {
         "arm64": "aarch64",
     }
@@ -90,11 +87,26 @@ def load_kernel_remotes(path: Path) -> list[KernelRemote]:
 
 
 def version_key(version: str) -> Optional[tuple]:
-    """Sort key for a kernel release like 7.2 or 7.2.9. None for anything else (e.g. an -rc)."""
+    """Sort key for a kernel release. None for anything else, such as an -rc."""
     parts = version.split('.')
     if len(parts) not in (2, 3) or not all(part.isdigit() for part in parts):
         return None
     return tuple(int(part) for part in parts)
+
+
+def kernel_tag_name(version: str, localversion_rev: int) -> str:
+    return f"mnt-v{version}-{DEFAULT_LOCALVERSION_NAME}{localversion_rev}"
+
+
+_KERNEL_TAG_RE = re.compile(
+    rf'^mnt-v(\d+\.\d+(?:\.\d+)?(?:-rc\d+)?)-{DEFAULT_LOCALVERSION_NAME}(\d+)$'
+)
+
+
+def parse_kernel_tag(name: str) -> Optional[tuple]:
+    """(version, localversion_rev) of a kernel tag name, or None if it is not one."""
+    match = _KERNEL_TAG_RE.match(name)
+    return (match.group(1), int(match.group(2))) if match else None
 
 
 def normalize_git_url(url: str) -> str:
@@ -113,8 +125,6 @@ def normalize_git_url(url: str) -> str:
         path = path[:-4]
     return f"{host.lower()}/{path}"
 
-# MNT board DTS files whose DTBs get packaged. The sources are commits in the
-# kernel branch.
 DTS_CONFIGS = [
     {
         "name": "imx8mp-mnt-pocket-reform.dts",
@@ -144,8 +154,6 @@ VENDOR_CONFIG_MAP = {
     "amlogic":   "CONFIG_ARCH_MESON",
 }
 
-# Upstream DTBs, built by make dtbs. No source copying needed, just
-# verify and package alongside the custom DTBs.
 EXTRA_DTB_PATHS = [
     "arch/arm64/boot/dts/rockchip/rk3588s-radxa-cm5-io.dtb",
 ]
@@ -177,6 +185,7 @@ class BuildConfig:
     timestamp: str
     jobs: int
     localversion_rev: int
+    tag: str
 
     @classmethod
     def create(cls, version: str, arch: str = "arm64",
@@ -206,7 +215,6 @@ class BuildConfig:
         version_parts = version.split('.')
         major_minor = f"{version_parts[0]}.{version_parts[1]}"
 
-        # Only the ARM64 Reform kernel flow uses DTBs.
         dtb_files = []
         xtra_dtbs_dir = build_dir / "xtra-dtbs"
         if arch == "arm64":
@@ -248,9 +256,9 @@ class BuildConfig:
             log_build_version=log_build_version,
             timestamp=timestamp,
             jobs=jobs,
-            localversion_rev=localversion_rev
+            localversion_rev=localversion_rev,
+            tag=kernel_tag_name(version, localversion_rev),
         )
 
     def failed_patch_log(self, suffix: str = "") -> Path:
-        # Named/located like the main build log, not standalone.
         return self.build_dir / f"patch-failures{suffix}-{self.log_build_version}-{self.timestamp}.log"

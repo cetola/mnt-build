@@ -57,13 +57,13 @@ _mnt_build_complete() {
       mapfile -t COMPREPLY < <(compgen -W "$clean_opts" -- "$cur")
       ;;
     dev-kernel)
-      local dev_kernel_opts="add-remotes fetch rebase --help --build-dir --kernel --kversion --from --offline --log"
+      local dev_kernel_opts="add-remotes fetch rebase tag --help --build-dir --kernel --kversion --from --localversion-rev --mnt-base --offline --log"
       case "$prev" in
         --build-dir)
           mapfile -t COMPREPLY < <(compgen -d -- "$cur")
           return 0
           ;;
-        --kernel|--kversion|--from)
+        --kernel|--kversion|--from|--localversion-rev|--mnt-base)
           return 0
           ;;
       esac

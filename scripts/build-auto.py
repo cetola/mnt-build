@@ -4,8 +4,6 @@
 MNT Reform Kernel Auto-Build Script
 Compiles kernel, out-of-tree modules, and creates deployment tarball.
 Assumes an automated build, with reduced args / options from mnt_build.py.
-Builds the mnt-linux checkout as it stands. Assumes the correct SHA of the
-kernel is already checked out, e.g. by the submodule pin.
 """
 
 import argparse
@@ -58,11 +56,12 @@ def main():
             build_dir=None,
             jobs=None,
             localversion_rev=args.localversion_rev,
-            skip_git_operations=True,
+            skip_git_operations=False,
             dry_run=False,
             arch=args.arch,
             cross_compile=args.cross_compile,
-            with_headers=args.with_headers
+            with_headers=args.with_headers,
+            shallow_clone=True
             )
 
 

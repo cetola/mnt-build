@@ -11,10 +11,12 @@ from pathlib import Path
 from typing import List, Optional
 
 from config import (
-    BuildConfig, DEFAULT_CROSS_COMPILE, DEFAULT_KERNEL_ONLY, DEFAULT_KERNEL_VERSION, EXTRA_DTB_PATHS,
-    MNT_KERNEL_REMOTE, REMOTES_FILE, STABLE_KERNEL_REMOTE, VENDOR_CONFIG_MAP,
+    BuildConfig, DEFAULT_CROSS_COMPILE, DEFAULT_KERNEL_ONLY, DEFAULT_KERNEL_VERSION,
+    DEFAULT_LOCALVERSION_NAME, DEFAULT_LOCALVERSION_REV, EXTRA_DTB_PATHS,
+    MNT_BASE_TRAILER, MNT_KERNEL_REMOTE, REBASED_FROM_TRAILER, REMOTES_FILE,
+    STABLE_KERNEL_REMOTE, VENDOR_CONFIG_MAP,
     load_kernel_remotes,
-    normalize_git_url, version_key,
+    normalize_git_url, parse_kernel_tag, version_key,
 )
 from errors import BuildError, PatchStats
 from logging_setup import Colors, Spinner
@@ -25,9 +27,11 @@ REMOTE_STATUS_TIMEOUT = 10
 REMOTE_FETCH_TIMEOUT = 600
 
 
-def kversion_flag(version: str) -> str:
-    """The --kversion argument to show in a suggested command, if one is needed."""
-    return "" if version == DEFAULT_KERNEL_VERSION else f" --kversion {version}"
+def kversion_flag(version: str, localversion_rev: int = DEFAULT_LOCALVERSION_REV) -> str:
+    flags = "" if version == DEFAULT_KERNEL_VERSION else f" --kversion {version}"
+    if localversion_rev != DEFAULT_LOCALVERSION_REV:
+        flags += f" --localversion-rev {localversion_rev}"
+    return flags
 
 
 class KernelBuilder:
@@ -204,7 +208,6 @@ class KernelBuilder:
     # ------------------------------------------------------------------
 
     def apply_patches(self) -> PatchStats:
-        """Apply xtra-patches, if there are any, on top of the checked-out branch."""
         stats = PatchStats()
 
         self.logger.info("Applying extra kernel patches...")
@@ -214,7 +217,7 @@ class KernelBuilder:
         self._record_created_files()
 
         if not stats.found:
-            self.logger.info("No patches to apply. Building the branch as committed.")
+            self.logger.info("No patches to apply. Building the kernel as committed.")
             return stats
 
         self.logger.info("Patch application complete!")
@@ -455,16 +458,15 @@ class KernelBuilder:
         return ('--tags', '--refs', f'v{self._series()}', f'v{self._series()}.*')
 
     def _prefetch_remote_refs(self, remotes: List[str]):
-        """Ask every remote for its branches, and stable for its tags, at the same time.
-
-        The status report needs all of these. Asked one after another, the
-        wait is the sum of the round trips; an unreachable remote alone costs
-        REMOTE_STATUS_TIMEOUT seconds.
-        """
+        # Asked one after another, an unreachable remote alone would cost
+        # REMOTE_STATUS_TIMEOUT seconds.
         queries = [(name, ('--heads',)) for name in remotes]
         stable = self._resolve_kernel_remote(STABLE_KERNEL_REMOTE)
         if stable:
             queries.append((stable, self._stable_tag_query()))
+        origin = self._origin_remote()
+        if origin:
+            queries.append((origin, self._origin_tag_query()))
         with ThreadPoolExecutor(max_workers=len(queries) or 1) as pool:
             answers = pool.map(lambda q: self._run_ls_remote(q[0], *q[1]), queries)
         self._ls_remote_cache.update(zip(queries, answers))
@@ -572,11 +574,15 @@ class KernelBuilder:
         linux_dir = self.config.linux_dir
         _, existing = self._load_kernel_remotes()
 
+        # The kernel tags point at commits no branch has, so a plain fetch
+        # would not bring them.
+        origin = self._origin_remote()
         failed = []
         for name in existing:
             self.logger.info(f"Fetching '{name}'...")
+            tags = ['--tags'] if name == origin else []
             result = self.run_command(
-                ['git', 'fetch', '--no-progress', name],
+                ['git', 'fetch', '--no-progress', *tags, name],
                 cwd=linux_dir, check=False, stream_output=True
             )
             if result.returncode != 0:
@@ -661,15 +667,130 @@ class KernelBuilder:
         names = [r.name for r in wanted if r.is_origin] + [MNT_KERNEL_REMOTE]
         return list(dict.fromkeys(names))
 
+    def _origin_remote(self) -> Optional[str]:
+        """Name in the checkout of the is-origin repo."""
+        wanted, _ = self._load_kernel_remotes()
+        listed = next((r.name for r in wanted if r.is_origin), None)
+        return self._resolve_kernel_remote(listed) if listed else None
+
     def _ref_exists(self, ref: str) -> bool:
-        return self.run_command(
+        return self._ref_sha(ref) is not None
+
+    def _ref_sha(self, ref: str) -> Optional[str]:
+        result = self.run_command(
             ['git', 'rev-parse', '--verify', '--quiet', f'{ref}^{{commit}}'],
             cwd=self.config.linux_dir, check=False, log_cmd=False
-        ).returncode == 0
+        )
+        if result.returncode != 0:
+            return None
+        return result.stdout.strip() or None
 
     def _series(self) -> str:
-        parts = self.config.version.split('.')
-        return f"{parts[0]}.{parts[1]}"
+        match = re.match(r'(\d+)\.(\d+)', self.config.version)
+        if not match:
+            raise BuildError(f"--kversion {self.config.version} is not a kernel version like 7.2.10")
+        return f"{match.group(1)}.{match.group(2)}"
+
+    def _series_tag_patterns(self) -> List[str]:
+        series = self._series()
+        return [f'mnt-v{series}-*', f'mnt-v{series}.*']
+
+    def _origin_tag_query(self) -> tuple:
+        return ('--tags', '--refs', *self._series_tag_patterns())
+
+    def _kernel_tags(self, names: Optional[set] = None) -> List[tuple]:
+        """(version_key, rev, name), newest first. Local tags unless names are given."""
+        if names is None:
+            names = self.run_command(
+                ['git', 'for-each-ref', '--format=%(refname:short)',
+                 *(f'refs/tags/{p}' for p in self._series_tag_patterns())],
+                cwd=self.config.linux_dir, log_cmd=False
+            ).stdout.split()
+        series = version_key(self._series())
+        found = []
+        for name in names:
+            parsed = parse_kernel_tag(name)
+            key = parsed and version_key(parsed[0])
+            if key and key[:2] == series:
+                found.append((key, parsed[1], name))
+        found.sort(key=lambda t: (t[0], t[1]), reverse=True)
+        return found
+
+    def _tags_for_version(self, version: str, names: Optional[set] = None) -> List[str]:
+        """Local tags unless names are given, highest revision first."""
+        if names is None:
+            names = self.run_command(
+                ['git', 'for-each-ref', '--format=%(refname:short)', f'refs/tags/mnt-v{version}-*'],
+                cwd=self.config.linux_dir, log_cmd=False
+            ).stdout.split()
+        found = [(p[1], n) for n in names if (p := parse_kernel_tag(n)) and p[0] == version]
+        return [n for _, n in sorted(found, reverse=True)]
+
+    def _tag_trailer(self, tag: str, trailer: str) -> Optional[tuple]:
+        """(ref name, sha) from a trailer in an annotated tag's message."""
+        text = self.run_command(
+            ['git', 'tag', '-l', '--format=%(contents)', tag],
+            cwd=self.config.linux_dir, log_cmd=False
+        ).stdout
+        for line in text.splitlines():
+            if line.startswith(f"{trailer}: "):
+                parts = line[len(trailer) + 2:].split()
+                if len(parts) == 2:
+                    return parts[0], parts[1]
+        return None
+
+    def _newest_mnt_branch(self, offline: bool) -> Optional[tuple]:
+        """(name, sha) of MNT's newest mnt-v branch of this series, or None."""
+        mnt = self._resolve_kernel_remote(MNT_KERNEL_REMOTE)
+        if mnt is None:
+            return None
+        branches = None
+        if not offline:
+            refs = self._ls_remote(mnt, '--heads')
+            if refs is None:
+                self.logger.warning(f"Could not reach {mnt}. Going by what was fetched earlier.")
+            else:
+                branches = {r[len('refs/heads/'):]: sha for r, sha in refs.items()}
+        if branches is None:
+            branches = {}
+            lines = self.run_command(
+                ['git', 'for-each-ref', '--format=%(refname) %(objectname)', f'refs/remotes/{mnt}/'],
+                cwd=self.config.linux_dir, log_cmd=False
+            ).stdout.splitlines()
+            for line in lines:
+                ref, sha = line.split(' ', 1)
+                branches[ref[len(f'refs/remotes/{mnt}/'):]] = sha
+        series = version_key(self._series())
+        found = []
+        for name, sha in branches.items():
+            key = version_key(name[len('mnt-v'):]) if name.startswith('mnt-v') else None
+            if key and key[:2] == series:
+                found.append((key, name, sha))
+        if not found:
+            return None
+        _, name, sha = max(found)
+        return name, sha
+
+    def _mnt_advice(self, tag: str, base: Optional[tuple], newest: tuple,
+                    version: str, rev: int) -> str:
+        name, sha = newest
+        mnt = self._resolve_kernel_remote(MNT_KERNEL_REMOTE) or MNT_KERNEL_REMOTE
+        if base is None:
+            text = f"{tag} records no {MNT_BASE_TRAILER}, so it is unknown whether it has {name}.\n"
+        else:
+            text = (f"MNT has patches the tags may not have: {tag} carries {base[0]} "
+                    f"({base[1][:12]}), MNT's newest is {name} ({sha[:12]}).\n")
+            old, new = base[0][len('mnt-v'):], name[len('mnt-v'):]
+            if version_key(old) and version_key(new):
+                text += f"Compare them:\n  git range-diff v{old}..{base[1][:12]} v{new}..{mnt}/{name}\n"
+        text += (
+            f"To take MNT's patches, rebase from their branch and carry your own fixes over:\n"
+            f"  mnt-build dev-kernel rebase{kversion_flag(version, rev)} --from {mnt}/{name}\n"
+            f"If there is nothing to take, name {tag} with --from on the next rebase, and "
+            f"record that you checked on the next tag:\n"
+            f"  mnt-build dev-kernel tag --mnt-base {mnt}/{name}"
+        )
+        return text
 
     def _mnt_linux_branches(self, remotes: List[str]) -> List[tuple]:
         """mnt-v branches of this kernel series known here, newest first.
@@ -711,55 +832,97 @@ class KernelBuilder:
         return max(versions)[1] if versions else None
 
     def show_kernel_versions(self, offline: bool = False):
-        """Report whether an mnt-v branch exists for the latest stable kernel of this series."""
         series = self._series()
-        remotes = self._kernel_branch_remotes()
+        linux_dir = self.config.linux_dir
 
         latest = self._latest_stable_version(offline)
         if latest is None:
             self.logger.warning(
-                f"No stable v{series} tags known. Run: mnt-build dev-kernel fetch"
+                f"No v{series} release tags known. An -rc series has none until its "
+                "release; otherwise run: mnt-build dev-kernel fetch"
             )
             return
         source = "tags fetched earlier, not checked" if offline else "stable remote"
         self.logger.info(f"Latest stable {series}: v{latest} ({source})")
 
-        branch = f"mnt-v{latest}"
-        have = []
-        if self._ref_exists(f'refs/heads/{branch}'):
-            have.append("local")
-        for remote in remotes:
-            if offline:
-                found = self._ref_exists(f'refs/remotes/{remote}/{branch}')
+        origin = self._origin_remote()
+        local_tags = {name for _, _, name in self._kernel_tags()}
+        origin_tags = None
+        if origin and not offline:
+            refs = self._ls_remote(origin, *self._origin_tag_query())
+            if refs is None:
+                self.logger.warning(f"Could not reach {origin}. Going by the tags here.")
             else:
-                refs = self._ls_remote(remote, '--heads')
-                if refs is None:
-                    found = self._ref_exists(f'refs/remotes/{remote}/{branch}')
-                    self.logger.warning(
-                        f"Could not reach {remote}. Going by what was fetched earlier."
-                    )
-                else:
-                    found = f'refs/heads/{branch}' in refs
-            if found:
-                have.append(remote)
+                origin_tags = {ref[len('refs/tags/'):] for ref in refs}
+        tags = self._kernel_tags(local_tags | (origin_tags or set()))
 
-        if have:
+        def where(name: str) -> str:
+            places = ["local"] if name in local_tags else []
+            if origin_tags and name in origin_tags:
+                places.append(origin)
+            return ', '.join(places)
+
+        newest = self._newest_mnt_branch(offline)
+        mnt = self._resolve_kernel_remote(MNT_KERNEL_REMOTE) or MNT_KERNEL_REMOTE
+        latest_tags = [t for t in tags if t[0] == version_key(latest)]
+        next_rev = latest_tags[0][1] + 1 if latest_tags else DEFAULT_LOCALVERSION_REV
+        if latest_tags:
+            _, rev, name = latest_tags[0]
             self.logger.info(
-                f"{Colors.GREEN}✓{Colors.RESET} {branch} is available ({', '.join(have)}). "
-                f"Build with: mnt-build build{kversion_flag(latest)}"
+                f"{Colors.GREEN}✓{Colors.RESET} v{latest} is tagged: {name} ({where(name)}). "
+                f"Build with: mnt-build build{kversion_flag(latest, rev)}"
             )
-            return
-
-        where = ' or '.join(['locally', *(f'on {r}' for r in remotes)])
-        self.logger.info(f"{Colors.YELLOW}{branch} does not exist{Colors.RESET} {where}")
-        known = self._mnt_linux_branches(remotes)
-        if known:
-            self.logger.info(f"Newest {series} branch known here: {known[0][1]}")
-            self.logger.info(f"Rebase it with: mnt-build dev-kernel rebase{kversion_flag(latest)}")
         else:
-            self.logger.info(
-                f"No mnt-v{series}.x branch is known here. Run: mnt-build dev-kernel fetch"
-            )
+            self.logger.info(f"{Colors.YELLOW}v{latest} is not tagged yet{Colors.RESET}")
+            newest_key = None
+            if tags:
+                newest_key = tags[0][0]
+                self.logger.info(f"Newest {series} tag: {tags[0][2]} ({where(tags[0][2])})")
+            else:
+                self.logger.info(f"No mnt-v{series} tags known here.")
+                branches = self._mnt_linux_branches(self._kernel_branch_remotes())
+                if branches:
+                    newest_key, ref = branches[0]
+                    known = '.'.join(map(str, newest_key))
+                    base = f"{mnt}/{newest[0]}" if newest else f"{mnt}/mnt-v{series}.N"
+                    self.logger.info(f"Newest {series} branch known here: {ref}")
+                    self.logger.info(
+                        f"To start the tags from it, check it out and tag it, naming the MNT "
+                        f"branch it carries:\n"
+                        f"  git -C {linux_dir} switch --detach {ref}\n"
+                        f"  mnt-build dev-kernel tag{kversion_flag(known)} --mnt-base {base}"
+                    )
+            if newest_key is None or newest_key < version_key(latest):
+                self.logger.info(f"Rebase with: mnt-build dev-kernel rebase{kversion_flag(latest)}")
+            else:
+                self.logger.info(
+                    f"Nothing here is older than v{latest} to rebase. If a newer release is out, "
+                    "fetch its tag: mnt-build dev-kernel fetch"
+                )
+        if origin_tags is not None:
+            for _, _, name in tags:
+                if name not in origin_tags:
+                    self.logger.info(
+                        f"{Colors.YELLOW}{name} is not on {origin} yet.{Colors.RESET} "
+                        f"Publish it with: git -C {linux_dir} push {origin} {name}"
+                    )
+
+        if newest is None:
+            self.logger.info(f"No MNT mnt-v{series}.x branch known.")
+            return
+        self.logger.info(f"Newest MNT {series} branch: {newest[0]} ({newest[1][:12]})")
+        if not tags:
+            return
+        tag = tags[0][2]
+        if tag not in local_tags:
+            self.logger.info(f"Fetch {tag} to compare it with MNT's: mnt-build dev-kernel fetch")
+            return
+        base = self._tag_trailer(tag, MNT_BASE_TRAILER)
+        if base == newest:
+            self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} {tag} carries it")
+        else:
+            for line in self._mnt_advice(tag, base, newest, latest, next_rev).splitlines():
+                self.logger.info(f"{Colors.YELLOW}{line}{Colors.RESET}" if not line.startswith(' ') else line)
 
     def _ensure_stable_tag(self, tag: str):
         """Make sure a stable release tag is in the checkout, fetching it if needed."""
@@ -792,12 +955,19 @@ class KernelBuilder:
                 return True
         return False
 
-    def rebase_mnt_linux_branch(self, source: Optional[str] = None):
-        """Create mnt-v{version} by rebasing an existing mnt-v branch onto v{version}.
+    def _require_git_identity(self, action: str):
+        # A rebase writes commits and a tag records its tagger. Without an
+        # identity git stops partway.
+        if self.run_command(
+            ['git', 'var', 'GIT_COMMITTER_IDENT'], cwd=self.config.linux_dir, check=False, log_cmd=False
+        ).returncode != 0:
+            raise BuildError(
+                f"git has no committer identity here, so it cannot {action}. Set one with:\n"
+                '  git config --global user.name "Your Name"\n'
+                '  git config --global user.email "you@example.com"'
+            )
 
-        Always works on a new local branch. The source branch is not modified
-        and nothing is pushed. On a conflict the rebase is left in progress.
-        """
+    def rebase_mnt_linux_branch(self, source: Optional[str] = None):
         linux_dir = self.config.linux_dir
         if not (linux_dir / ".git").exists():
             raise BuildError(f"Not a git repository: {linux_dir}")
@@ -805,48 +975,68 @@ class KernelBuilder:
         version = self.config.version
         tag = f"v{version}"
         branch = f"mnt-v{version}"
+        flag = kversion_flag(version, self.config.localversion_rev)
 
-        # A rebase writes new commits. Without an identity it stops on the first one.
-        if self.run_command(
-            ['git', 'var', 'GIT_COMMITTER_IDENT'], cwd=linux_dir, check=False, log_cmd=False
-        ).returncode != 0:
-            raise BuildError(
-                "git has no committer identity here, so it cannot rebase. Set one with:\n"
-                '  git config --global user.name "Your Name"\n'
-                '  git config --global user.email "you@example.com"'
-            )
+        self._require_git_identity("rebase")
         self.require_clean_kernel_tree()
         # Nothing here is taken back out afterwards.
         self._untracked_before = None
 
+        tagged = self._tags_for_version(version)
+        if tagged and parse_kernel_tag(tagged[0])[1] >= self.config.localversion_rev:
+            rev = parse_kernel_tag(tagged[0])[1]
+            raise BuildError(
+                f"v{version} is already tagged ({', '.join(tagged)}). Nothing to rebase. "
+                f"Build it with: mnt-build build{kversion_flag(version, rev)}\n"
+                f"To make a new stack for it, rebase with --localversion-rev {rev + 1}, or "
+                f"commit on top of the tag and tag the result with --localversion-rev {rev + 1}."
+            )
         remotes = self._kernel_branch_remotes()
-        for ref in [f'refs/heads/{branch}'] + [f'refs/remotes/{r}/{branch}' for r in remotes]:
-            if self._ref_exists(ref):
-                short = ref.removeprefix('refs/heads/').removeprefix('refs/remotes/')
-                raise BuildError(
-                    f"{branch} already exists ({short}). Nothing to rebase. Build it with: "
-                    f"mnt-build build{kversion_flag(version)}"
-                )
+        if self._ref_exists(f'refs/heads/{branch}'):
+            raise BuildError(
+                f"Local branch {branch} already exists. If it is the stack you want, build it "
+                f"with 'mnt-build build{flag} --skip-git-ops', then tag it with: "
+                f"mnt-build dev-kernel tag{flag}\n"
+                f"To start over, delete it first: git -C {linux_dir} branch -D {branch}"
+            )
+
+        tags = self._kernel_tags()
+        newest_mnt = self._newest_mnt_branch(offline=True)
+        unabsorbed = None
+        if tags and newest_mnt:
+            base = self._tag_trailer(tags[0][2], MNT_BASE_TRAILER)
+            if base != newest_mnt:
+                unabsorbed = self._mnt_advice(
+                    tags[0][2], base, newest_mnt, version, self.config.localversion_rev)
 
         if source is None:
-            # Newest branch older than the target. A newer one would be rebased backwards.
             target = version_key(version)
-            older = [
-                ref for key, ref in self._mnt_linux_branches(remotes)
-                if target is not None and key < target
+            if target is None:
+                raise BuildError(f"{version} is not a release. Name the stack to rebase with --from.")
+            if unabsorbed:
+                raise BuildError(unabsorbed)
+            # A newer stack would be rebased backwards.
+            candidates = [((key, 0, -rev), name) for key, rev, name in tags if key < target]
+            candidates += [
+                ((key, 1, rank), ref)
+                for rank, (key, ref) in enumerate(self._mnt_linux_branches(remotes)) if key < target
             ]
-            if not older:
+            if not candidates:
                 raise BuildError(
-                    f"No mnt-v{self._series()}.x branch older than {version} is known in "
+                    f"No mnt-v{self._series()}.x tag or branch older than {version} is known in "
                     f"{linux_dir} to rebase from. "
-                    "Run 'mnt-build dev-kernel fetch', or name a branch with --from."
+                    "Run 'mnt-build dev-kernel fetch', or name one with --from."
                 )
-            source = older[0]
+            candidates.sort(key=lambda c: (tuple(-n for n in c[0][0]), c[0][1], c[0][2]))
+            source = candidates[0][1]
         elif not self._ref_exists(source):
-            raise BuildError(f"--from {source}: no such branch or commit in {linux_dir}")
+            raise BuildError(f"--from {source}: no such tag, branch or commit in {linux_dir}")
+        elif unabsorbed:
+            self.logger.warning(unabsorbed.splitlines()[0])
 
-        # The stable tag the source branch sits on.
-        match = re.search(r'mnt-v(\d+\.\d+(?:\.\d+)?)$', source)
+        match = re.search(
+            rf'mnt-v(\d+\.\d+(?:\.\d+)?)(?:-{DEFAULT_LOCALVERSION_NAME}\d+)?$', source
+        )
         if match:
             old_tag = f"v{match.group(1)}"
             self._ensure_stable_tag(old_tag)
@@ -863,9 +1053,22 @@ class KernelBuilder:
         if not is_base:
             raise BuildError(f"{source} is not based on {old_tag}. Refusing to guess its base.")
         if old_tag == tag:
-            raise BuildError(f"{source} is already based on {tag}.")
+            raise BuildError(
+                f"{source} is already based on {tag}. Nothing to rebase. Check it out, "
+                f"build it with 'mnt-build build{flag} --skip-git-ops', then tag it with: "
+                f"mnt-build dev-kernel tag{flag}"
+            )
 
         self._ensure_stable_tag(tag)
+
+        source_sha = self._ref_sha(source)
+        mnt = self._resolve_kernel_remote(MNT_KERNEL_REMOTE)
+        if mnt and source.startswith(f'{mnt}/'):
+            mnt_base = (source[len(mnt) + 1:], source_sha)
+        elif self._ref_exists(f'refs/tags/{source.removeprefix("refs/tags/")}'):
+            mnt_base = self._tag_trailer(source.removeprefix('refs/tags/'), MNT_BASE_TRAILER)
+        else:
+            mnt_base = None
 
         def count(rev_range: str) -> int:
             return int(self.run_command(
@@ -878,6 +1081,15 @@ class KernelBuilder:
             f"Rebasing {before} commits from {source} ({old_tag}) onto {tag} as new branch {branch}..."
         )
         self.run_command(['git', 'switch', '--no-track', '--create', branch, source], cwd=linux_dir)
+        # Kept with the branch for 'dev-kernel tag', which writes them into the tag.
+        self.run_command(
+            ['git', 'config', f'branch.{branch}.rebasedFrom', f'{source} {source_sha}'], cwd=linux_dir
+        )
+        if mnt_base:
+            self.run_command(
+                ['git', 'config', f'branch.{branch}.mntBase', f'{mnt_base[0]} {mnt_base[1]}'],
+                cwd=linux_dir
+            )
         result = self.run_command(
             ['git', 'rebase', '--onto', tag, old_tag], cwd=linux_dir,
             check=False, stream_output=True
@@ -899,9 +1111,93 @@ class KernelBuilder:
             self.logger.info(
                 f"{before - after} commit(s) from {source} were dropped as already in {tag}"
             )
-        self.logger.info("The branch is local only. Nothing was pushed.")
+        self.logger.info("The branch is local only. Nothing was pushed or tagged.")
         olddefconfig = "" if self.config.config_file.exists() else " --olddefconfig"
-        self.logger.info(f"Next: mnt-build build{kversion_flag(version)}{olddefconfig}")
+        self.logger.info(f"Next, build and test it: mnt-build build{flag} --skip-git-ops{olddefconfig}")
+        self.logger.info(f"Then tag it: mnt-build dev-kernel tag{flag}")
+
+    def tag_kernel(self, mnt_base: Optional[str] = None):
+        linux_dir = self.config.linux_dir
+        if not (linux_dir / ".git").exists():
+            raise BuildError(f"Not a git repository: {linux_dir}")
+        version = self.config.version
+        tag = self.config.tag
+        next_rev = f"--localversion-rev {self.config.localversion_rev + 1}"
+
+        self._require_git_identity("tag")
+        self.require_clean_kernel_tree()
+        self._untracked_before = None
+
+        if self._ref_exists(f'refs/tags/{tag}'):
+            raise BuildError(
+                f"{tag} already exists here. Tags are never moved. "
+                f"Tag a changed stack as the next revision with {next_rev}."
+            )
+        origin = self._origin_remote()
+        if origin:
+            refs = self._run_ls_remote(origin, '--tags', '--refs', f'refs/tags/{tag}')
+            if refs is None:
+                self.logger.warning(f"Could not reach {origin} to check that {tag} is new there.")
+            elif refs:
+                raise BuildError(
+                    f"{tag} already exists on {origin}. Tags are never moved. Fetch it with "
+                    f"'mnt-build dev-kernel fetch', or tag a changed stack with {next_rev}."
+                )
+        self._check_kernel_version()
+
+        result = self.run_command(
+            ['git', 'symbolic-ref', '--short', '-q', 'HEAD'], cwd=linux_dir, check=False, log_cmd=False
+        )
+        branch = result.stdout.strip() if result.returncode == 0 else None
+
+        def branch_config(key: str) -> Optional[str]:
+            if branch is None:
+                return None
+            value = self.run_command(
+                ['git', 'config', '--get', f'branch.{branch}.{key}'],
+                cwd=linux_dir, check=False, log_cmd=False
+            ).stdout.strip()
+            return value or None
+
+        base = None
+        if mnt_base:
+            sha = self._ref_sha(mnt_base)
+            if sha is None:
+                raise BuildError(f"--mnt-base {mnt_base}: no such branch or commit in {linux_dir}")
+            name = mnt_base.removeprefix('refs/remotes/')
+            mnt = self._resolve_kernel_remote(MNT_KERNEL_REMOTE)
+            if mnt:
+                name = name.removeprefix(f'{mnt}/')
+            base = f"{name} {sha}"
+        else:
+            base = branch_config('mntBase')
+        rebased_from = branch_config('rebasedFrom')
+        if base is None:
+            self.logger.warning(
+                f"No MNT branch is recorded for this stack, so the status report cannot tell "
+                f"whether MNT has newer patches. Name the one it carries with --mnt-base, "
+                f"e.g. --mnt-base {MNT_KERNEL_REMOTE}/mnt-v{self._series()}.N"
+            )
+
+        trailers = []
+        if base:
+            trailers.append(f"{MNT_BASE_TRAILER}: {base}")
+        if rebased_from:
+            trailers.append(f"{REBASED_FROM_TRAILER}: {rebased_from}")
+        message = f"MNT Reform patch stack on Linux v{version}"
+        if trailers:
+            message += "\n\n" + "\n".join(trailers)
+        self.run_command(['git', 'tag', '--annotate', '--file=-', tag], cwd=linux_dir,
+                         input_data=message)
+
+        head = self.run_command(
+            ['git', 'log', '-1', '--format=%h %s', tag], cwd=linux_dir, log_cmd=False
+        ).stdout.strip()
+        self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Tagged {head} as {tag}")
+        for line in trailers:
+            self.logger.info(f"  {line}")
+        self.logger.info("The tag is local only. Nothing was pushed.")
+        self.logger.info(f"Publish it with: git -C {linux_dir} push {origin or 'origin'} {tag}")
 
     def _untracked_files(self) -> set:
         return set(self.run_command(
@@ -958,138 +1254,175 @@ class KernelBuilder:
         )
         self._created_files = set()
 
-    def checkout_mnt_linux_branch(self):
-        """Switch to the mnt-v{version} branch named by --kversion.
-
-        Uses the local branch if there is one, otherwise the first of
-        the origin and MNT remotes that has it. Never force-resets, force-checks-out
-        or rebases.
-        """
-        if not (self.config.linux_dir / ".git").exists():
-            raise BuildError(f"Not a git repository: {self.config.linux_dir}")
-
-        self.require_clean_kernel_tree()
-
-        branch = f"mnt-v{self.config.version}"
-
-        current = self.run_command(
-            ['git', 'rev-parse', '--abbrev-ref', 'HEAD'], cwd=self.config.linux_dir
-        ).stdout.strip()
-        if current == branch:
-            self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Already on {branch}")
+    def ensure_kernel_checkout(self, shallow: bool = False):
+        # A shallow clone can build but not dev-kernel rebase.
+        linux_dir = self.config.linux_dir
+        if (linux_dir / ".git").exists():
             return
-
-        self.logger.info(f"Switching from {current} to {branch} (from --kversion {self.config.version})...")
-
-        local_exists = self.run_command(
-            ['git', 'rev-parse', '--verify', '--quiet', f'refs/heads/{branch}'],
-            cwd=self.config.linux_dir, check=False
-        ).returncode == 0
-
-        if not local_exists:
-            remotes = self._kernel_branch_remotes()
-            if not remotes:
-                raise BuildError(
-                    f"None of the remotes that carry mnt-v branches "
-                    f"({', '.join(self._kernel_branch_remote_names())}) are set up in "
-                    f"{self.config.linux_dir}. Run: mnt-build dev-kernel add-remotes"
-                )
-            for remote in remotes:
-                if self._fetch_mnt_linux_branch(remote, branch):
-                    self.run_command(
-                        ['git', 'switch', '--create', branch, '--track', f'{remote}/{branch}'],
-                        cwd=self.config.linux_dir
-                    )
-                    self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Checked out {branch} from {remote}")
-                    return
-            raise BuildError(self._missing_mnt_linux_branch_message(branch, remotes))
-
-        checkout_result = self.run_command(
-            ['git', 'checkout', branch], cwd=self.config.linux_dir, check=False
-        )
-        if checkout_result.returncode != 0:
+        if linux_dir.exists() and any(linux_dir.iterdir()):
             raise BuildError(
-                f"Could not switch to {branch} in {self.config.linux_dir}. "
-                f"git said:\n{checkout_result.stderr}"
+                f"{linux_dir} is not empty and not a git repository. Move it aside "
+                "and mnt-build will clone the kernel there."
             )
 
-        self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Checked out {branch}")
+        remotes_file = self.config.build_dir / REMOTES_FILE
+        if not remotes_file.is_file():
+            raise BuildError(f"No kernel at {linux_dir}, and no {remotes_file} to clone it from.")
+        try:
+            origin = next((r for r in load_kernel_remotes(remotes_file) if r.is_origin), None)
+        except ValueError as e:
+            raise BuildError(str(e))
+        if origin is None:
+            raise BuildError(
+                f"No kernel at {linux_dir}, and no remote in {remotes_file} "
+                'has "is-origin": true to clone it from.'
+            )
 
-    def _fetch_mnt_linux_branch(self, remote: str, branch: str) -> bool:
-        """Fetch branch from remote. True if refs/remotes/{remote}/{branch} is usable."""
-        self.logger.info(f"No local branch {branch}, checking {remote}...")
-        cmd = ['git', 'fetch', remote, f'+refs/heads/{branch}:refs/remotes/{remote}/{branch}']
+        tag = self.config.tag
+        if shallow:
+            found = self.run_command(['git', 'ls-remote', '--tags', origin.url, f'refs/tags/{tag}'],
+                                     cwd=self.config.build_dir, check=False)
+            if found.returncode == 0 and not found.stdout.strip():
+                raise BuildError(
+                    f"{origin.url} has no tag {tag}. Push the tag, or build a version "
+                    "and revision that has one."
+                )
+            self.logger.info(f"No kernel at {linux_dir}. Cloning {tag} only from {origin.url}...")
+            cmd = ['git', 'clone', '--depth', '1', '--branch', tag, '--origin', 'origin',
+                   origin.url, str(linux_dir)]
+        else:
+            self.logger.info(f"No kernel at {linux_dir}. Cloning {origin.url}...")
+            cmd = ['git', 'clone', '--no-checkout', '--origin', 'origin',
+                   origin.url, str(linux_dir)]
+        result = self.run_command(cmd, cwd=self.config.build_dir, check=False)
+        if result.returncode != 0:
+            detail = f" git said:\n{result.stderr}" if result.stderr else ""
+            raise BuildError(f"Could not clone {origin.url} into {linux_dir}.{detail}")
+        if origin.push_url:
+            self.run_command(['git', 'remote', 'set-url', '--push', 'origin', origin.push_url],
+                             cwd=linux_dir, log_cmd=False)
+
+        if not shallow:
+            if not self._ref_exists(f'refs/tags/{tag}'):
+                raise BuildError(self._missing_kernel_tag_message('origin'))
+            result = self.run_command(['git', 'switch', '--detach', tag], cwd=linux_dir, check=False)
+            if result.returncode != 0:
+                raise BuildError(f"Could not check out {tag} in {linux_dir}. git said:\n{result.stderr}")
+        self.logger.info(
+            f"{Colors.GREEN}✓{Colors.RESET} Cloned the kernel at {tag}. "
+            "For the other remotes run: mnt-build dev-kernel add-remotes"
+        )
+
+    def checkout_kernel_tag(self):
+        linux_dir = self.config.linux_dir
+        if not (linux_dir / ".git").exists():
+            raise BuildError(f"Not a git repository: {linux_dir}")
+
+        self.require_clean_kernel_tree()
+        tag = self.config.tag
+
+        if not self._ref_exists(f'refs/tags/{tag}'):
+            origin = self._origin_remote()
+            if origin is None:
+                raise BuildError(
+                    f"No tag {tag} here, and the origin remote that carries the kernel tags "
+                    f"is not set up in {linux_dir}. Run: mnt-build dev-kernel add-remotes"
+                )
+            self.logger.info(f"No local tag {tag}, checking {origin}...")
+            found = self._fetch_ref(origin, f'refs/tags/{tag}', f'refs/tags/{tag}')
+            if found is None:
+                raise BuildError(
+                    f"Could not reach {origin}, and tag {tag} is not here. "
+                    "Try again when it is reachable, or check out a commit by hand "
+                    "and build it with --skip-git-ops."
+                )
+            if not found:
+                raise BuildError(self._missing_kernel_tag_message(origin))
+            self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Fetched {tag} from {origin}")
+
+        target = self._ref_sha(f'refs/tags/{tag}')
+        if self._ref_sha('HEAD') == target:
+            self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Already at {tag}")
+            return
+
+        current = self.run_command(
+            ['git', 'rev-parse', '--abbrev-ref', 'HEAD'], cwd=linux_dir, log_cmd=False
+        ).stdout.strip()
+        self.logger.info(f"Switching from {current} to {tag} (from --kversion {self.config.version})...")
+        result = self.run_command(['git', 'switch', '--detach', tag], cwd=linux_dir, check=False)
+        if result.returncode != 0:
+            raise BuildError(
+                f"Could not switch to {tag} in {linux_dir}. git said:\n{result.stderr}"
+            )
+        self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Checked out {tag} ({target[:12]})")
+
+    def _fetch_ref(self, remote: str, src: str, dst: str) -> Optional[bool]:
+        """Fetch one ref. True if fetched, False if the remote lacks it, None if unreachable."""
+        cmd = ['git', 'fetch', '--no-tags', remote, f'+{src}:{dst}']
         # Not run_command: needs a timeout and must never stop for a password prompt.
         self.logger.debug(f"$ {' '.join(cmd)}")
         try:
             result = subprocess.run(
                 cmd, cwd=self.config.linux_dir, capture_output=True, text=True,
                 timeout=REMOTE_FETCH_TIMEOUT,
-                # LC_ALL=C: the "no such branch" check below matches git's English message.
+                # LC_ALL=C: the "no such ref" check below matches git's English message.
                 env={**os.environ, 'GIT_TERMINAL_PROMPT': '0', 'LC_ALL': 'C',
                      'GIT_SSH_COMMAND': os.environ.get('GIT_SSH_COMMAND', 'ssh -o BatchMode=yes')},
             )
-            if result.returncode == 0:
-                return True
-            self.logger.debug(f"stderr: {result.stderr.strip()}")
-            # "couldn't find remote ref" means the remote answered and has no such branch.
-            reachable = "couldn't find remote ref" in result.stderr
         except subprocess.TimeoutExpired:
             self.logger.debug(f"No answer from {remote} in {REMOTE_FETCH_TIMEOUT}s")
-            reachable = False
-
-        if reachable:
-            self.logger.info(f"{remote} has no {branch}")
-            return False
-
-        fetched_before = self.run_command(
-            ['git', 'rev-parse', '--verify', '--quiet', f'refs/remotes/{remote}/{branch}'],
-            cwd=self.config.linux_dir, check=False, log_cmd=False
-        ).returncode == 0
-        if fetched_before:
-            self.logger.warning(
-                f"Could not reach {remote}. Using the copy of {branch} fetched earlier, "
-                "which may be out of date."
-            )
+            return None
+        if result.returncode == 0:
             return True
-        self.logger.warning(f"Could not reach {remote}, and {branch} was never fetched from it")
-        return False
+        self.logger.debug(f"stderr: {result.stderr.strip()}")
+        if "couldn't find remote ref" in result.stderr:
+            self.logger.info(f"{remote} has no {src.removeprefix('refs/tags/')}")
+            return False
+        return None
 
-    def _missing_mnt_linux_branch_message(self, branch: str, remotes: List[str]) -> str:
-        version_parts = self.config.version.split('.')
-        series = f"mnt-v{version_parts[0]}.{version_parts[1]}."
-        refs = self.run_command(
-            ['git', 'for-each-ref', '--format=%(refname:short)', '--sort=-version:refname',
-             f'refs/heads/{series}*', *(f'refs/remotes/{r}/{series}*' for r in remotes)],
+    def _missing_kernel_tag_message(self, origin: str) -> str:
+        version = self.config.version
+        flag = kversion_flag(version, self.config.localversion_rev)
+        names = set(self.run_command(
+            ['git', 'for-each-ref', '--format=%(refname:short)', f'refs/tags/mnt-v{version}-*'],
             cwd=self.config.linux_dir, log_cmd=False
-        ).stdout.split()
+        ).stdout.split())
+        refs = self._run_ls_remote(origin, '--tags', '--refs', f'mnt-v{version}-*')
+        names |= {ref[len('refs/tags/'):] for ref in (refs or {})}
+        others = self._tags_for_version(version, names)
 
         message = (
-            f"No {branch} branch locally or on {' or '.join(remotes)}. "
-            f"mnt-build does not rebase the MNT patch stack as part of a build.\n"
+            f"No tag {self.config.tag} locally or on {origin}. "
+            "mnt-build builds tagged kernels only.\n"
         )
-        if refs:
+        if others:
+            rev = parse_kernel_tag(others[0])[1]
             message += (
-                f"Branches known here for this series: {', '.join(refs)}\n"
-                f"Rebase the newest one onto v{self.config.version}, then build again:\n"
-                f"  mnt-build dev-kernel rebase{kversion_flag(self.config.version)}\n"
+                f"Tags for v{version}: {', '.join(others)}. Build the newest with:\n"
+                f"  mnt-build build{kversion_flag(version, rev)}\n"
+            )
+        elif branch := next(
+            (ref for key, ref in self._mnt_linux_branches(self._kernel_branch_remotes())
+             if ref.endswith(f'mnt-v{version}')), None
+        ):
+            message += (
+                f"Branch {branch} has a stack for this release. To build it as a tag, "
+                "check it out, test it, then tag it:\n"
+                f"  git -C {self.config.linux_dir} switch --detach {branch}\n"
+                f"  mnt-build build{flag} --skip-git-ops\n"
+                f"  mnt-build dev-kernel tag{flag} --mnt-base {MNT_KERNEL_REMOTE}/<the MNT branch it carries>\n"
             )
         else:
             message += (
-                f"No {series}x branch is known here either. Run "
-                "'mnt-build dev-kernel fetch', then build again. "
+                "To make it, rebase the patch stack, build and test it, then tag it:\n"
+                f"  mnt-build dev-kernel rebase{flag}\n"
+                f"  mnt-build build{flag} --skip-git-ops\n"
+                f"  mnt-build dev-kernel tag{flag}\n"
             )
-        message += (
-            "Or pass the --kversion of a branch that exists."
-        )
+        message += "To build an untagged commit, check it out and pass --skip-git-ops."
         return message
 
     def prepare_kernel_source(self, skip_git_operations: bool = False):
-        """Get the kernel checkout onto the commit to build.
-
-        Normally that is branch mnt-v{version}. With skip_git_operations the
-        checkout is built as it stands, e.g. a submodule pinned by CI.
-        """
         if skip_git_operations:
             if not (self.config.linux_dir / ".git").exists():
                 raise BuildError(f"Not a git repository: {self.config.linux_dir}")
@@ -1099,8 +1432,10 @@ class KernelBuilder:
             ).stdout.strip()
             self.logger.info(f"Skipping git checkout. Building what is checked out: {head}")
         else:
-            self.checkout_mnt_linux_branch()
+            self.checkout_kernel_tag()
+        self._check_kernel_version()
 
+    def _check_kernel_version(self):
         result = self.run_command(
             ['make', *self._make_kernel_vars(), 'kernelversion'],
             cwd=self.config.linux_dir, log_cmd=False

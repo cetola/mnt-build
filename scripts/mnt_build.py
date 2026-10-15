@@ -40,7 +40,8 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
               kernel_only: bool = DEFAULT_KERNEL_ONLY,
               dtbs_only: bool = False,
               modules_only: bool = False,
-              kernel: str = DEFAULT_KERNEL_DIR) -> int:
+              kernel: str = DEFAULT_KERNEL_DIR,
+              shallow_clone: bool = False) -> int:
     if cross_compile is None:
         cross_compile = DEFAULT_CROSS_COMPILE
     normalized_cross_compile = cross_compile.strip()
@@ -92,6 +93,8 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         start_time = datetime.now()
 
         builder.log_phase("Preflight")
+        if not skip_git_operations:
+            builder.ensure_kernel_checkout(shallow=shallow_clone)
         builder.check_prerequisites(run_olddefconfig=run_olddefconfig)
 
         if dry_run:
@@ -217,8 +220,11 @@ def run_clean(build_dir: Optional[Path] = None, kernel: str = DEFAULT_KERNEL_DIR
 def run_dev_kernel(build_dir: Optional[Path] = None, kernel: str = DEFAULT_KERNEL_DIR,
                    action: Optional[str] = None, offline: bool = False,
                    log: bool = False, version: str = DEFAULT_KERNEL_VERSION,
-                   source: Optional[str] = None) -> int:
-    config = BuildConfig.create(version=version, build_dir=build_dir, kernel=kernel)
+                   source: Optional[str] = None,
+                   localversion_rev: int = DEFAULT_LOCALVERSION_REV,
+                   mnt_base: Optional[str] = None) -> int:
+    config = BuildConfig.create(version=version, build_dir=build_dir, kernel=kernel,
+                                localversion_rev=localversion_rev)
     if log:
         config.build_dir.mkdir(parents=True, exist_ok=True)
     else:
@@ -240,6 +246,10 @@ def run_dev_kernel(build_dir: Optional[Path] = None, kernel: str = DEFAULT_KERNE
         if action == 'rebase':
             builder.log_phase("Rebase")
             builder.rebase_mnt_linux_branch(source=source)
+            return 0
+        if action == 'tag':
+            builder.log_phase("Tag")
+            builder.tag_kernel(mnt_base=mnt_base)
             return 0
 
         builder.log_phase("Remotes")
@@ -480,8 +490,9 @@ def build_parser() -> argparse.ArgumentParser:
         '--kernel',
         default=DEFAULT_KERNEL_DIR,
         help='Kernel checkout to use, as a directory name under build_dir '
-             f'(default: {DEFAULT_KERNEL_DIR}). The build switches it to branch '
-             'mnt-v{kversion}, taking the branch from the first remote that has it.'
+             f'(default: {DEFAULT_KERNEL_DIR}). The build checks out tag '
+             'mnt-v{kversion}-reform{localversion-rev}, fetching it from origin if it '
+             'is not here yet.'
     )
     build_parser.add_argument(
         '-j', '--jobs',
@@ -497,7 +508,7 @@ def build_parser() -> argparse.ArgumentParser:
     build_parser.add_argument(
         '--dry-run',
         action='store_true',
-        help='Check prerequisites, check out the kernel branch and apply '
+        help='Check prerequisites, check out the kernel tag and apply '
              'xtra-patches, do not build. The patches are taken back out afterwards. '
              'If combined with --olddefconfig, updates config and exits without building.'
     )
@@ -524,9 +535,10 @@ def build_parser() -> argparse.ArgumentParser:
         '--skip-git-ops',
         action='store_true',
         default=False,
-        help='Do not switch branches or fetch. Build the kernel checkout as it stands. '
-             'Useful for automated builds that pin the kernel commit, or when you have '
-             'checked out something by hand. The checkout must still be free of '
+        help='Do not check out the kernel tag or fetch. Build the kernel checkout as it '
+             'stands. Useful for testing a rebased branch before tagging it, or when you '
+             'have checked out something by hand. Never clones a missing checkout. '
+             'The checkout must still be free of '
              'uncommitted changes and match --kversion.'
     )
     build_parser.add_argument(
@@ -588,30 +600,47 @@ def build_parser() -> argparse.ArgumentParser:
     dev_kernel_parser.add_argument(
         'action',
         nargs='?',
-        choices=['add-remotes', 'fetch', 'rebase'],
+        choices=['add-remotes', 'fetch', 'rebase', 'tag'],
         help='With no action, list the remotes in the checkout and whether each '
-             'is fetched and up to date, then report whether an mnt-v branch '
-             'exists for the latest stable kernel. add-remotes: add any remote listed in '
+             'is fetched and up to date, then report whether the latest stable kernel '
+             'is tagged and whether MNT has a branch the newest tag does not carry. '
+             'add-remotes: add any remote listed in '
              'remotes.json that the checkout lacks (nothing is fetched). The '
              'one marked is-origin is added as "origin". '
-             'fetch: fetch the latest from every remote in the checkout. '
+             'fetch: fetch the latest from every remote in the checkout, and the tags from origin. '
              'rebase: create local branch mnt-v{kversion} by rebasing the newest '
-             'mnt-v branch of the same series onto stable tag v{kversion}. Works '
-             'from what is already fetched, pushes nothing, and leaves the rebase '
-             'in progress on a conflict.'
+             'kernel tag (or mnt-v branch) of the same series onto stable tag v{kversion}. '
+             'Stops if MNT has a branch the newest tag does not carry, unless --from is given. '
+             'Works from what is already fetched, pushes nothing, and leaves the rebase '
+             'in progress on a conflict. '
+             'tag: tag the checked-out commit as mnt-v{kversion}-reform{localversion-rev}, '
+             'recording the MNT branch it carries. Never moves a tag and pushes nothing.'
     )
     dev_kernel_parser.add_argument(
         '--kversion',
         default=DEFAULT_KERNEL_VERSION,
         help='Kernel version. Picks the series (X.Y) the status report covers, '
-             f'and is the version rebase targets (default: {DEFAULT_KERNEL_VERSION})'
+             f'and is the version rebase and tag target (default: {DEFAULT_KERNEL_VERSION})'
     )
     dev_kernel_parser.add_argument(
         '--from',
         dest='source',
         metavar='BRANCH',
-        help='With rebase: the branch to rebase from, e.g. mnt/mnt-v7.2.6 '
-             '(default: the newest mnt-v branch of the same series).'
+        help='With rebase: the tag or branch to rebase from, e.g. mnt/mnt-v7.2.6 '
+             'or mnt-v7.2.9-reform1 (default: the newest tag or mnt-v branch of the same series).'
+    )
+    dev_kernel_parser.add_argument(
+        '--localversion-rev',
+        type=int,
+        default=DEFAULT_LOCALVERSION_REV,
+        help=f'With tag: the revision in the tag name (default: {DEFAULT_LOCALVERSION_REV}). '
+             'Use the next one when the patches change on a release that is already tagged.'
+    )
+    dev_kernel_parser.add_argument(
+        '--mnt-base',
+        metavar='BRANCH',
+        help='With tag: the MNT branch whose patches the stack carries, e.g. '
+             'mnt/mnt-v7.2.6 (default: what rebase recorded for the checked-out branch).'
     )
     dev_kernel_parser.add_argument(
         '--build-dir',
@@ -746,7 +775,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.command == 'dev-kernel':
         return run_dev_kernel(build_dir=args.build_dir, kernel=args.kernel,
                               action=args.action, offline=args.offline, log=args.log,
-                              version=args.kversion, source=args.source)
+                              version=args.kversion, source=args.source,
+                              localversion_rev=args.localversion_rev, mnt_base=args.mnt_base)
 
     if args.command == 'uboot':
         if args.list == 'sysimage':

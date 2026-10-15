@@ -40,7 +40,7 @@ _mnt_build() {
         '--olddefconfig[run olddefconfig and persist config]' \
         '--defconfig[alias for --olddefconfig]' \
         '--post-clean[run mrproper after olddefconfig dry-run]' \
-        '--skip-git-ops[do not switch branches; build the kernel checkout as it stands]' \
+        '--skip-git-ops[do not check out the kernel tag; build the kernel checkout as it stands]' \
         '--arch=[kernel ARCH]:arch:' \
         '--cross-compile=[cross compile prefix]:prefix:' \
         '--with-headers[generate extmod headers tree]' \
@@ -60,11 +60,13 @@ _mnt_build() {
         '--help[show dev-kernel help]' \
         '--build-dir=[build directory]:directory:_files -/' \
         '--kernel=[kernel checkout dir under build_dir (default: mnt-linux)]:kernel:' \
-        '--kversion=[kernel version: series for the status report, target for rebase]:kversion:' \
-        '--from=[with rebase: branch to rebase from (default: newest mnt-v branch of the series)]:branch:' \
+        '--kversion=[kernel version: series for the status report, target for rebase and tag]:kversion:' \
+        '--from=[with rebase: tag or branch to rebase from (default: newest of the series)]:ref:' \
+        '--localversion-rev=[with tag: revision in the tag name (default: 1)]:rev:' \
+        '--mnt-base=[with tag: MNT branch the stack carries]:branch:' \
         '--offline[do not contact the remotes]' \
         '--log[also write output to a log file in the build directory]' \
-        '2::action:(add-remotes fetch rebase)'
+        '2::action:(add-remotes fetch rebase tag)'
       ;;
     uboot)
       _arguments -s \
