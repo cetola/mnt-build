@@ -31,10 +31,14 @@ if [ "$OLD_VERSION" = "$NEW_VERSION" ]; then
     exit 0
 fi
 
-count_before=$(grep -o -- "$OLD_VERSION" "$INDEX_HTML" | wc -l)
+count_before=$(grep -oF -- "$OLD_VERSION" "$INDEX_HTML" | wc -l | tr -d ' ')
 
 old_pattern=$(printf '%s' "$OLD_VERSION" | sed 's/\./\\./g')
-sed -i "s/${old_pattern}/${NEW_VERSION}/g" "$INDEX_HTML"
+# BSD sed (macOS) has no plain -i
+tmp=$(mktemp)
+sed "s/${old_pattern}/${NEW_VERSION}/g" "$INDEX_HTML" > "$tmp"
+cat "$tmp" > "$INDEX_HTML"
+rm -f "$tmp"
 
 echo "Replaced $count_before occurrence(s) of '$OLD_VERSION' with '$NEW_VERSION' in docs/index.html"
 echo
