@@ -18,9 +18,11 @@ if [ ! -f "$INDEX_HTML" ]; then
     exit 1
 fi
 
-OLD_VERSION=$(grep -oP 'Release: <code>v\K[0-9]+\.[0-9]+\.[0-9]+' "$INDEX_HTML" || true)
+OLD_VERSION=$(sed -nE 's/.*Release: *<code>v?([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' "$INDEX_HTML" | head -n 1)
 if [ -z "$OLD_VERSION" ]; then
     echo "Error: couldn't find the current version on the 'Release: <code>v...' line in $INDEX_HTML." >&2
+    echo "Release lines found:" >&2
+    grep -n 'Release' "$INDEX_HTML" >&2 || echo "  (none)" >&2
     exit 1
 fi
 
