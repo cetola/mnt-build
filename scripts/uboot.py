@@ -14,6 +14,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from config import REMOTES_FILE, load_bootloader_url
+
 
 @dataclass
 class SysimageUBootInfo:
@@ -97,7 +99,11 @@ class UBootManager:
         """Clone/fetch U-Boot repo, checkout tag, apply local patches. Stops before building."""
         info = self.get_info(sysimage)
         checkout_dir = self._uboot_root / info.project
-        repo_url = f"https://source.mnt.re/reform/{info.project}.git"
+        try:
+            repo_url = load_bootloader_url(self.root / REMOTES_FILE, info.project)
+        except ValueError as e:
+            print(f"[uboot] ERROR: {e}", file=sys.stderr)
+            return 1
         patches_dir = self._patches_root / info.project
 
         print(f"[uboot] Preparing {info.project} for {sysimage}")

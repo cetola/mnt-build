@@ -86,6 +86,35 @@ def load_kernel_remotes(path: Path) -> list[KernelRemote]:
     return remotes
 
 
+def load_bootloader_url(path: Path, project: str) -> str:
+    """Return the clone URL for a U-Boot or barebox project from REMOTES_FILE.
+
+    {"bootloaders": {"<project>": {"url": ...}, ...}}
+    """
+    try:
+        data = json.loads(path.read_text())
+    except FileNotFoundError:
+        raise ValueError(f"{path}: not found")
+    except json.JSONDecodeError as e:
+        raise ValueError(f"{path}: not valid JSON: {e}")
+    bootloaders = data.get("bootloaders") if isinstance(data, dict) else None
+    if not isinstance(bootloaders, dict):
+        raise ValueError(f'{path}: expected {{"bootloaders": {{"<project>": {{"url": ...}}}}}}')
+    entry = bootloaders.get(project)
+    if entry is None:
+        raise ValueError(f'{path}: no "bootloaders" entry for "{project}"')
+    where = f'{path}: bootloader "{project}"'
+    if not isinstance(entry, dict):
+        raise ValueError(f"{where}: expected an object")
+    unknown = sorted(set(entry) - {"url"})
+    if unknown:
+        raise ValueError(f"{where}: unknown key(s): {', '.join(unknown)}")
+    url = entry.get("url")
+    if not isinstance(url, str) or not url:
+        raise ValueError(f'{where}: "url" must be a non-empty string')
+    return url
+
+
 def version_key(version: str) -> Optional[tuple]:
     """Sort key for a kernel release. None for anything else, such as an -rc."""
     parts = version.split('.')

@@ -61,7 +61,7 @@ Options:
   --mode <mode>            Bootloader source mode: prebuilt (default) or source
   --ref <ref>              Git ref (tag/branch/SHA) override
   --sha <sha>              Exact git commit SHA override (takes priority over --ref)
-  --repo <url>             U-Boot repository URL override
+  --repo <url>             bootloader repository URL override (default: remotes.json)
   --downloads-dir <path>   Override downloads directory (default: <work-dir>/downloads)
   --work-dir <path>        Override work directory (default: $(pwd)/image-gen)
   --build-cmd <cmd>        Build command to run inside source checkout (source mode)
@@ -267,7 +267,10 @@ fsbl_set_default_repo_url() {
   if [[ -n "$UBOOT_REPO_URL" ]]; then
     FSBL_REPO_URL="$UBOOT_REPO_URL"
   else
-    FSBL_REPO_URL="https://source.mnt.re/reform/${BOOTLOADER_PROJECT}.git"
+    FSBL_REPO_URL="$(python3 "$FSBL_SCRIPT_DIR/bootloader-url.py" "$BOOTLOADER_PROJECT")" || {
+      fsbl_die "No clone URL for ${BOOTLOADER_PROJECT} in remotes.json"
+      return 1
+    }
   fi
 }
 
@@ -465,7 +468,7 @@ fsbl_handle_source_build() {
   local source_artifact=""
   local output_path="$DOWNLOADS_DIR/$BOOTLOADER_FILENAME"
 
-  fsbl_set_default_repo_url
+  fsbl_set_default_repo_url || return 1
   fsbl_checkout_source_repo || return 1
   fsbl_apply_xtra_patches || return 1
   fsbl_run_source_build || return 1

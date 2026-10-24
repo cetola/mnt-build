@@ -23,5 +23,19 @@
         "is-origin": false
       }
     ]
+  },
+  "bootloaders": {
+    "reform-a311d-uboot": {
+      "url": "https://source.mnt.re/reform/reform-a311d-uboot.git"
+    },
+    "reform-imx8mp-uboot": {
+      "url": "https://source.mnt.re/reform/reform-imx8mp-uboot.git"
+    },
+    "reform-rk3588-uboot": {
+      "url": "https://source.mnt.re/reform/reform-rk3588-uboot.git"
+    },
+    "mnt-reform-barebox": {
+      "url": "https://source.mnt.re/reform/mnt-reform-barebox.git"
+    }
   }
 }

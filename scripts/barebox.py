@@ -12,6 +12,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from config import REMOTES_FILE, load_bootloader_url
+
 
 @dataclass
 class SysimageBareboxInfo:
@@ -132,7 +134,11 @@ class BareboxManager:
             return 1
 
         checkout_dir = self._barebox_root
-        repo_url = f"https://source.mnt.re/reform/{info.project}.git"
+        try:
+            repo_url = load_bootloader_url(self.root / REMOTES_FILE, info.project)
+        except ValueError as e:
+            print(f"[barebox] ERROR: {e}", file=sys.stderr)
+            return 1
 
         print(f"[barebox] Preparing {info.project} for {sysimage}")
         print(f"[barebox] Ref:      {info.tag}")
@@ -143,6 +149,18 @@ class BareboxManager:
                 ["git", "-C", str(checkout_dir), "rev-parse", "HEAD"],
                 capture_output=True, text=True, check=True,
             ).stdout.strip()
+
+            origin = subprocess.run(
+                ["git", "-C", str(checkout_dir), "remote", "get-url", "origin"],
+                capture_output=True, text=True,
+            ).stdout.strip()
+            if origin != repo_url:
+                print(f"[barebox] Setting origin to {repo_url} (was {origin or 'unset'})")
+                subprocess.run(
+                    ["git", "-C", str(checkout_dir), "remote",
+                     "set-url" if origin else "add", "origin", repo_url],
+                    check=True,
+                )
 
             expected = self._resolve_ref(checkout_dir, info.tag)
             if expected is None:
