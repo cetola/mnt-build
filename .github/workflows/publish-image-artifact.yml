@@ -86,62 +86,23 @@ jobs:
             exit 1
           fi
 
-          unzip -o "${publish_zips[0]}" -d artifact-dist
+          name="$(basename "${publish_zips[0]}" .zip)"
+          unzip -o "${publish_zips[0]}" -d "artifact-dist/$name"
           find artifact-dist -maxdepth 2 -type f -ls
 
-      - name: Apply label to filenames
-        if: ${{ github.event.inputs.label != '' }}
-        env:
-          LABEL: ${{ github.event.inputs.label }}
-        run: |
-          set -euo pipefail
-          cd artifact-dist
-
-          # Rename image and bmap, then regenerate SHA to match new filename.
-          for img_zst in *.img.zst; do
-            [[ -f "$img_zst" ]] || continue
-            base="${img_zst%.img.zst}"
-            labeled="${base}-${LABEL}.img.zst"
-
-            mv -v "$img_zst" "$labeled"
-
-            bmap="${base}.img.bmap"
-            if [[ -f "$bmap" ]]; then
-              mv -v "$bmap" "${base}-${LABEL}.img.bmap"
-            fi
-
-            old_sha="${img_zst}.sha256"
-            if [[ -f "$old_sha" ]]; then
-              rm "$old_sha"
-            fi
-            sha256sum "$labeled" > "${labeled}.sha256"
-            echo "SHA256 regenerated for $labeled:"
-            cat "${labeled}.sha256"
-          done
-
-          echo "Files after label applied:"
-          ls -lh
-
-      - name: Verify downloaded release files
+      - name: Prepare release files
         id: collect_release_files
+        env:
+          LABEL: ${{ inputs.label }}
         run: |
           set -euo pipefail
-          mapfile -t files < <(find artifact-dist -type f ! -name '*.log' | sort)
-          if [[ ${#files[@]} -eq 0 ]]; then
-            echo "Extracted artifact has no publishable non-log files." >&2
-            exit 1
-          fi
-
-          mapfile -t excluded_logs < <(find artifact-dist -type f -name '*.log' | sort)
-          if [[ ${#excluded_logs[@]} -gt 0 ]]; then
-            printf 'Excluded log files:\n%s\n' "${excluded_logs[@]}"
-          fi
-
-          printf 'files<<EOF\n' >> "$GITHUB_OUTPUT"
-          printf '%s\n' "${files[@]}" >> "$GITHUB_OUTPUT"
-          printf 'EOF\n' >> "$GITHUB_OUTPUT"
-
-          printf 'Files to publish:\n%s\n' "${files[@]}"
+          files="$(bash scripts/prepare-release-assets.sh artifact-dist release "$LABEL")"
+          {
+            echo "files<<EOF"
+            echo "$files"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          ls -lh release
 
       - name: Upload image files to tagged release
         uses: softprops/action-gh-release@v3

@@ -1,0 +1,167 @@
+name: Release Images aarch64
+
+# Builds several images with local-image-gen-aarch64.yml and publishes them
+# all to one release. Run it on the mnt-build tag the images should use.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release Tag (must already exist)
+        required: true
+        type: string
+      images:
+        description: Images as sysimage[:bootloader[:uboot_sha]], separated by spaces or commas. Bootloader defaults to uboot-prebuilt.
+        required: true
+        type: string
+        default: pocket-reform-system-a311d pocket-reform-system-imx8mp pocket-reform-system-rk3588s pocket-reform-system-rk3588 reform-next-system-rk3588
+      zero_fill_max_mb:
+        description: Max MiB for bounded zero-fill before final trim
+        required: true
+        default: "2048"
+        type: string
+      label:
+        description: Optional label appended to published filenames (e.g. "beta")
+        required: false
+        type: string
+        default: ''
+      publish:
+        description: Publish to the release (off builds the images only)
+        required: true
+        type: boolean
+        default: true
+
+concurrency:
+  group: release-images-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Validate inputs and build the image matrix
+        id: plan
+        env:
+          IMAGES: ${{ inputs.images }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          PUBLISH: ${{ inputs.publish }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          source scripts/sysimage-config.sh
+
+          contains() { local x="$1"; shift; local e; for e in "$@"; do [[ "$e" == "$x" ]] && return 0; done; return 1; }
+
+          entries=()
+          seen=()
+          errors=0
+          for spec in ${IMAGES//,/ }; do
+            IFS=: read -r sysimage bootloader uboot_sha extra <<< "$spec"
+            bootloader="${bootloader:-uboot-prebuilt}"
+            if [[ -n "${extra:-}" ]]; then
+              echo "::error::$spec: too many ':' fields"; errors=1; continue
+            fi
+            if ! contains "$sysimage" "${SUPPORTED_SYSIMAGES[@]}"; then
+              echo "::error::$sysimage: unknown sysimage (supported: ${SUPPORTED_SYSIMAGES[*]})"; errors=1; continue
+            fi
+            if contains "$sysimage" "${seen[@]}"; then
+              echo "::error::$sysimage is listed twice. Both images would get the same file name."; errors=1; continue
+            fi
+            case "$bootloader" in
+              uboot-prebuilt|uboot-source) ;;
+              barebox-source)
+                if ! contains "$sysimage" "${BAREBOX_SUPPORTED_SYSIMAGES[@]}"; then
+                  echo "::error::$sysimage: barebox-source only works for ${BAREBOX_SUPPORTED_SYSIMAGES[*]}"; errors=1; continue
+                fi ;;
+              *) echo "::error::$spec: unknown bootloader $bootloader"; errors=1; continue ;;
+            esac
+            if [[ -n "${uboot_sha:-}" && "$bootloader" != uboot-source ]]; then
+              echo "::error::$spec: a U-Boot SHA only applies to uboot-source"; errors=1; continue
+            fi
+            seen+=("$sysimage")
+            entries+=("$(jq -cn --arg s "$sysimage" --arg b "$bootloader" --arg u "${uboot_sha:-}" \
+              '{sysimage: $s, bootloader: $b, uboot_sha: $u}')")
+          done
+
+          if [[ ${#entries[@]} -eq 0 && $errors -eq 0 ]]; then
+            echo "::error::No images given"; errors=1
+          fi
+
+          if [[ "$PUBLISH" == true ]] && ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null; then
+            echo "::error::Release $RELEASE_TAG does not exist in $GITHUB_REPOSITORY"; errors=1
+          fi
+
+          [[ $errors -eq 0 ]] || exit 1
+
+          matrix="$(printf '%s\n' "${entries[@]}" | jq -cs '{include: .}')"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Images"
+            echo ""
+            echo "| Sysimage | Bootloader | U-Boot SHA |"
+            echo "|---|---|---|"
+            jq -r '.include[] | "| \(.sysimage) | \(.bootloader) | \(.uboot_sha) |"' <<< "$matrix"
+            echo ""
+            echo "Release: \`$RELEASE_TAG\` (publish: $PUBLISH)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    name: build (${{ matrix.sysimage }})
+    uses: ./.github/workflows/local-image-gen-aarch64.yml
+    with:
+      sysimage: ${{ matrix.sysimage }}
+      bootloader: ${{ matrix.bootloader }}
+      uboot_sha: ${{ matrix.uboot_sha }}
+      zero_fill_max_mb: ${{ inputs.zero_fill_max_mb }}
+
+  publish:
+    needs: build
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Download image artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: mnt-reform-image-*
+          path: artifacts
+
+      - name: Prepare release files
+        id: prepare
+        env:
+          LABEL: ${{ inputs.label }}
+        run: |
+          set -euo pipefail
+          files="$(bash scripts/prepare-release-assets.sh artifacts release "$LABEL")"
+          {
+            echo "files<<EOF"
+            echo "$files"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          ls -lh release
+
+      - name: Upload image files to release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          files: ${{ steps.prepare.outputs.files }}
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
