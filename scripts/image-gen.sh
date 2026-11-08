@@ -10,8 +10,10 @@ readonly MAX_BOOTLOADER_MB=16
 readonly PARTITION_WAIT_MAX_ATTEMPTS=20
 readonly PARTITION_WAIT_INTERVAL=0.2
 
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly WORK_DIR="$(pwd)/image-gen"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+WORK_DIR="$(pwd)/image-gen"
+readonly WORK_DIR
 readonly DOWNLOADS_DIR="$WORK_DIR/downloads"
 readonly MOUNT_DIR="$WORK_DIR/mnt"
 readonly BOOT_MNT="$MOUNT_DIR/boot"
@@ -24,7 +26,8 @@ readonly KERNEL_EXTLINUX_FALLBACK="$SCRIPT_DIR/linux-mnt-reform-bin/extlinux.con
 
 readonly ARCH_URL="http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz"
 
-readonly TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+readonly TIMESTAMP
 IMAGE="$DOWNLOADS_DIR/arch-sys-mnt-image.img"
 LOGFILE="$DOWNLOADS_DIR/image-gen-${TIMESTAMP}.log"
 

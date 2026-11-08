@@ -111,7 +111,7 @@ class UBootManager:
         print(f"[uboot] Checkout: {checkout_dir}")
 
         if checkout_dir.is_dir():
-            print(f"[uboot] Checkout already exists — skipping clone.")
+            print("[uboot] Checkout already exists — skipping clone.")
             print(f"[uboot] To start fresh: mnt-build uboot --sysimage {sysimage} --clean")
             return 0
 
@@ -206,6 +206,7 @@ class UBootManager:
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, bufsize=1,
         )
+        assert proc.stdout is not None
         for line in proc.stdout:
             sys.stdout.write(line)
             sys.stdout.flush()
@@ -214,13 +215,13 @@ class UBootManager:
         return proc.returncode
 
     def build(self, sysimage: str, cross_compile: str = "aarch64-linux-gnu-") -> int:
-        print(f"[uboot] Checking build prerequisites ...", flush=True)
+        print("[uboot] Checking build prerequisites ...", flush=True)
         missing = self._check_build_prerequisites(cross_compile)
         if missing:
-            print(f"[uboot] Missing required packages:", file=sys.stderr)
+            print("[uboot] Missing required packages:", file=sys.stderr)
             for pkg, desc in missing:
                 print(f"  {pkg:<30}  # {desc}", file=sys.stderr)
-            print(f"[uboot] Install with:", file=sys.stderr)
+            print("[uboot] Install with:", file=sys.stderr)
             print(f"  sudo apt install {' '.join(pkg for pkg, _ in missing)}", file=sys.stderr)
             return 1
 
@@ -229,7 +230,7 @@ class UBootManager:
         checkout_dir = self._uboot_root / info.project
 
         if not checkout_dir.is_dir():
-            print(f"[uboot] No checkout found — running prepare first ...")
+            print("[uboot] No checkout found — running prepare first ...")
             rc = self.prepare(sysimage)
             if rc != 0:
                 return rc
@@ -251,10 +252,10 @@ class UBootManager:
         build_script = checkout_dir / "build.sh"
         with open(log_path, "w") as log_fh:
             if build_script.is_file():
-                print(f"[uboot] Running build.sh ...")
+                print("[uboot] Running build.sh ...")
                 rc = self._run_logged(["bash", "./build.sh"], str(checkout_dir), build_env, log_fh)
             else:
-                print(f"[uboot] Running make ...")
+                print("[uboot] Running make ...")
                 rc = self._run_logged(
                     ["make", f"-j{jobs}", f"CROSS_COMPILE={cross_compile}"],
                     str(checkout_dir), build_env, log_fh,
@@ -361,7 +362,7 @@ class UBootManager:
         built_artifact = downloads_dir / info.filename
 
         if not built_artifact.is_file():
-            print(f"[uboot] No built artifact found — building first ...")
+            print("[uboot] No built artifact found — building first ...")
             rc = self.build(sysimage, cross_compile)
             if rc != 0:
                 return rc
@@ -401,7 +402,7 @@ class UBootManager:
                 f"https://source.mnt.re/reform/{info.project}"
                 f"/-/jobs/artifacts/{info.tag}/raw/{info.filename}?job=build"
             )
-            print(f"Downloading prebuilt artifact ...")
+            print("Downloading prebuilt artifact ...")
             print(f"  {url}")
             result = subprocess.run(
                 ["curl", "-fL", "--retry", "3", "--retry-delay", "2",
@@ -428,11 +429,11 @@ class UBootManager:
         print("Binary compare: differ")
         cmp_bin = shutil.which("cmp")
         if cmp_bin:
-            result = subprocess.run(
+            cmp_result = subprocess.run(
                 [cmp_bin, "-l", str(built_artifact), str(prebuilt_artifact)],
                 capture_output=True, text=True,
             )
-            lines = result.stdout.splitlines()
+            lines = cmp_result.stdout.splitlines()
             if lines:
                 first_byte = int(lines[0].split()[0])
                 print(f"First differing byte (1-based): {first_byte}")
@@ -488,7 +489,7 @@ class UBootManager:
         """Shallow-clone the u-boot sub-repo using the URL and SHA from build.sh."""
         params = self._parse_uboot_subdir_params(checkout_dir)
         if params is None:
-            print(f"[uboot] Could not find u-boot clone parameters in build.sh")
+            print("[uboot] Could not find u-boot clone parameters in build.sh")
             return 1
 
         url, sha = params
@@ -520,12 +521,12 @@ class UBootManager:
             return 0
 
         if not uboot_dir.is_dir():
-            print(f"[uboot] u-boot/ sub-repo not present — nothing to reset.")
+            print("[uboot] u-boot/ sub-repo not present — nothing to reset.")
             return 0
 
         params = self._parse_uboot_subdir_params(checkout_dir)
         if params is None:
-            print(f"[uboot] Could not read expected SHA from build.sh")
+            print("[uboot] Could not read expected SHA from build.sh")
             return 1
 
         _, sha = params
@@ -537,7 +538,7 @@ class UBootManager:
             result = subprocess.run(cmd)
             if result.returncode != 0:
                 return result.returncode
-        print(f"[uboot] Done.")
+        print("[uboot] Done.")
         return 0
 
     def menuconfig(self, sysimage: str, cross_compile: str = "aarch64-linux-gnu-") -> int:
@@ -552,7 +553,7 @@ class UBootManager:
         uboot_dir = checkout_dir / "u-boot"
 
         if not checkout_dir.is_dir():
-            print(f"[uboot] No checkout found — running prepare first ...")
+            print("[uboot] No checkout found — running prepare first ...")
             rc = self.prepare(sysimage)
             if rc != 0:
                 return rc
@@ -563,7 +564,7 @@ class UBootManager:
                 return rc
 
         if not (uboot_dir / ".config").is_file():
-            print(f"[uboot] No .config found — loading defconfig ...")
+            print("[uboot] No .config found — loading defconfig ...")
             defconfig = self._find_defconfig(checkout_dir, info.filename)
             if defconfig is None:
                 print(f"[uboot] Could not find a matching defconfig in uboot/{info.project}/")
@@ -599,7 +600,7 @@ class UBootManager:
 
         print(f"[uboot] Removing uboot/{info.project}/ ...")
         shutil.rmtree(checkout_dir)
-        print(f"[uboot] Done.")
+        print("[uboot] Done.")
         return 0
 
     def list_sysimages(self) -> list[SysimageUBootInfo]:

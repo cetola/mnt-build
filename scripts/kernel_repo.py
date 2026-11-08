@@ -364,8 +364,8 @@ class KernelRepo:
         found = []
         for name in names:
             parsed = parse_kernel_tag(name)
-            key = parsed and version_key(parsed[0])
-            if key and key[:2] == series:
+            key = version_key(parsed[0]) if parsed else None
+            if parsed and key and key[:2] == series:
                 found.append((key, parsed[1], name))
         found.sort(key=lambda t: (t[0], t[1]), reverse=True)
         return found
@@ -512,7 +512,7 @@ class KernelRepo:
 
         def where(name: str) -> str:
             places = ["local"] if name in local_tags else []
-            if origin_tags and name in origin_tags:
+            if origin and origin_tags and name in origin_tags:
                 places.append(origin)
             return ', '.join(places)
 
@@ -571,11 +571,11 @@ class KernelRepo:
         if tag not in local_tags:
             self.logger.info(f"Fetch {tag} to compare it with MNT's: mnt-build dev-kernel fetch")
             return
-        base = self._tag_trailer(tag, MNT_BASE_TRAILER)
-        if base == newest:
+        recorded = self._tag_trailer(tag, MNT_BASE_TRAILER)
+        if recorded == newest:
             self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} {tag} carries it")
         else:
-            for line in self._mnt_advice(tag, base, newest, latest, next_rev).splitlines():
+            for line in self._mnt_advice(tag, recorded, newest, latest, next_rev).splitlines():
                 self.logger.info(f"{Colors.YELLOW}{line}{Colors.RESET}" if not line.startswith(' ') else line)
 
     def _ensure_stable_tag(self, tag: str):
@@ -635,8 +635,9 @@ class KernelRepo:
         self.require_clean()
 
         tagged = self._tags_for_version(version)
-        if tagged and parse_kernel_tag(tagged[0])[1] >= self.config.localversion_rev:
-            rev = parse_kernel_tag(tagged[0])[1]
+        newest_tag = parse_kernel_tag(tagged[0]) if tagged else None
+        if newest_tag and newest_tag[1] >= self.config.localversion_rev:
+            rev = newest_tag[1]
             raise BuildError(
                 f"v{version} is already tagged ({', '.join(tagged)}). Nothing to rebase. "
                 f"Build it with: mnt-build build{kversion_flag(version, rev)}\n"
@@ -715,6 +716,7 @@ class KernelRepo:
 
         source_sha = self._ref_sha(source)
         mnt = self._resolve_kernel_remote(MNT_KERNEL_REMOTE)
+        mnt_base: Optional[tuple]
         if mnt and source.startswith(f'{mnt}/'):
             mnt_base = (source[len(mnt) + 1:], source_sha)
         elif self._ref_exists(f'refs/tags/{source.removeprefix("refs/tags/")}'):
@@ -1023,8 +1025,9 @@ class KernelRepo:
             f"No tag {self.config.tag} locally or on {origin}. "
             "mnt-build builds tagged kernels only.\n"
         )
-        if others:
-            rev = parse_kernel_tag(others[0])[1]
+        newest_other = parse_kernel_tag(others[0]) if others else None
+        if newest_other:
+            rev = newest_other[1]
             message += (
                 f"Tags for v{version}: {', '.join(others)}. Build the newest with:\n"
                 f"  mnt-build build{kversion_flag(version, rev)}\n"

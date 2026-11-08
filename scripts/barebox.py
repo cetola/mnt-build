@@ -204,7 +204,6 @@ class BareboxManager:
 
     def _check_build_prerequisites(self) -> list[tuple[str, str]]:
         """Return list of (apt_package, description) for missing prerequisites."""
-        import importlib.util
         missing = []
         for kind, name, pkg, desc in self._BUILD_PREREQS:
             if kind == "tool":
@@ -233,6 +232,7 @@ class BareboxManager:
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, bufsize=1,
         )
+        assert proc.stdout is not None
         for line in proc.stdout:
             sys.stdout.write(line)
             sys.stdout.flush()
@@ -267,13 +267,13 @@ class BareboxManager:
         )
 
     def build(self, sysimage: str) -> int:
-        print(f"[barebox] Checking build prerequisites ...", flush=True)
+        print("[barebox] Checking build prerequisites ...", flush=True)
         missing = self._check_build_prerequisites()
         if missing:
-            print(f"[barebox] Missing required packages:", file=sys.stderr)
+            print("[barebox] Missing required packages:", file=sys.stderr)
             for pkg, desc in missing:
                 print(f"  {pkg:<30}  # {desc}", file=sys.stderr)
-            print(f"[barebox] Install with:", file=sys.stderr)
+            print("[barebox] Install with:", file=sys.stderr)
             print(f"  sudo apt install {' '.join(pkg for pkg, _ in missing)}",
                   file=sys.stderr)
             return 1
@@ -302,7 +302,7 @@ class BareboxManager:
         build_env = {**os.environ, "MAKEFLAGS": f"-j{jobs}"}
 
         print(f"[barebox] Building {info.project} ...")
-        print(f"[barebox] Running build.sh (CROSS_COMPILE set internally by build.sh)")
+        print("[barebox] Running build.sh (CROSS_COMPILE set internally by build.sh)")
 
         with open(log_path, "w") as log_fh:
             rc = self._run_logged(
@@ -387,7 +387,7 @@ class BareboxManager:
                 f"  dd if={rel_artifact} of=/dev/<device> bs=512 {dd_args}",
                 "  (replace <device> with your SD card, e.g. mmcblk1 or sda)",
                 "",
-                f"To test from SD before flashing eMMC, erase eMMC bootloader first:",
+                "To test from SD before flashing eMMC, erase eMMC bootloader first:",
                 f"  dd if=/dev/zero bs=512 seek={seek_blocks} of=/dev/mmcblk0 count=2",
             ]
 
@@ -412,7 +412,7 @@ class BareboxManager:
         built_artifacts = list(downloads_dir.glob("barebox-*.img")) if downloads_dir.is_dir() else []
 
         if not built_artifacts:
-            print(f"[barebox] No built artifact found — building first ...")
+            print("[barebox] No built artifact found — building first ...")
             rc = self.build(sysimage)
             if rc != 0:
                 return rc
@@ -451,7 +451,7 @@ class BareboxManager:
         if prebuilt_artifact.is_file():
             print(f"Using cached prebuilt artifact: {prebuilt_artifact}")
         else:
-            print(f"Downloading prebuilt artifact ...")
+            print("Downloading prebuilt artifact ...")
             print(f"  {url}")
             result = subprocess.run(
                 ["curl", "-fL", "--retry", "3", "--retry-delay", "2",
@@ -476,11 +476,11 @@ class BareboxManager:
         print("Binary compare: differ")
         cmp_bin = shutil.which("cmp")
         if cmp_bin:
-            result = subprocess.run(
+            cmp_result = subprocess.run(
                 [cmp_bin, "-l", str(built_artifact), str(prebuilt_artifact)],
                 capture_output=True, text=True,
             )
-            lines = result.stdout.splitlines()
+            lines = cmp_result.stdout.splitlines()
             if lines:
                 first_byte = int(lines[0].split()[0])
                 print(f"First differing byte (1-based): {first_byte}")
@@ -507,10 +507,10 @@ class BareboxManager:
         if not (checkout_dir / ".config").is_file():
             defconfig = checkout_dir / "mnt-reform-defconfig"
             if not defconfig.is_file():
-                print(f"[barebox] mnt-reform-defconfig not found in checkout",
+                print("[barebox] mnt-reform-defconfig not found in checkout",
                       file=sys.stderr)
                 return 1
-            print(f"[barebox] No .config found — copying mnt-reform-defconfig ...")
+            print("[barebox] No .config found — copying mnt-reform-defconfig ...")
             shutil.copy2(defconfig, checkout_dir / ".config")
 
         print(f"[barebox] Running menuconfig for {info.project} ...")
@@ -531,12 +531,12 @@ class BareboxManager:
         checkout_dir = self._barebox_root
 
         if not checkout_dir.is_dir():
-            print(f"[barebox] No checkout found at barebox/ — nothing to clean.")
+            print("[barebox] No checkout found at barebox/ — nothing to clean.")
             return 0
 
-        print(f"[barebox] Removing barebox/ ...")
+        print("[barebox] Removing barebox/ ...")
         shutil.rmtree(checkout_dir)
-        print(f"[barebox] Done.")
+        print("[barebox] Done.")
         return 0
 
     @staticmethod

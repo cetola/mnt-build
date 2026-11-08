@@ -7,8 +7,10 @@ set -euo pipefail
 
 : "${SCRIPT_DIR:=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 readonly FSBL_SCRIPT_PATH="${BASH_SOURCE[0]}"
-readonly FSBL_SCRIPT_DIR="$(cd "$(dirname "$FSBL_SCRIPT_PATH")" && pwd)"
-readonly FSBL_TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+FSBL_SCRIPT_DIR="$(cd "$(dirname "$FSBL_SCRIPT_PATH")" && pwd)"
+readonly FSBL_SCRIPT_DIR
+FSBL_TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+readonly FSBL_TIMESTAMP
 
 # shellcheck source=/dev/null
 source "$FSBL_SCRIPT_DIR/common.sh"
