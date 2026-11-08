@@ -20,6 +20,7 @@ from config import (
     DEFAULT_KERNEL_ONLY,
     DEFAULT_KERNEL_VERSION,
     DEFAULT_LOCALVERSION_REV,
+    is_rc_version,
 )
 from errors import BuildError
 from logging_setup import Colors, log_phase, setup_logging
@@ -57,6 +58,9 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         localversion_rev=localversion_rev,
         kernel=kernel,
     )
+    # An rc has new symbols every time, so its config is always regenerated.
+    rc_build = is_rc_version(version)
+    run_olddefconfig = run_olddefconfig or rc_build
 
     config.build_dir.mkdir(parents=True, exist_ok=True)
     logger = setup_logging(config.log_file)
@@ -75,6 +79,8 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         logger.info("=" * 60)
         logger.info("Starting kernel build process")
         logger.info(f"Version: {config.version}")
+        if rc_build:
+            logger.info("Release candidate: the kernel config is regenerated with olddefconfig")
         logger.info(f"Build version: {config.build_version}")
         logger.info(f"Kernel release: {config.kernel_release}")
         logger.info(f"Kernel localversion: {config.localversion}")
@@ -480,7 +486,9 @@ def build_parser() -> argparse.ArgumentParser:
         '--kversion',
         dest='kernel_version',
         default=DEFAULT_KERNEL_VERSION,
-        help=f'Kernel version to build (default: {DEFAULT_KERNEL_VERSION})'
+        help=f'Kernel version to build (default: {DEFAULT_KERNEL_VERSION}). '
+             'A release candidate is written 7.4-rc1 and always regenerates its config '
+             'with olddefconfig.'
     )
     build_parser.add_argument(
         '--build-dir',
@@ -610,7 +618,8 @@ def build_parser() -> argparse.ArgumentParser:
              'one marked is-origin is added as "origin". '
              'fetch: fetch the latest from every remote in the checkout, and the tags from origin. '
              'rebase: create local branch mnt-v{kversion} by rebasing the newest '
-             'kernel tag (or mnt-v branch) of the same series onto stable tag v{kversion}. '
+             'kernel tag (or mnt-v branch) of the same series onto stable tag v{kversion}, or for an -rc ({kversion} like 7.4-rc1) onto the '
+             'mainline tag, from the previous rc tag or the newest tag of the previous series. '
              'Stops if MNT has a branch the newest tag does not carry, unless --from is given. '
              'Works from what is already fetched, pushes nothing, and leaves the rebase '
              'in progress on a conflict. '

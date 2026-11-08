@@ -16,6 +16,7 @@ DEFAULT_KERNEL_DIR = "mnt-linux"
 REMOTES_FILE = "remotes.json"
 MNT_KERNEL_REMOTE = "mnt"
 STABLE_KERNEL_REMOTE = "stable"
+MAINLINE_KERNEL_REMOTE = "mainline"
 MNT_BASE_TRAILER = "MNT-Base"
 REBASED_FROM_TRAILER = "Rebased-From"
 
@@ -121,6 +122,32 @@ def version_key(version: str) -> Optional[tuple]:
     if len(parts) not in (2, 3) or not all(part.isdigit() for part in parts):
         return None
     return tuple(int(part) for part in parts)
+
+
+_KERNEL_VERSION_RE = re.compile(r'^(\d+)\.(\d+)(?:\.(\d+))?(?:-rc(\d+))?$')
+
+
+def parse_kernel_version(version: str) -> Optional[tuple]:
+    """(major, minor, patch, rc) of 7.4, 7.3.3 or 7.4-rc1. rc is None for a release."""
+    match = _KERNEL_VERSION_RE.match(version)
+    if not match:
+        return None
+    major, minor, patch, rc = match.groups()
+    return int(major), int(minor), int(patch or 0), int(rc) if rc else None
+
+
+def is_rc_version(version: str) -> bool:
+    """True for a mainline release candidate like 7.4-rc1, not a stable one like 7.3.4-rc1."""
+    return re.match(r'^\d+\.\d+-rc\d+$', version) is not None
+
+
+def version_sort_key(version: str) -> Optional[tuple]:
+    """Sort key where 7.4-rc1 < 7.4-rc2 < 7.4 < 7.4.1."""
+    parsed = parse_kernel_version(version)
+    if parsed is None:
+        return None
+    major, minor, patch, rc = parsed
+    return major, minor, patch, rc is None, rc or 0
 
 
 def kernel_tag_name(version: str, localversion_rev: int) -> str:
@@ -234,15 +261,17 @@ class BuildConfig:
         linux_dir = build_dir / kernel
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         localversion = f"-{DEFAULT_LOCALVERSION_NAME}{localversion_rev}"
-        kernel_release = f"{version}{localversion}"
+        parsed = parse_kernel_version(version)
+        # An rc reports itself as 7.4.0-rc1.
+        release_base = f"{parsed[0]}.{parsed[1]}.{parsed[2]}-rc{parsed[3]}" if parsed and parsed[3] else version
+        kernel_release = f"{release_base}{localversion}"
         build_version = f"{version}.{DEFAULT_LOCALVERSION_NAME}{localversion_rev}"
         log_build_version = (
             f"{version}_{log_arch_name_for_arch(arch)}."
             f"{DEFAULT_LOCALVERSION_NAME}{localversion_rev}"
         )
 
-        version_parts = version.split('.')
-        major_minor = f"{version_parts[0]}.{version_parts[1]}"
+        major_minor = ".".join(version.split('-')[0].split('.')[:2])
 
         dtb_files = []
         xtra_dtbs_dir = build_dir / "xtra-dtbs"

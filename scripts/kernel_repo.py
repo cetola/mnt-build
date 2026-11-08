@@ -8,9 +8,10 @@ from typing import List, Optional, Sequence
 
 from config import (
     BuildConfig, DEFAULT_KERNEL_VERSION, DEFAULT_LOCALVERSION_NAME,
-    DEFAULT_LOCALVERSION_REV, MNT_BASE_TRAILER, MNT_KERNEL_REMOTE,
-    REBASED_FROM_TRAILER, REMOTES_FILE, STABLE_KERNEL_REMOTE,
-    load_kernel_remotes, normalize_git_url, parse_kernel_tag, version_key,
+    DEFAULT_LOCALVERSION_REV, MAINLINE_KERNEL_REMOTE, MNT_BASE_TRAILER,
+    MNT_KERNEL_REMOTE, REBASED_FROM_TRAILER, REMOTES_FILE, STABLE_KERNEL_REMOTE,
+    is_rc_version, load_kernel_remotes, normalize_git_url, parse_kernel_tag,
+    parse_kernel_version, version_key, version_sort_key,
 )
 from errors import BuildError
 from logging_setup import Colors, Spinner
@@ -234,9 +235,13 @@ class KernelRepo:
         failed = []
         for name in existing:
             self.logger.info(f"Fetching '{name}'...")
-            tags = ['--tags'] if name == origin else []
+            if name == self._resolve_kernel_remote(MAINLINE_KERNEL_REMOTE):
+                # Linus's tags carry the -rc releases. His branches are not needed.
+                cmd = ['git', 'fetch', '--no-progress', '--no-tags', name, '+refs/tags/v*:refs/tags/v*']
+            else:
+                cmd = ['git', 'fetch', '--no-progress', *(['--tags'] if name == origin else []), name]
             result = self.run_command(
-                ['git', 'fetch', '--no-progress', *tags, name],
+                cmd,
                 cwd=linux_dir, check=False, stream_output=True
             )
             if result.returncode != 0:
@@ -485,9 +490,114 @@ class KernelRepo:
         versions = [(key, t[1:]) for t in tags if (key := version_key(t[1:])) is not None]
         return max(versions)[1] if versions else None
 
+    def _rc_tags(self, series: str) -> List[tuple]:
+        """(rc number, rev, name) of the local mnt-v rc tags of a series, newest first."""
+        names = self.run_command(
+            ['git', 'for-each-ref', '--format=%(refname:short)', f'refs/tags/mnt-v{series}-rc*'],
+            cwd=self.config.linux_dir, log_cmd=False
+        ).stdout.split()
+        found = []
+        for name in names:
+            parsed = parse_kernel_tag(name)
+            version = parse_kernel_version(parsed[0]) if parsed else None
+            if parsed and version and version[3] is not None:
+                found.append((version[3], parsed[1], name))
+        return sorted(found, reverse=True)
+
+    def _rc_rebase_source(self, version: str) -> str:
+        """The tag an -rc is rebased from: the previous rc of its series, else the
+        newest release tag of an earlier series."""
+        target = parse_kernel_version(version)
+        if target is None or target[3] is None:
+            raise BuildError(f"{version} is not a release candidate like 7.4-rc1.")
+        series = f"{target[0]}.{target[1]}"
+        earlier_rcs = [t for t in self._rc_tags(series) if t[0] < target[3]]
+        if earlier_rcs:
+            return earlier_rcs[0][2]
+
+        names = self.run_command(
+            ['git', 'for-each-ref', '--format=%(refname:short)', 'refs/tags/mnt-v*'],
+            cwd=self.config.linux_dir, log_cmd=False
+        ).stdout.split()
+        found = []
+        for name in names:
+            parsed = parse_kernel_tag(name)
+            tagged = parse_kernel_version(parsed[0]) if parsed else None
+            if parsed and tagged and tagged[3] is None and tagged[:2] < target[:2]:
+                found.append((tagged[:3], parsed[1], name))
+        if not found:
+            raise BuildError(
+                f"No mnt-v tag of an earlier series than {series} is known in "
+                f"{self.config.linux_dir} to rebase from. "
+                "Run 'mnt-build dev-kernel fetch', or name one with --from."
+            )
+        return max(found)[2]
+
+    def _latest_mainline_rc(self, offline: bool, series: Optional[str] = None) -> Optional[str]:
+        """Newest -rc version (like 7.4-rc1) on the mainline remote, of one series if given."""
+        pattern = f'v{series}-rc*' if series else 'v[0-9]*-rc*'
+        mainline = self._resolve_kernel_remote(MAINLINE_KERNEL_REMOTE)
+        tags = None
+        if not offline and mainline:
+            refs = self._ls_remote(mainline, '--tags', '--refs', pattern)
+            if refs is not None:
+                tags = [ref[len('refs/tags/'):] for ref in refs]
+        if tags is None:
+            tags = self.run_command(
+                ['git', 'tag', '-l', pattern], cwd=self.config.linux_dir, log_cmd=False
+            ).stdout.split()
+        versions = [(key, t[1:]) for t in tags if is_rc_version(t[1:]) and (key := version_sort_key(t[1:])) is not None]
+        return max(versions)[1] if versions else None
+
+    def _show_rc_status(self, rc: str, offline: bool):
+        linux_dir = self.config.linux_dir
+        source = "tags fetched earlier, not checked" if offline else "mainline remote"
+        self.logger.info(f"Latest mainline rc: v{rc} ({source})")
+
+        local = set(self._tags_for_version(rc))
+        origin = self._origin_remote()
+        origin_names = None
+        if origin and not offline:
+            refs = self._ls_remote(origin, '--tags', '--refs', f'mnt-v{rc}-*')
+            if refs is None:
+                self.logger.warning(f"Could not reach {origin}. Going by the tags here.")
+            else:
+                origin_names = {ref[len('refs/tags/'):] for ref in refs}
+        tagged = self._tags_for_version(rc, local | (origin_names or set()))
+        if not tagged:
+            self.logger.info(f"{Colors.YELLOW}v{rc} is not tagged yet{Colors.RESET}")
+            self.logger.info(f"Rebase with: mnt-build dev-kernel rebase{kversion_flag(rc)}")
+            return
+        newest = tagged[0]
+        rev = (parse_kernel_tag(newest) or (rc, DEFAULT_LOCALVERSION_REV))[1]
+        self.logger.info(
+            f"{Colors.GREEN}✓{Colors.RESET} v{rc} is tagged: {newest}. "
+            f"Build with: mnt-build build{kversion_flag(rc, rev)}"
+        )
+        if origin_names is not None:
+            for name in sorted(local - origin_names):
+                self.logger.info(
+                    f"{Colors.YELLOW}{name} is not on {origin} yet.{Colors.RESET} "
+                    f"Publish it with: git -C {linux_dir} push {origin} {name}"
+                )
+
     def show_versions(self, offline: bool = False):
         series = self._series()
         linux_dir = self.config.linux_dir
+
+        if is_rc_version(self.config.version):
+            rc = self._latest_mainline_rc(offline, series)
+            if rc is None:
+                self.logger.warning(
+                    f"No v{series}-rc tags known. Run: mnt-build dev-kernel fetch"
+                )
+            else:
+                self._show_rc_status(rc, offline)
+            return
+        rc = self._latest_mainline_rc(offline)
+        rc_series = parse_kernel_version(rc) if rc else None
+        if rc and rc_series and rc_series[:2] > (version_key(series) or ())[:2]:
+            self._show_rc_status(rc, offline)
 
         latest = self._latest_stable_version(offline)
         if latest is None:
@@ -578,24 +688,28 @@ class KernelRepo:
             for line in self._mnt_advice(tag, recorded, newest, latest, next_rev).splitlines():
                 self.logger.info(f"{Colors.YELLOW}{line}{Colors.RESET}" if not line.startswith(' ') else line)
 
-    def _ensure_stable_tag(self, tag: str):
-        """Make sure a stable release tag is in the checkout, fetching it if needed."""
+    def _ensure_upstream_tag(self, tag: str):
+        """Make sure a Linus or stable release tag is in the checkout, fetching it if needed.
+
+        An -rc tag comes from the mainline remote, a release from stable.
+        """
         if self._ref_exists(f'refs/tags/{tag}'):
             return
-        stable = self._resolve_kernel_remote(STABLE_KERNEL_REMOTE)
-        if stable is None:
+        listed = MAINLINE_KERNEL_REMOTE if is_rc_version(tag[1:]) else STABLE_KERNEL_REMOTE
+        remote = self._resolve_kernel_remote(listed)
+        if remote is None:
             raise BuildError(
-                f"Tag {tag} is not in {self.config.linux_dir} and no 'stable' remote is set up "
+                f"Tag {tag} is not in {self.config.linux_dir} and no '{listed}' remote is set up "
                 "to fetch it from. Run: mnt-build dev-kernel add-remotes"
             )
-        self.logger.info(f"Fetching {tag} from '{stable}'...")
+        self.logger.info(f"Fetching {tag} from '{remote}'...")
         result = self.run_command(
-            ['git', 'fetch', '--no-progress', stable, f'refs/tags/{tag}:refs/tags/{tag}'],
+            ['git', 'fetch', '--no-progress', remote, f'refs/tags/{tag}:refs/tags/{tag}'],
             cwd=self.config.linux_dir, check=False
         )
         if result.returncode != 0:
             raise BuildError(
-                f"Could not fetch tag {tag} from '{stable}'. Has it been released? "
+                f"Could not fetch tag {tag} from '{remote}'. Has it been released? "
                 f"git said:\n{result.stderr.strip()}"
             )
 
@@ -662,7 +776,9 @@ class KernelRepo:
                 unabsorbed = self._mnt_advice(
                     tags[0][2], base, newest_mnt, version, self.config.localversion_rev)
 
-        if source is None:
+        if source is None and is_rc_version(version):
+            source = self._rc_rebase_source(version)
+        elif source is None:
             target = version_key(version)
             if target is None:
                 raise BuildError(f"{version} is not a release. Name the stack to rebase with --from.")
@@ -674,25 +790,30 @@ class KernelRepo:
                 ((key, 1, rank), ref)
                 for rank, (key, ref) in enumerate(self._mnt_linux_branches(remotes)) if key < target
             ]
-            if not candidates:
-                raise BuildError(
-                    f"No mnt-v{self._series()}.x tag or branch older than {version} is known in "
-                    f"{linux_dir} to rebase from. "
-                    "Run 'mnt-build dev-kernel fetch', or name one with --from."
-                )
-            candidates.sort(key=lambda c: (tuple(-n for n in c[0][0]), c[0][1], c[0][2]))
-            source = candidates[0][1]
+            if candidates:
+                candidates.sort(key=lambda c: (tuple(-n for n in c[0][0]), c[0][1], c[0][2]))
+                source = candidates[0][1]
+            else:
+                # The first release of a series that had release candidates.
+                rc_tags = self._rc_tags(self._series())
+                if not rc_tags:
+                    raise BuildError(
+                        f"No mnt-v{self._series()}.x tag or branch older than {version} is known in "
+                        f"{linux_dir} to rebase from. "
+                        "Run 'mnt-build dev-kernel fetch', or name one with --from."
+                    )
+                source = rc_tags[0][2]
         elif not self._ref_exists(source):
             raise BuildError(f"--from {source}: no such tag, branch or commit in {linux_dir}")
         elif unabsorbed:
             self.logger.warning(unabsorbed.splitlines()[0])
 
         match = re.search(
-            rf'mnt-v(\d+\.\d+(?:\.\d+)?)(?:-{DEFAULT_LOCALVERSION_NAME}\d+)?$', source
+            rf'mnt-v(\d+\.\d+(?:\.\d+)?(?:-rc\d+)?)(?:-{DEFAULT_LOCALVERSION_NAME}\d+)?$', source
         )
         if match:
             old_tag = f"v{match.group(1)}"
-            self._ensure_stable_tag(old_tag)
+            self._ensure_upstream_tag(old_tag)
         else:
             old_tag = self.run_command(
                 ['git', 'describe', '--tags', '--abbrev=0', '--match', 'v[0-9]*', source],
@@ -712,7 +833,7 @@ class KernelRepo:
                 f"mnt-build dev-kernel tag{flag}"
             )
 
-        self._ensure_stable_tag(tag)
+        self._ensure_upstream_tag(tag)
 
         source_sha = self._ref_sha(source)
         mnt = self._resolve_kernel_remote(MNT_KERNEL_REMOTE)
@@ -1060,11 +1181,8 @@ class KernelRepo:
         )
         found = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
 
-        def padded(version: str) -> Optional[tuple]:
-            key = version_key(version)
-            return key and (key + (0,))[:3]
-
-        if padded(found) != padded(self.config.version):
+        parsed = parse_kernel_version(found)
+        if parsed is None or parsed != parse_kernel_version(self.config.version):
             raise BuildError(
                 f"{self.config.linux_dir} is kernel {found or '(unknown)'}, but --kversion is "
                 f"{self.config.version}. Check out the matching commit or pass the right --kversion."
