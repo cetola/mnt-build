@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 from builder import KernelBuilder
+from kernel_repo import KernelRepo
 from config import (
     BuildConfig,
     DEFAULT_CROSS_COMPILE,
@@ -21,7 +22,7 @@ from config import (
     DEFAULT_LOCALVERSION_REV,
 )
 from errors import BuildError
-from logging_setup import Colors, setup_logging
+from logging_setup import Colors, log_phase, setup_logging
 from barebox import BareboxManager, print_barebox_table
 from uboot import UBootManager, print_sysimage_table
 
@@ -94,7 +95,7 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
 
         builder.log_phase("Preflight")
         if not skip_git_operations:
-            builder.ensure_kernel_checkout(shallow=shallow_clone)
+            builder.repo.ensure_checkout(shallow=shallow_clone)
         builder.check_prerequisites(run_olddefconfig=run_olddefconfig)
 
         if dry_run:
@@ -187,7 +188,7 @@ def run_clean(build_dir: Optional[Path] = None, kernel: str = DEFAULT_KERNEL_DIR
     config = BuildConfig.create(version=DEFAULT_KERNEL_VERSION, build_dir=build_dir, kernel=kernel)
     config.build_dir.mkdir(parents=True, exist_ok=True)
     logger = setup_logging(config.log_file)
-    builder = KernelBuilder(config, logger)
+    repo = KernelRepo(config, logger)
 
     try:
         logger.info("=" * 60)
@@ -197,10 +198,10 @@ def run_clean(build_dir: Optional[Path] = None, kernel: str = DEFAULT_KERNEL_DIR
         logger.info(f"Log file: {config.log_file}")
         logger.info("=" * 60)
 
-        builder.log_phase("Clean")
-        builder.clean_kernel_repo()
+        log_phase(logger, "Clean")
+        repo.clean()
 
-        builder.log_phase("Summary")
+        log_phase(logger, "Summary")
         logger.info("=" * 60)
         logger.info(f"{Colors.GREEN}✓ Clean completed successfully{Colors.RESET}")
         logger.info("=" * 60)
@@ -230,7 +231,7 @@ def run_dev_kernel(build_dir: Optional[Path] = None, kernel: str = DEFAULT_KERNE
     else:
         config.log_file = None
     logger = setup_logging(config.log_file)
-    builder = KernelBuilder(config, logger)
+    repo = KernelRepo(config, logger)
 
     try:
         logger.info("=" * 60)
@@ -241,26 +242,26 @@ def run_dev_kernel(build_dir: Optional[Path] = None, kernel: str = DEFAULT_KERNE
             logger.info(f"Log file: {config.log_file}")
         logger.info("=" * 60)
 
-        builder.check_origin_remote()
+        repo.check_origin_remote()
 
         if action == 'rebase':
-            builder.log_phase("Rebase")
-            builder.rebase_mnt_linux_branch(source=source)
+            log_phase(logger, "Rebase")
+            repo.rebase(source=source)
             return 0
         if action == 'tag':
-            builder.log_phase("Tag")
-            builder.tag_kernel(mnt_base=mnt_base)
+            log_phase(logger, "Tag")
+            repo.tag(mnt_base=mnt_base)
             return 0
 
-        builder.log_phase("Remotes")
+        log_phase(logger, "Remotes")
         if action == 'add-remotes':
-            builder.ensure_kernel_remotes()
+            repo.ensure_remotes()
         elif action == 'fetch':
-            builder.fetch_kernel_remotes()
+            repo.fetch_remotes()
         else:
-            builder.show_kernel_remotes(offline=offline)
-            builder.log_phase("Versions")
-            builder.show_kernel_versions(offline=offline)
+            repo.show_remotes(offline=offline)
+            log_phase(logger, "Versions")
+            repo.show_versions(offline=offline)
         return 0
     except BuildError as e:
         logger.error(f"dev-kernel failed: {e}")

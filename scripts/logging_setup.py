@@ -93,3 +93,9 @@ class Spinner:
             sys.stdout.write("\r\033[K")
             sys.stdout.flush()
         return False
+
+
+def log_phase(logger: logging.Logger, name: str):
+    logger.info("=" * 60)
+    logger.info(f"Phase: {name}")
+    logger.info("=" * 60)
