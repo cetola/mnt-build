@@ -64,7 +64,7 @@ Once the build is complete, you'll get a kernel tarball containing the kernel, c
 
 | Upstream Package | AUR | Description |
 | --- | --- | --- |
-| [Linux stable kernel](https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/) | [linux-mnt-reform](https://aur.archlinux.org/packages/linux-mnt-reform-bin) | MNT Reform patched Linux kernel and headers. |
+| [mnt-linux](https://git.sr.ht/~stephano/mnt-linux) | [linux-mnt-reform](https://aur.archlinux.org/packages/linux-mnt-reform-bin) | MNT Reform patched Linux kernel and headers. |
 | [reform-tools](https://source.mnt.re/reform/reform-tools) | [reform-tools](https://aur.archlinux.org/packages/reform-tools) | Reform userland tools and scripts. |
 | [MNT LPC module](https://source.mnt.re/reform/reform-tools) | [mnt-reform-lpc](https://aur.archlinux.org/packages/mnt-reform-lpc-dkms) | LPC system controller driver module used across Reform platforms. |
 
@@ -89,7 +89,7 @@ Once the build is complete, you'll get a kernel tarball containing the kernel, c
 
 I will currently only release images for hardware that I can test. If you are willing to test other platforms / SoMs, [create an issue](https://github.com/cetola/mnt-build/issues) and I'll produce more images.
 
-The kernel is built from the `mnt-vX.Y.Z-reformN` tag of [mnt-linux](https://git.sr.ht/~stephano/mnt-linux), which carries the MNT patch stack as commits on top of the matching stable release. As such, it should boot on any MNT Reform platform, provided you use the correct DTB and have a U-Boot setup that works for your system.
+The kernel is built from the `mnt-vX.Y.Z-reformN` tag of [mnt-linux](https://git.sr.ht/~stephano/mnt-linux), which carries the MNT patch stack. As such, it should boot on any MNT Reform platform, provided you use the correct DTB and have a U-Boot setup that works for your system.
 
 ## 🪞👢 U-Boot &amp; 🐻📦 Barebox
 
