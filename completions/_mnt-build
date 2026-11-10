@@ -22,7 +22,7 @@ _mnt_build() {
   if (( CURRENT == 2 )); then
     _arguments -s \
       $global_opts \
-      '1:subcommand:(build clean dev-kernel uboot)'
+      '1:subcommand:(build setup clean dev-kernel uboot)'
     return
   fi
 
@@ -48,6 +48,15 @@ _mnt_build() {
         '(--kernel-only --modules-only)--dtbs-only[build DTBs only (ARM64)]' \
         '(--kernel-only --dtbs-only)--modules-only[build and install in-tree modules only]' \
         '--kernel=[kernel checkout dir under build_dir (default: mnt-linux)]:kernel:'
+      ;;
+    setup)
+      _arguments -s \
+        '--help[show setup help]' \
+        '--kversion=[kernel version]:kversion:' \
+        '--build-dir=[build directory]:directory:_files -/' \
+        '--kernel=[kernel checkout dir under build_dir (default: mnt-linux)]:kernel:' \
+        '--localversion-rev=[kernel localversion revision]:rev:' \
+        '--shallow-clone[clone only the kernel tag]'
       ;;
     clean)
       _arguments -s \
@@ -80,7 +89,7 @@ _mnt_build() {
         '--reset[reset inner u-boot/ sub-repo to the SHA expected by build.sh]'
       ;;
     *)
-      _message 'subcommand' 'build clean dev-kernel uboot'
+      _message 'subcommand' 'build setup clean dev-kernel uboot'
       ;;
   esac
 }

@@ -26,6 +26,7 @@ from config import (
 from errors import BuildError
 from logging_setup import Colors, log_phase, setup_logging
 from barebox import BareboxManager, print_barebox_table
+from reform_tools import ensure_reform_tools
 from uboot import UBootManager, print_sysimage_table
 
 __version__ = "2.1.5"
@@ -221,6 +222,51 @@ def run_clean(build_dir: Optional[Path] = None, kernel: str = DEFAULT_KERNEL_DIR
         return 1
     except KeyboardInterrupt:
         logger.warning("Clean interrupted by user")
+        return 130
+    except Exception as e:
+        logger.exception(f"Unexpected error: {e}")
+        return 1
+
+
+def run_setup(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] = None,
+              localversion_rev: int = DEFAULT_LOCALVERSION_REV,
+              kernel: str = DEFAULT_KERNEL_DIR, shallow_clone: bool = False) -> int:
+    config = BuildConfig.create(version=version, build_dir=build_dir,
+                                localversion_rev=localversion_rev, kernel=kernel)
+    config.build_dir.mkdir(parents=True, exist_ok=True)
+    logger = setup_logging(config.log_file)
+    repo = KernelRepo(config, logger)
+
+    try:
+        logger.info("=" * 60)
+        logger.info("Setting up the build environment")
+        logger.info(f"Build directory: {config.build_dir}")
+        logger.info(f"Kernel directory: {config.linux_dir}")
+        logger.info(f"Kernel tag: {config.tag}")
+        logger.info(f"Log file: {config.log_file}")
+        logger.info("=" * 60)
+
+        log_phase(logger, "Kernel")
+        repo.ensure_checkout(shallow=shallow_clone)
+        repo.require_clean()
+        repo.checkout_tag()
+
+        log_phase(logger, "reform-tools")
+        sha = ensure_reform_tools(config.build_dir, logger.info)
+
+        log_phase(logger, "Summary")
+        logger.info("=" * 60)
+        logger.info(f"{Colors.GREEN}✓ Build environment ready{Colors.RESET}")
+        logger.info(f"Kernel: {config.tag}")
+        logger.info(f"reform-tools: {REFORM_TOOLS_TAG} ({sha})")
+        logger.info("=" * 60)
+        return 0
+    except BuildError as e:
+        logger.error(f"Setup failed: {e}")
+        logger.error(f"Check log file for details: {config.log_file}")
+        return 1
+    except KeyboardInterrupt:
+        logger.warning("Setup interrupted by user")
         return 130
     except Exception as e:
         logger.exception(f"Unexpected error: {e}")
@@ -589,6 +635,38 @@ def build_parser() -> argparse.ArgumentParser:
         help='Build and install in-tree kernel modules only; skip kernel image, DTBs, and tarballs.'
     )
 
+    setup_parser = subparsers.add_parser(
+        'setup',
+        help='Fetch what a build needs (the kernel tag and reform-tools) without building'
+    )
+    setup_parser.add_argument(
+        '--kversion',
+        dest='kernel_version',
+        default=DEFAULT_KERNEL_VERSION,
+        help=f'Kernel version to check out (default: {DEFAULT_KERNEL_VERSION}).'
+    )
+    setup_parser.add_argument(
+        '--build-dir',
+        type=Path,
+        help='Build directory (default: ~/mnt-build)'
+    )
+    setup_parser.add_argument(
+        '--kernel',
+        default=DEFAULT_KERNEL_DIR,
+        help=f'Kernel checkout dir under build_dir (default: {DEFAULT_KERNEL_DIR}).'
+    )
+    setup_parser.add_argument(
+        '--localversion-rev',
+        type=int,
+        default=DEFAULT_LOCALVERSION_REV,
+        help=f'Kernel localversion revision (default: {DEFAULT_LOCALVERSION_REV})'
+    )
+    setup_parser.add_argument(
+        '--shallow-clone',
+        action='store_true',
+        help='If the kernel is not cloned yet, clone only the tag. Such a clone cannot dev-kernel rebase.'
+    )
+
     clean_parser = subparsers.add_parser(
         'clean',
         help='Discard uncommitted changes and untracked files in the kernel checkout'
@@ -781,6 +859,11 @@ def main(argv: Optional[list[str]] = None) -> int:
             modules_only=args.modules_only,
             kernel=args.kernel,
         )
+
+    if args.command == 'setup':
+        return run_setup(version=args.kernel_version, build_dir=args.build_dir,
+                         localversion_rev=args.localversion_rev, kernel=args.kernel,
+                         shallow_clone=args.shallow_clone)
 
     if args.command == 'clean':
         return run_clean(build_dir=args.build_dir, kernel=args.kernel)
