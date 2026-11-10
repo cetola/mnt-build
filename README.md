@@ -1,4 +1,4 @@
-# Kernel Build for MNT Reform
+# MNT Build
 
 ## 💻 About the MNT Reform Platforms
 
@@ -8,13 +8,23 @@ The team at [MNT Research](https://mntre.com/) has done an amazing job documenti
 
 ## 🤷 What is MNT Build?
 
-MNT Build is a simple build system for the Linux kernel and associated required artifacts for the MNT Reform platforms. It focuses on a "distro-agnostic" approach, so that you can use the kernel in whatever distro you choose. It also focuses on extensibility, so that you can integrate the scripts into your workflow.
+MNT Build turns tagged MNT Reform sources into bootable systems.
 
-As we need to test that it actually works, we use Arch Linux ARM as the testing distro. That's also the filesystem we use to test the kernel modules, headers (DKMS), and the booting process (u-boot handoff).
+The MNT patch stack lives in [mnt-linux](https://git.sr.ht/~stephano/mnt-linux) as tags, one per stable release (`mnt-vX.Y.Z-reformN`). This repo pins a tag and builds it. It also builds the bootloaders (U-Boot or barebox), packages the out-of-tree modules, and assembles full disk images.
+
+It does three jobs.
+
+- **Build and package.** Kernel, DTBs, `reform2_lpc`, bootloaders and disk images for each supported board.
+- **Carry the patch stack forward.** `dev-kernel` rebases the stack onto a new stable release, tags it, and checks that MNT's own branches have not moved ahead.
+- **Stage bring-up work.** `xtra-patches/` and `xtra-dtbs/` hold changes not yet committed to `mnt-linux`. They are applied per build and removed afterwards.
+
+It stays "distro-agnostic". The tarballs work on any distro. Arch Linux ARM is the test distro. It is the filesystem we use to check modules, headers (DKMS) and the U-Boot handoff.
+
+Kernel changes belong in `mnt-linux`, not here.
 
 ## 🤹 Downloading & Booting
-Releases will contain the following artifacts:
-- MNT Reform patched Linux kernel
+Releases contain the following artifacts:
+- Linux kernel built from the MNT patch stack (`mnt-linux` tag), with its config
 - Linux headers for building out of tree modules
 - MNT's LPC module
 - QCOM's Wi-Fi module (i.MX8M Plus)
@@ -60,7 +70,20 @@ The first time you build, the config you need will probably not match the config
 
 See --help for more options.
 
-Once the build is complete, you'll get a kernel tarball containing the kernel, config, and all patches that were applied. There will be a separate module tarball for `reform2_lpc`. If you want headers, use the `--with-headers` flag and it will generate a headers tarball. You can install all of this manually or use the PKGBUILDs in [Additional Tooling](#hammer-additional-tooling).
+Once the build is complete, you'll get a kernel tarball containing the kernel, its config, and any `xtra-patches` that were applied. There will be a separate module tarball for `reform2_lpc`. If you want headers, use the `--with-headers` flag and it will generate a headers tarball. You can install all of this manually or use the PKGBUILDs in [Additional Tooling](#hammer-additional-tooling).
+
+## 🔁 Moving to a New Kernel Release
+
+The patch stack is maintained in `mnt-linux`. To carry it to a new stable release:
+
+```bash
+./mnt-build dev-kernel fetch
+./mnt-build dev-kernel rebase --kversion X.Y.Z
+./mnt-build build --skip-git-ops     # build and test the rebased branch
+./mnt-build dev-kernel tag --kversion X.Y.Z
+```
+
+Then push the tag yourself and bump `DEFAULT_KERNEL_VERSION` in `scripts/config.py`. Tags are never moved. A changed stack on a released version gets the next `-reformN`.
 
 ## 🔨 Additional Tooling
 
@@ -89,9 +112,9 @@ Once the build is complete, you'll get a kernel tarball containing the kernel, c
   - For SD-boot platforms, bootloader is also written into raw sectors at configured offsets
 - Output: `mnt-reform-image-<sysimage>.tar` which contains the image, bmap file, SHA, and manifest
 
-I will currently only release images for hardware that I can test. If you are willing to test other platforms / SoMs, [create an issue](https://github.com/cetola/mnt-build/issues) and I'll produce more images.
+The kernel comes from a `mnt-vX.Y.Z-reformN` tag of [mnt-linux](https://git.sr.ht/~stephano/mnt-linux). The stack targets every MNT Reform platform. Whether a given board boots still depends on the correct DTB and a U-Boot setup that works for it.
 
-The kernel is built from the `mnt-vX.Y.Z-reformN` tag of [mnt-linux](https://git.sr.ht/~stephano/mnt-linux), which carries the MNT patch stack. As such, it should boot on any MNT Reform platform, provided you use the correct DTB and have a U-Boot setup that works for your system.
+I only release images for hardware that I can test. If you are willing to test other platforms / SoMs, [create an issue](https://github.com/cetola/mnt-build/issues) and I'll produce more images.
 
 ## 🪞👢 U-Boot &amp; 🐻📦 Barebox
 
