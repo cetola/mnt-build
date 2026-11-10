@@ -1,8 +1,3 @@
-[submodule "qcacld2"]
-	path = qcacld2
-	url = https://source.mnt.re/reform/qcacld2.git
-	ignore = dirty
-	branch = binary-deb
 [submodule "reform-tools"]
 	path = reform-tools
 	url = https://source.mnt.re/reform/reform-tools.git

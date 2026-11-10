@@ -11,8 +11,6 @@ jobs:
     strategy:
       matrix:
         include:
-          - src: https://source.mnt.re/reform/qcacld2.git
-            dst: https://github.com/cetola/qcacld2-mirror.git
           - src: https://source.mnt.re/reform/reform-tools.git
             dst: https://github.com/cetola/reform-tools-mirror.git
           - src: https://source.mnt.re/reform/reform-debian-packages.git

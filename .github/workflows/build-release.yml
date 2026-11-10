@@ -204,7 +204,7 @@ jobs:
             cd mnt-build
             git fetch --depth 1 origin ${{ github.sha }}
             git checkout ${{ github.sha }}
-            git submodule update --init --depth 1 -- qcacld2 reform-tools
+            git submodule update --init --depth 1 -- reform-tools
           EOF
 
       - name: Build the container 
@@ -256,7 +256,6 @@ jobs:
         run: |
           mkdir -p release-artifacts
           scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/reform2_lpc-*.tar.gz release-artifacts/ || true
-          scp -i ~/.ssh/id_rsa ubuntu@${{ steps.launch-instance.outputs.public_ip }}:~/mnt-build/wlan-*.tar.gz release-artifacts/ || true
           ls -lh release-artifacts/
 
       - name: Terminate EC2 instance
@@ -280,7 +279,6 @@ jobs:
             release-artifacts/kernel-*.tar.gz
             release-artifacts/headers-*.tar.gz
             release-artifacts/reform2_lpc-*.tar.gz
-            release-artifacts/wlan-*.tar.gz
 
       - name: Create Release
         if: >
@@ -294,7 +292,6 @@ jobs:
             release-artifacts/kernel-*.tar.gz
             release-artifacts/headers-*.tar.gz
             release-artifacts/reform2_lpc-*.tar.gz
-            release-artifacts/wlan-*.tar.gz
           draft: false
           prerelease: ${{ steps.build_config.outputs.prerelease }}
         env:

@@ -60,7 +60,7 @@ The first time you build, the config you need will probably not match the config
 
 See --help for more options.
 
-Once the build is complete, you'll get a kernel tarball containing the kernel, config, and all patches that were applied. There will be separate module tarballs for `reform2_lpc` and `wlan`. If you want headers, use the `--with-headers` flag and it will generate a headers tarball. You can install all of this manually or use the PKGBUILDs in [Additional Tooling](#hammer-additional-tooling).
+Once the build is complete, you'll get a kernel tarball containing the kernel, config, and all patches that were applied. There will be a separate module tarball for `reform2_lpc`. If you want headers, use the `--with-headers` flag and it will generate a headers tarball. You can install all of this manually or use the PKGBUILDs in [Additional Tooling](#hammer-additional-tooling).
 
 ## 🔨 Additional Tooling
 
@@ -68,7 +68,6 @@ Once the build is complete, you'll get a kernel tarball containing the kernel, c
 | --- | --- | --- |
 | [Linux stable kernel](https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/) | [linux-mnt-reform](https://aur.archlinux.org/packages/linux-mnt-reform-bin) | MNT Reform patched Linux kernel and headers. |
 | [reform-tools](https://source.mnt.re/reform/reform-tools) | [reform-tools](https://aur.archlinux.org/packages/reform-tools) | Reform userland tools and scripts. |
-| [QCOM WiFi module](https://source.mnt.re/reform/qcacld2) | [mnt-reform-qcacld2](https://aur.archlinux.org/packages/mnt-reform-qcacld2-dkms) | Out-of-tree WiFi module used on i.MX8M Plus SoMs. |
 | [MNT LPC module](https://source.mnt.re/reform/reform-tools) | [mnt-reform-lpc](https://aur.archlinux.org/packages/mnt-reform-lpc-dkms) | LPC system controller driver module used across Reform platforms. |
 
 ## 💾 Images  
@@ -82,7 +81,6 @@ Once the build is complete, you'll get a kernel tarball containing the kernel, c
 - Installs:
   - ArchLinuxARM base rootfs
     - linux-mnt-reform kernel, dtb, extlinux
-    - mnt-reform-qcacld2
     - mnt-reform-lpc
     - reform-tools
     - flash.bin (copy of u-boot)

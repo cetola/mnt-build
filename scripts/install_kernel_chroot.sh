@@ -40,7 +40,7 @@ export MAKEFLAGS="-j${JOBS}"
 export CMAKE_BUILD_PARALLEL_LEVEL="${JOBS}"
 export NINJAFLAGS="-j${JOBS}"
 
-# Prefer parallel DKMS builds for long-running module compiles (e.g. qcacld).
+# Prefer parallel DKMS builds for long-running module compiles.
 mkdir -p /etc/dkms
 cat > /etc/dkms/framework.conf <<EOF
 parallel_jobs=${JOBS}
@@ -55,7 +55,7 @@ pacman_run_with_retry \
 echo "Installing essential packages..."
 pacman_run_with_retry \
   $PACMAN -S --needed --noconfirm \
-  base base-devel dracut networkmanager cpio git dkms sudo
+  base base-devel dracut networkmanager cpio git dkms sudo linux-firmware-atheros
 
 echo "Removing conflicting linux-aarch64 package if present..."
 remove_installed_packages() {
@@ -206,13 +206,12 @@ fi
 echo "Building and installing AUR package reform-tools..."
 build_and_install_aur_package "reform-tools"
 
-echo "Building and installing AUR package mnt-reform-qcacld2-dkms..."
-build_and_install_aur_package "mnt-reform-qcacld2-dkms"
+sed -i '/^blacklist ath10k_sdio$/d' /usr/lib/modprobe.d/reform.conf
 
 echo "Building and installing AUR package mnt-reform-lpc-dkms..."
 build_and_install_aur_package "mnt-reform-lpc-dkms"
 
-echo "Kernel, qcacld2, lpc, and reform-tools AUR packages installed successfully!"
+echo "Kernel, lpc, and reform-tools AUR packages installed successfully!"
 
 echo "Recording installed kernel release..."
 find /usr/lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%f\n' \

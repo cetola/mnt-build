@@ -27,7 +27,7 @@ jobs:
           submodules: false
 
       - name: Checkout submodules
-        run: git submodule update --init --depth 1 -- qcacld2 reform-tools
+        run: git submodule update --init --depth 1 -- reform-tools
 
       - name: Resolve build configuration
         id: build_config
@@ -134,13 +134,11 @@ jobs:
           HEADERS_TARBALL=$(find . -name "headers-*.tar.gz" -type f)
           KERNEL_TARBALL=$(find . -name "kernel-*.tar.gz" -type f)
           LPC_MODULE=$(find . -name "reform2_lpc-*.tar.gz" -type f)
-          WIFI_MODULE=$(find . -name "wlan-*.tar.gz" -type f)
 
           echo "Found build artifacts:"
           echo "Headers: $HEADERS_TARBALL"
           echo "Kernel: $KERNEL_TARBALL"
           echo "LPC module: $LPC_MODULE"
-          echo "WiFi module: $WIFI_MODULE"
 
           mkdir -p release-artifacts
 
@@ -156,10 +154,6 @@ jobs:
             cp "$LPC_MODULE" release-artifacts/
           fi
 
-          if [ -n "$WIFI_MODULE" ]; then
-            cp "$WIFI_MODULE" release-artifacts/
-          fi
-
           echo "Artifacts directory contents:"
           ls -lh release-artifacts/
 
@@ -172,7 +166,6 @@ jobs:
             release-artifacts/kernel-*.tar.gz
             release-artifacts/headers-*.tar.gz
             release-artifacts/reform2_lpc-*.tar.gz
-            release-artifacts/wlan-*.tar.gz
 
       - name: Create Release
         if: >
@@ -186,7 +179,6 @@ jobs:
             release-artifacts/kernel-*.tar.gz
             release-artifacts/headers-*.tar.gz
             release-artifacts/reform2_lpc-*.tar.gz
-            release-artifacts/wlan-*.tar.gz
           draft: false
           prerelease: ${{ steps.build_config.outputs.prerelease }}
         env:

@@ -225,7 +225,6 @@ class BuildConfig:
     kernel: str
     build_dir: Path
     linux_dir: Path
-    qcacld_dir: Path
     reform_tools_dir: Path
     xtra_patches_dir: Path
     xtra_dtbs_dir: Path
@@ -235,7 +234,6 @@ class BuildConfig:
     output_tar: Path
     output_headers_tar: Path
     output_lpc_module_tar: Path
-    output_wifi_module_tar: Path
     log_file: Path
     log_build_version: str
     timestamp: str
@@ -299,7 +297,6 @@ class BuildConfig:
             kernel=kernel,
             build_dir=build_dir,
             linux_dir=linux_dir,
-            qcacld_dir=build_dir / "qcacld2",
             reform_tools_dir=build_dir / "reform-tools",
             xtra_patches_dir=build_dir / "xtra-patches" / major_minor,
             xtra_dtbs_dir=xtra_dtbs_dir,
@@ -309,7 +306,6 @@ class BuildConfig:
             output_tar=linux_dir / f"kernel-{build_version}.tar.gz",
             output_headers_tar=linux_dir / f"headers-{build_version}.tar.gz",
             output_lpc_module_tar=linux_dir / f"reform2_lpc-{build_version}.tar.gz",
-            output_wifi_module_tar=linux_dir / f"wlan-{build_version}.tar.gz",
             log_file=build_dir / f"build-{log_build_version}-{timestamp}.log",
             log_build_version=log_build_version,
             timestamp=timestamp,

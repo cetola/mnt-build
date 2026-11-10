@@ -138,7 +138,6 @@ class KernelBuilder:
             return 0
 
         target_map = {
-            "qcacld2": self.config.qcacld_dir,
             "reform-tools": self.config.reform_tools_dir,
         }
         # (patches_dir, target_dir, failed_log_path, label, patch_files)
@@ -558,28 +557,6 @@ class KernelBuilder:
 
         self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} LPC module built")
 
-    def build_qcacld2_module(self):
-        self.logger.info("Building QCACLD2 WiFi module...")
-        qca_dir = self.config.build_dir / "qcacld2"
-
-        if not qca_dir.exists():
-            raise BuildError(f"QCACLD2 module directory not found: {qca_dir}")
-
-        make_args = [
-            *self._make_kernel_vars(),
-            f"KERNEL_SRC={self.config.linux_dir}",
-            "CONFIG_CLD_HL_SDIO_CORE=y",
-            "CONFIG_FORCE_MLO_SUPPORT=y",
-        ]
-
-        self.run_command(["make", *make_args, "clean"], cwd=qca_dir)
-        self.run_command(["make", *make_args, f"-j{self.config.jobs}"], cwd=qca_dir)
-
-        if not (qca_dir / "wlan.ko").exists():
-            raise BuildError("QCACLD2 module build failed - wlan.ko not found")
-
-        self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} QCACLD2 module built")
-
     # ------------------------------------------------------------------
     # Headers tree
     # ------------------------------------------------------------------
@@ -726,40 +703,6 @@ class KernelBuilder:
                     (
                         self.config.build_dir / "reform-tools/lpc/reform2_lpc.ko",
                         "reform2_lpc.ko",
-                    ),
-                ],
-            ),
-            (
-                "WiFi module",
-                self.config.output_wifi_module_tar,
-                [
-                    (
-                        self.config.build_dir / "qcacld2/wlan.ko",
-                        "wlan.ko",
-                    ),
-                    (
-                        self.config.build_dir / "qcacld2/debian/bdwlan30.bin",
-                        "usr/lib/firmware/qcacld2/bdwlan30.bin",
-                    ),
-                    (
-                        self.config.build_dir / "qcacld2/debian/otp30.bin",
-                        "usr/lib/firmware/qcacld2/otp30.bin",
-                    ),
-                    (
-                        self.config.build_dir / "qcacld2/debian/qwlan30.bin",
-                        "usr/lib/firmware/qcacld2/qwlan30.bin",
-                    ),
-                    (
-                        self.config.build_dir / "qcacld2/debian/cfg.dat",
-                        "usr/lib/firmware/wlan/qcacld2/cfg.dat",
-                    ),
-                    (
-                        self.config.build_dir / "qcacld2/debian/qcom_cfg.ini",
-                        "usr/lib/firmware/wlan/qcacld2/qcom_cfg.ini",
-                    ),
-                    (
-                        self.config.build_dir / "qcacld2/debian/reform-qcacld2.conf",
-                        "etc/modprobe.d/reform-qcacld2.conf",
                     ),
                 ],
             ),

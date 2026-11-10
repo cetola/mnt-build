@@ -684,7 +684,7 @@ print_summary() {
   echo "Contents:"
   echo "  - Boot partition with kernel, DTB, and initramfs"
   echo "  - Root filesystem with Arch Linux ARM and kernel modules"
-  echo "  - Kernel, qcacld2, and lpc installed from AUR packages"
+  echo "  - Kernel and lpc installed from AUR packages"
   echo
   echo "To write to SD card:"
   if command -v bmaptool >/dev/null 2>&1; then

@@ -147,7 +147,6 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         else:
             builder.log_phase("Out-of-Tree Modules")
             builder.build_lpc_module()
-            builder.build_qcacld2_module()
             builder.log_phase("Packaging")
             builder.create_module_tarballs()
             builder.create_tarball()
@@ -165,7 +164,6 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         else:
             logger.info(f"Output: {config.output_tar}")
             logger.info(f"LPC module output: {config.build_dir / config.output_lpc_module_tar.name}")
-            logger.info(f"WiFi module output: {config.build_dir / config.output_wifi_module_tar.name}")
         if with_headers:
             logger.info(f"Headers output: {config.build_dir / config.output_headers_tar.name}")
         logger.info(f"Log file: {config.log_file}")
