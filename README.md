@@ -46,11 +46,9 @@ Then run:
 ```bash
 git clone https://github.com/cetola/mnt-build.git ~/mnt-build
 cd ~/mnt-build
-# Checkout a release tag
-git submodule update --init --recursive
 ```
 
-The kernel is not a submodule. The first build clones [mnt-linux](https://git.sr.ht/~stephano/mnt-linux) into `mnt-linux/` and checks out the tag for the configured kernel version, e.g. `mnt-v7.2.10-reform1`.
+The first build clones [mnt-linux](https://git.sr.ht/~stephano/mnt-linux) into `mnt-linux/` and checks out the tag for the configured kernel version, e.g. `mnt-v7.2.10-reform1`. It also clones [reform-tools](https://source.mnt.re/reform/reform-tools) into `reform-tools/` at the release pinned by `REFORM_TOOLS_TAG` in `scripts/config.py`, and logs the commit it used.
 
 The first time you build, the config you need will probably not match the config in the repo. So at a minimum you'll want to build with the olddefconfig option:
 

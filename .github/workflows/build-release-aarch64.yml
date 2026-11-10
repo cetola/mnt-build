@@ -262,8 +262,7 @@ jobs:
               git clone --depth 1 --no-checkout https://github.com/${{ github.repository }} ~/mnt-build &&
               cd ~/mnt-build &&
               git fetch --depth 1 origin ${{ github.sha }} &&
-              git checkout ${{ github.sha }} &&
-              git submodule update --init --depth 1 -- reform-tools
+              git checkout ${{ github.sha }}
             "
           EOF
 

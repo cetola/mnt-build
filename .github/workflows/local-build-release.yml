@@ -26,9 +26,6 @@ jobs:
           fetch-depth: 1
           submodules: false
 
-      - name: Checkout submodules
-        run: git submodule update --init --depth 1 -- reform-tools
-
       - name: Resolve build configuration
         id: build_config
         run: |

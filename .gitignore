@@ -18,3 +18,4 @@ scripts/arm-libs-staging/
 barebox*.log
 /dtbs/
 /mnt-linux/
+/reform-tools/

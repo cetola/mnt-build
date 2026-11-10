@@ -63,20 +63,16 @@ jobs:
           fetch-depth: 0
           submodules: false
 
-      - name: Checkout required submodule (reform-tools only)
-        run: |
-          set -euo pipefail
-          git submodule sync -- reform-tools
-          git -c protocol.version=2 submodule update --init --depth 1 reform-tools
+      - name: Check out reform-tools
+        run: python3 scripts/reform_tools.py ensure --build-dir .
 
-      - name: Verify checkout and submodules
+      - name: Verify checkout
         run: |
           set -euo pipefail
           echo "== Checkout debug =="
           echo "pwd: $(pwd)"
           echo "head: $(git rev-parse --short HEAD)"
-          echo "submodule status:"
-          git submodule status || true
+          echo "reform-tools: $(git -C reform-tools rev-parse --short HEAD)"
 
           if [[ ! -d ./reform-tools/machines ]]; then
             echo "ERROR: ./reform-tools/machines missing after checkout." >&2

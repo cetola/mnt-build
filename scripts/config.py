@@ -14,6 +14,8 @@ DEFAULT_CROSS_COMPILE = "aarch64-linux-gnu-"
 DEFAULT_KERNEL_ONLY = False
 DEFAULT_KERNEL_DIR = "mnt-linux"
 REMOTES_FILE = "remotes.json"
+REFORM_TOOLS_DIR = "reform-tools"
+REFORM_TOOLS_TAG = "1.89"
 MNT_KERNEL_REMOTE = "mnt"
 STABLE_KERNEL_REMOTE = "stable"
 MAINLINE_KERNEL_REMOTE = "mainline"
@@ -113,6 +115,26 @@ def load_bootloader_url(path: Path, project: str) -> str:
     url = entry.get("url")
     if not isinstance(url, str) or not url:
         raise ValueError(f'{where}: "url" must be a non-empty string')
+    return url
+
+
+def load_reform_tools_url(path: Path) -> str:
+    """Return the clone URL of reform-tools from REMOTES_FILE.
+
+    {"reform-tools": {"url": ...}}
+    """
+    try:
+        data = json.loads(path.read_text())
+    except FileNotFoundError:
+        raise ValueError(f"{path}: not found")
+    except json.JSONDecodeError as e:
+        raise ValueError(f"{path}: not valid JSON: {e}")
+    entry = data.get("reform-tools") if isinstance(data, dict) else None
+    if not isinstance(entry, dict) or set(entry) != {"url"}:
+        raise ValueError(f'{path}: expected {{"reform-tools": {{"url": ...}}}}')
+    url = entry["url"]
+    if not isinstance(url, str) or not url:
+        raise ValueError(f'{path}: reform-tools "url" must be a non-empty string')
     return url
 
 

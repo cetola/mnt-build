@@ -1,5 +1,0 @@
-[submodule "reform-tools"]
-	path = reform-tools
-	url = https://source.mnt.re/reform/reform-tools.git
-	ignore = dirty
-	branch = main

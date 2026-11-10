@@ -127,8 +127,7 @@ jobs:
             cd mnt-build
             git fetch --depth 1 origin ${{ github.sha }}
             git checkout ${{ github.sha }}
-            git submodule sync -- reform-tools
-            git -c protocol.version=2 submodule update --init --depth 1 reform-tools
+            python3 scripts/reform_tools.py ensure --build-dir .
           EOF
 
       - name: Install image-gen host dependencies on instance

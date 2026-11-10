@@ -11,11 +11,12 @@ from typing import List, Optional
 
 from config import (
     BuildConfig, DEFAULT_CROSS_COMPILE, DEFAULT_KERNEL_ONLY,
-    EXTRA_DTB_PATHS, VENDOR_CONFIG_MAP,
+    EXTRA_DTB_PATHS, REFORM_TOOLS_TAG, VENDOR_CONFIG_MAP,
 )
 from errors import BuildError, PatchStats
 from kernel_repo import KernelRepo
 from logging_setup import Colors, log_phase
+from reform_tools import ensure_reform_tools
 from runner import CommandRunner
 
 class KernelBuilder:
@@ -34,6 +35,7 @@ class KernelBuilder:
         self.modules_only = modules_only
         self.patch_dirs_used: List[Path] = []
         self.patch_stats: Optional[PatchStats] = None
+        self.reform_tools_sha: Optional[str] = None
         # Untracked files in the kernel tree before source prep. None until the
         # tree has been verified clean, so restore_kernel_tree() never runs on
         # a tree that held someone's uncommitted work.
@@ -45,6 +47,10 @@ class KernelBuilder:
 
     def log_phase(self, name: str):
         log_phase(self.logger, name)
+
+    def ensure_reform_tools(self):
+        self.reform_tools_sha = ensure_reform_tools(self.config.build_dir, self.logger.info)
+        self.logger.info(f"reform-tools {REFORM_TOOLS_TAG} at {self.reform_tools_sha}")
 
     def _make_kernel_vars(self) -> List[str]:
         args = [f"ARCH={self.arch}", f"LOCALVERSION={self.config.localversion}"]

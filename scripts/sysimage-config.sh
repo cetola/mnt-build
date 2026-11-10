@@ -262,6 +262,8 @@ configure_sysimage_fallback() {
 
 find_machine_conf_for_sysimage() {
   local wanted_sysimage="$1"
+  python3 "$SCRIPT_DIR/reform_tools.py" ensure --build-dir "$SCRIPT_DIR/.." >&2 \
+    || log_warn "Could not check out reform-tools. Using machine configs already on disk."
   local candidate_dirs=(
     "$SCRIPT_DIR/../local-machines"
     "$SCRIPT_DIR/../reform-tools/machines"

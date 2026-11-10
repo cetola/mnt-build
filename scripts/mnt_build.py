@@ -20,6 +20,7 @@ from config import (
     DEFAULT_KERNEL_ONLY,
     DEFAULT_KERNEL_VERSION,
     DEFAULT_LOCALVERSION_REV,
+    REFORM_TOOLS_TAG,
     is_rc_version,
 )
 from errors import BuildError
@@ -102,6 +103,8 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
         builder.log_phase("Preflight")
         if not skip_git_operations:
             builder.repo.ensure_checkout(shallow=shallow_clone)
+            if not (kernel_only or dtbs_only or modules_only):
+                builder.ensure_reform_tools()
         builder.check_prerequisites(run_olddefconfig=run_olddefconfig)
 
         if dry_run:
@@ -166,6 +169,8 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
             logger.info(f"LPC module output: {config.build_dir / config.output_lpc_module_tar.name}")
         if with_headers:
             logger.info(f"Headers output: {config.build_dir / config.output_headers_tar.name}")
+        if builder.reform_tools_sha:
+            logger.info(f"reform-tools: {REFORM_TOOLS_TAG} ({builder.reform_tools_sha})")
         logger.info(f"Log file: {config.log_file}")
         logger.info("=" * 60)
 
