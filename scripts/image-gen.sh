@@ -24,6 +24,13 @@ readonly KERNEL_VERSION_FILE="$ROOT_MNT/tmp/linux-mnt-reform-bin.version"
 readonly KERNEL_EXTLINUX_STAGED="$ROOT_MNT/tmp/linux-mnt-reform-bin.extlinux.conf.example"
 readonly KERNEL_EXTLINUX_FALLBACK="$SCRIPT_DIR/linux-mnt-reform-bin/extlinux.conf.example"
 
+# The target is aarch64. A foreign host needs qemu-user for the chroot.
+NEEDS_QEMU=1
+if [[ "$(uname -m)" == "aarch64" ]]; then
+  NEEDS_QEMU=0
+fi
+readonly NEEDS_QEMU
+
 readonly ARCH_URL="http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz"
 
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
@@ -207,8 +214,8 @@ check_required_tools() {
     fi
   done
 
-  # Check for qemu-aarch64-static (required for x86_64 -> aarch64 chroot)
-  if [[ ! -f /usr/bin/qemu-aarch64-static ]]; then
+  # A non-aarch64 host needs qemu-aarch64-static for the chroot
+  if (( NEEDS_QEMU )) && [[ ! -f /usr/bin/qemu-aarch64-static ]]; then
     missing_tools+=("qemu-user-static qemu-user-static-binfmt")
   fi
 
@@ -464,9 +471,11 @@ EOF
 setup_chroot_environment() {
   log "Preparing chroot environment..."
   
-  log "Setting up qemu-user-static for cross-architecture chroot..."
-  cp /usr/bin/qemu-aarch64-static "$ROOT_MNT/usr/bin/"
-  
+  if (( NEEDS_QEMU )); then
+    log "Setting up qemu-user-static for cross-architecture chroot..."
+    cp /usr/bin/qemu-aarch64-static "$ROOT_MNT/usr/bin/"
+  fi
+
   log "Mounting /boot inside root filesystem..."
   mkdir -p "$ROOT_MNT/boot"
   mount "$BOOT_PART" "$ROOT_MNT/boot"
@@ -576,7 +585,9 @@ cleanup_chroot_environment() {
   log "Cleaning up chroot environment..."
   rm -f "$CHROOT_INSTALLER_TARGET"
   rm -f "$KERNEL_VERSION_FILE"
-  rm -f "$ROOT_MNT/usr/bin/qemu-aarch64-static"
+  if (( NEEDS_QEMU )); then
+    rm -f "$ROOT_MNT/usr/bin/qemu-aarch64-static"
+  fi
 }
 
 # Reclaim free-space compressibility before image compression.

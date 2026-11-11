@@ -171,10 +171,10 @@ jobs:
             echo "- zero_fill_max_mb: \`$ZERO_FILL_MAX_MB\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Run image-gen-aarch64.sh on runner (as root)
+      - name: Run image-gen.sh on runner (as root)
         run: |
           set -euo pipefail
-          chmod +x ./scripts/image-gen-aarch64.sh
+          chmod +x ./scripts/image-gen.sh
           BOOTLOADER="$(printf '%s' "${{ inputs.bootloader }}" | tr -d '\r\n')"
           UBOOT_SHA="$(printf '%s' "${{ inputs.uboot_sha }}" | tr -d '\r\n')"
           ZERO_FILL_MAX_MB="$(printf '%s' "${{ inputs.zero_fill_max_mb }}" | tr -d '\r\n')"
@@ -185,7 +185,7 @@ jobs:
           echo "Using ZERO_FILL_MAX_MB=${ZERO_FILL_MAX_MB}"
           export UBOOT_SHA ZERO_FILL_MAX_MB
           sudo --preserve-env=UBOOT_SHA,ZERO_FILL_MAX_MB \
-            ./scripts/image-gen-aarch64.sh --sysimage "${{ inputs.sysimage }}" --bootloader "${BOOTLOADER}"
+            ./scripts/image-gen.sh --sysimage "${{ inputs.sysimage }}" --bootloader "${BOOTLOADER}"
 
       - name: Package outputs (zstd, bmap, logs, sha256)
         run: |
