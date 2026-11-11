@@ -491,6 +491,8 @@ mount_virtual_filesystems() {
 
 configure_dns() {
   log "Configuring DNS for chroot..."
+  # The rootfs ships an absolute symlink. Writing through it would overwrite the host's file.
+  rm -f "$ROOT_MNT/etc/resolv.conf"
   cat > "$ROOT_MNT/etc/resolv.conf" << EOF
 nameserver 8.8.8.8
 nameserver 8.8.4.4

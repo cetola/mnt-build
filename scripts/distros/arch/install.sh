@@ -213,6 +213,39 @@ build_and_install_aur_package "mnt-reform-lpc-dkms"
 
 echo "Kernel, lpc, and reform-tools AUR packages installed successfully!"
 
+# The base rootfs enables systemd-networkd and systemd-resolved.
+# Use NetworkManager instead.
+configure_network_services() {
+  local leftovers=""
+
+  echo "Configuring network services (NetworkManager only)..."
+  systemctl disable \
+    systemd-networkd.service \
+    systemd-networkd.socket \
+    systemd-networkd-wait-online.service \
+    systemd-resolved.service
+  systemctl enable NetworkManager.service
+
+  # image-gen.sh left a static resolv.conf for the chroot. Hand it to NetworkManager.
+  rm -f /etc/resolv.conf
+  ln -s /run/NetworkManager/resolv.conf /etc/resolv.conf
+
+  # Look at the files, not systemctl. image-gen.sh bind-mounts the host /run,
+  # so is-enabled reports host state that never reaches the image.
+  leftovers=$(find /etc/systemd/system \( -lname '*systemd-networkd*' -o -lname '*systemd-resolved*' \) -print)
+  if [ -n "$leftovers" ]; then
+    echo "systemd-networkd/resolved links remain in /etc/systemd/system:" >&2
+    echo "$leftovers" >&2
+    exit 1
+  fi
+  if ! systemctl is-enabled --quiet NetworkManager.service; then
+    echo "NetworkManager.service is not enabled" >&2
+    exit 1
+  fi
+}
+
+configure_network_services
+
 echo "Recording installed kernel release..."
 find /usr/lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%f\n' \
   | sort -V \
