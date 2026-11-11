@@ -18,11 +18,8 @@ readonly DOWNLOADS_DIR="$WORK_DIR/downloads"
 readonly MOUNT_DIR="$WORK_DIR/mnt"
 readonly BOOT_MNT="$MOUNT_DIR/boot"
 readonly ROOT_MNT="$MOUNT_DIR/root"
-readonly CHROOT_INSTALLER_SOURCE="$SCRIPT_DIR/install_kernel_chroot.sh"
 readonly CHROOT_INSTALLER_TARGET="$ROOT_MNT/tmp/install_kernel.sh"
 readonly KERNEL_VERSION_FILE="$ROOT_MNT/tmp/linux-mnt-reform-bin.version"
-readonly KERNEL_EXTLINUX_STAGED="$ROOT_MNT/tmp/linux-mnt-reform-bin.extlinux.conf.example"
-readonly KERNEL_EXTLINUX_FALLBACK="$SCRIPT_DIR/linux-mnt-reform-bin/extlinux.conf.example"
 
 # The target is aarch64. A foreign host needs qemu-user for the chroot.
 NEEDS_QEMU=1
@@ -31,17 +28,16 @@ if [[ "$(uname -m)" == "aarch64" ]]; then
 fi
 readonly NEEDS_QEMU
 
-readonly ARCH_URL="http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz"
-
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 readonly TIMESTAMP
-IMAGE="$DOWNLOADS_DIR/arch-sys-mnt-image.img"
+IMAGE=""
 LOGFILE="$DOWNLOADS_DIR/image-gen-${TIMESTAMP}.log"
 
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/common.sh"
 
 # Global state
+DISTRO="arch"
 LOOPDEV=""
 BOOT_PART=""
 ROOT_PART=""
@@ -90,7 +86,7 @@ die() {
 usage() {
   cat <<'EOF'
 Usage:
-  image-gen.sh --sysimage <name> [--bootloader <choice>]
+  image-gen.sh --sysimage <name> [--bootloader <choice>] [--distro <name>]
 
 Options:
   --sysimage <name>         Target platform sysimage. Supported values:
@@ -106,8 +102,22 @@ Options:
                             barebox-source is only available for RK3588/S sysimages
                             (reform-next-system-rk3588, pocket-reform-system-rk3588,
                             pocket-reform-system-rk3588s).
+  --distro <name>           Root filesystem distro. One of the directories under
+                            scripts/distros/ (default: arch).
   -h, --help                Show this help.
 EOF
+}
+
+load_distro() {
+  local distro_file="$SCRIPT_DIR/distros/$DISTRO/distro.sh"
+
+  if [[ ! -f "$distro_file" ]]; then
+    die "Unknown distro: $DISTRO (no $distro_file)"
+  fi
+
+  # shellcheck source=/dev/null
+  source "$distro_file"
+  IMAGE="$DOWNLOADS_DIR/${DISTRO_IMAGE_PREFIX}-sys-mnt-image.img"
 }
 
 parse_args() {
@@ -127,6 +137,11 @@ parse_args() {
           uboot-prebuilt|uboot-source|barebox-source) SELECTED_BOOTLOADER="$2" ;;
           *) die "--bootloader must be one of: uboot-prebuilt, uboot-source, barebox-source (got: $2)" ;;
         esac
+        shift 2
+        ;;
+      --distro)
+        [[ $# -lt 2 ]] && die "--distro requires an argument"
+        DISTRO="$2"
         shift 2
         ;;
       -h|--help)
@@ -355,7 +370,7 @@ download_if_missing() {
 download_dependencies() {
   log "Downloading dependencies..."
   cd "$DOWNLOADS_DIR"
-  download_if_missing "$ARCH_URL" "archlinuxarm.tar.gz"
+  download_if_missing "$DISTRO_ROOTFS_URL" "$DISTRO_ROOTFS_FILE"
 }
 
 preflight_bootloader_artifact() {
@@ -435,28 +450,8 @@ install_bootloader_to_boot_partition() {
 # ============================================================================
 
 extract_rootfs() {
-  log "Extracting ArchLinuxARM root filesystem..."
-  tar -xpf "$DOWNLOADS_DIR/archlinuxarm.tar.gz" -C "$ROOT_MNT"
-}
-
-configure_pacman_mirrors() {
-  local mirrorlist="$ROOT_MNT/etc/pacman.d/mirrorlist"
-
-  log "Configuring ArchLinuxARM pacman mirrors..."
-  mkdir -p "$(dirname "$mirrorlist")"
-
-  cat > "$mirrorlist" <<'EOF'
-# Prefer concrete mirrors so pacman can fail over if one backend is stale.
-Server = http://nj.us.mirror.archlinuxarm.org/$arch/$repo
-Server = http://ca.us.mirror.archlinuxarm.org/$arch/$repo
-Server = http://fl.us.mirror.archlinuxarm.org/$arch/$repo
-Server = http://eu.mirror.archlinuxarm.org/$arch/$repo
-Server = http://de.mirror.archlinuxarm.org/$arch/$repo
-Server = http://de3.mirror.archlinuxarm.org/$arch/$repo
-Server = http://de4.mirror.archlinuxarm.org/$arch/$repo
-Server = http://dk.mirror.archlinuxarm.org/$arch/$repo
-Server = http://mirror.archlinuxarm.org/$arch/$repo
-EOF
+  log "Extracting $DISTRO_LABEL root filesystem..."
+  tar -xpf "$DOWNLOADS_DIR/$DISTRO_ROOTFS_FILE" -C "$ROOT_MNT"
 }
 
 create_fstab() {
@@ -505,31 +500,25 @@ EOF
 
 configure_extlinux() {
   log "Installing extlinux.conf from kernel package example..."
-  local extlinux_example="$ROOT_MNT/usr/share/doc/linux-mnt-reform-bin/extlinux.conf.example"
+  local extlinux_example
   local extlinux_conf="$BOOT_MNT/extlinux/extlinux.conf"
 
-  if [[ ! -f "$extlinux_example" ]]; then
-    extlinux_example="$KERNEL_EXTLINUX_STAGED"
-  fi
-
-  if [[ ! -f "$extlinux_example" ]]; then
-    extlinux_example="$KERNEL_EXTLINUX_FALLBACK"
-  fi
-
-  if [[ ! -f "$extlinux_example" ]]; then
+  extlinux_example="$(distro_find_extlinux_example)"
+  if [[ -z "$extlinux_example" ]]; then
     die "Unable to find extlinux.conf.example in installed package, staged chroot copy, or workspace fallback"
   fi
 
   mkdir -p "$BOOT_MNT/extlinux"
   cp "$extlinux_example" "$extlinux_conf"
 
-  log "Fixing extlinux.conf to use LABEL=ROOT..."
-  sed -i 's|root=/dev/nvme0n1p1|root=LABEL=ROOT|g' "$extlinux_conf"
+  if ! grep -q 'root=LABEL=ROOT' "$extlinux_conf"; then
+    die "extlinux.conf.example does not use root=LABEL=ROOT. Update the kernel package."
+  fi
 }
 
 create_chroot_script() {
   log "Creating chroot installation script..."
-  install -m 0755 "$CHROOT_INSTALLER_SOURCE" "$CHROOT_INSTALLER_TARGET"
+  install -m 0755 "$DISTRO_CHROOT_INSTALLER" "$CHROOT_INSTALLER_TARGET"
 }
 
 run_chroot_installation() {
@@ -653,12 +642,12 @@ fix_file_ownership() {
 }
 
 rename_outputs_for_kernel_version() {
-  local image_prefix="arch-sys-mnt-image"
+  local image_prefix="${DISTRO_IMAGE_PREFIX}-sys-mnt-image"
   local final_image=""
   local final_logfile="$DOWNLOADS_DIR/image-gen-${INSTALLED_KERNEL_VERSION}-${TIMESTAMP}.log"
 
   if [[ -n "${IMAGE_PLATFORM:-}" && -n "${IMAGE_SOM:-}" ]]; then
-    image_prefix="arch-sys-mnt-${IMAGE_PLATFORM}-${IMAGE_SOM}"
+    image_prefix="${DISTRO_IMAGE_PREFIX}-sys-mnt-${IMAGE_PLATFORM}-${IMAGE_SOM}"
   fi
 
   final_image="$DOWNLOADS_DIR/${image_prefix}-${INSTALLED_KERNEL_VERSION}.img"
@@ -703,8 +692,8 @@ print_summary() {
   echo
   echo "Contents:"
   echo "  - Boot partition with kernel, DTB, and initramfs"
-  echo "  - Root filesystem with Arch Linux ARM and kernel modules"
-  echo "  - Kernel and lpc installed from AUR packages"
+  echo "  - Root filesystem with $DISTRO_LABEL and kernel modules"
+  echo "  - $DISTRO_SUMMARY_NOTE"
   echo
   echo "To write to SD card:"
   if command -v bmaptool >/dev/null 2>&1; then
@@ -724,6 +713,7 @@ print_summary() {
 
 main() {
   parse_args "$@"
+  load_distro
   configure_sysimage
   apply_bootloader_choice
 
@@ -755,7 +745,7 @@ main() {
   install_bootloader_to_image
   install_bootloader_to_boot_partition
   extract_rootfs
-  configure_pacman_mirrors
+  distro_prepare_rootfs
   
   create_fstab
   setup_chroot_environment
