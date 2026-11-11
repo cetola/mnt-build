@@ -29,7 +29,7 @@ from barebox import BareboxManager, print_barebox_table
 from reform_tools import ensure_reform_tools
 from uboot import UBootManager, print_sysimage_table
 
-__version__ = "2.1.5"
+__version__ = "2.2.0"
 
 
 def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] = None,
