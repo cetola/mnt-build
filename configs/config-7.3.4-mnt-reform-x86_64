@@ -1,6 +1,6 @@
 #
 # Automatically generated file; DO NOT EDIT.
-# Linux/x86_64 7.3.1 Kernel Configuration
+# Linux/x86_64 7.3.4 Kernel Configuration
 #
 CONFIG_CC_VERSION_TEXT="gcc (GCC) 16.2.1 20260810"
 CONFIG_CC_IS_GCC=y
@@ -2013,7 +2013,6 @@ CONFIG_SATA_MOBILE_LPM_POLICY=3
 # CONFIG_SATA_AHCI_PLATFORM is not set
 # CONFIG_AHCI_DWC is not set
 # CONFIG_AHCI_CEVA is not set
-# CONFIG_SATA_INIC162X is not set
 # CONFIG_SATA_ACARD_AHCI is not set
 # CONFIG_SATA_SIL24 is not set
 CONFIG_ATA_SFF=y
