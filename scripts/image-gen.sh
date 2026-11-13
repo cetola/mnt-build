@@ -10,6 +10,13 @@ readonly MAX_BOOTLOADER_MB=16
 readonly PARTITION_WAIT_MAX_ATTEMPTS=20
 readonly PARTITION_WAIT_INTERVAL=0.2
 
+# i.MX8MP U-Boot (reform-imx8mp-uboot patch 0001) loads the DTB at
+# fdt_addr_r. U-Boot may move the kernel up to the next 2 MiB boundary, so
+# the kernel's runtime size must fit between there and the DTB.
+readonly IMX8MP_KERNEL_ADDR=$((0x40480000))
+readonly IMX8MP_FDT_ADDR=$((0x43000000))
+readonly LOAD_ALIGN=$((0x200000))
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 WORK_DIR="$(pwd)/image-gen"
@@ -544,6 +551,44 @@ resolve_installed_kernel_version() {
   log "Resolved installed kernel version: $INSTALLED_KERNEL_VERSION"
 }
 
+check_kernel_fits_load_window() {
+  local image="$BOOT_MNT/Image"
+  local file_size image_size load_base limit
+
+  if [[ "$SYSIMAGE" != *-imx8mp ]]; then
+    return 0
+  fi
+
+  if [[ ! -f "$image" ]]; then
+    log_warn "No $image found. Skipping kernel load window check."
+    return 0
+  fi
+
+  # arm64 Image header: image_size is the little-endian u64 at offset 16.
+  # It includes BSS, so it is larger than the file.
+  file_size=$(stat -c %s "$image")
+  image_size=$(od -An -tu8 -j16 -N8 "$image" | tr -d ' ')
+  load_base=$(( (IMX8MP_KERNEL_ADDR + LOAD_ALIGN - 1) / LOAD_ALIGN * LOAD_ALIGN ))
+  limit=$(( IMX8MP_FDT_ADDR - load_base ))
+
+  log "Kernel Image: file ${file_size} bytes, runtime ${image_size} bytes, limit ${limit} bytes"
+
+  if (( image_size <= limit )); then
+    log "Kernel fits below the DTB load address with $(( (limit - image_size) / 1024 )) KiB to spare."
+    return 0
+  fi
+
+  log_error "Kernel Image is too large for the i.MX8MP U-Boot load layout."
+  log_error "Runtime size ${image_size} bytes exceeds ${limit} bytes by $(( image_size - limit )) bytes."
+  log_error "U-Boot would overwrite the DTB at fdt_addr_r (0x$(printf '%x' "$IMX8MP_FDT_ADDR")) and the board would not boot."
+  log_error "Shrink the kernel (build more drivers as modules) or raise fdt_addr_r in U-Boot."
+  if [[ "${ALLOW_OVERSIZE_KERNEL:-0}" == "1" ]]; then
+    log_warn "ALLOW_OVERSIZE_KERNEL=1 is set. Continuing anyway."
+    return 0
+  fi
+  die "Refusing to produce an image that will not boot. Set ALLOW_OVERSIZE_KERNEL=1 to override."
+}
+
 configure_boot_dtb_symlink() {
   log "Configuring boot DTB symlink for $SYSIMAGE..."
   local dtb_dir="$BOOT_MNT/dtbs"
@@ -755,6 +800,7 @@ main() {
   create_chroot_script
   run_chroot_installation
   resolve_installed_kernel_version
+  check_kernel_fits_load_window
   configure_boot_dtb_symlink
   configure_extlinux
   cleanup_chroot_environment
