@@ -40,6 +40,12 @@
         "name": "upstream",
         "url": "https://github.com/barebox/barebox.git",
         "is-origin": false
+      },
+      {
+        "name": "cetola",
+        "url": "git@source.mnt.re:stephano/mnt-reform-barebox.git",
+        "push-url": "git@source.mnt.re:stephano/mnt-reform-barebox.git",
+        "is-origin": false
       }
     ]
   },

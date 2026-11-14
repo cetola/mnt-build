@@ -97,7 +97,7 @@ _mnt_build_complete() {
       mapfile -t COMPREPLY < <(compgen -W "$uboot_opts" -- "$cur")
       ;;
     barebox)
-      local barebox_opts="add-remotes fetch --help --list --sysimage --dry-run --diff --menuconfig --clean"
+      local barebox_opts="add-remotes fetch status --verbose --help --list --sysimage --dry-run --diff --menuconfig --clean"
       case "$prev" in
         --list)
           mapfile -t COMPREPLY < <(compgen -W "sysimage" -- "$cur")

@@ -14,6 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from config import REMOTES_FILE, load_bootloader_url
+from barebox_status import BareboxStatus
 from errors import BuildError
 from git_remotes import GitRemotes
 from logging_setup import setup_logging
@@ -166,6 +167,22 @@ class BareboxManager:
             print(f"[barebox] ERROR: {e}", file=sys.stderr)
             return 1
         return 0
+
+    def status(self, sysimage: str | None = None, verbose: bool = False) -> int:
+        if not self._require_checkout():
+            return 1
+        try:
+            remotes = self._remotes()
+            origin, upstream = remotes.origin(), remotes.resolve("upstream")
+        except BuildError as e:
+            print(f"[barebox] ERROR: {e}", file=sys.stderr)
+            return 1
+        if not origin or not upstream:
+            print("[barebox] ERROR: origin or upstream remote missing. "
+                  "Run: mnt-build barebox add-remotes", file=sys.stderr)
+            return 1
+        pin = self._resolve_ref(self._barebox_root, self.get_info(sysimage).tag) if sysimage else None
+        return BareboxStatus(self._barebox_root, self._patches_root, origin, upstream).show(pin, verbose)
 
     def prepare(self, sysimage: str) -> int:
         """Clone barebox repo, checkout tag, apply local patches. Stops before building."""

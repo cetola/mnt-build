@@ -453,8 +453,10 @@ def run_barebox_list() -> int:
     return 0
 
 
-def run_barebox_remotes(action: str) -> int:
+def run_barebox_remotes(action: str, sysimage: str | None = None, verbose: bool = False) -> int:
     manager = BareboxManager(Path(__file__).parent.parent)
+    if action == 'status':
+        return manager.status(sysimage, verbose)
     return manager.add_remotes() if action == 'add-remotes' else manager.fetch()
 
 
@@ -803,11 +805,14 @@ def build_parser() -> argparse.ArgumentParser:
     barebox_parser.add_argument(
         'action',
         nargs='?',
-        choices=['add-remotes', 'fetch'],
+        choices=['add-remotes', 'fetch', 'status'],
         help='add-remotes: add any remote listed under "mnt-reform-barebox" in remotes.json '
              'that the checkout lacks (nothing is fetched). '
              'fetch: fetch the latest from every remote in the checkout, and the '
-             'tags from origin. Both need the checkout that --dry-run creates.'
+             'tags from origin. '
+             'status: how far the checkout is from upstream and which commits and '
+             'xtra-patches upstream lacks (--verbose lists each one, --sysimage '
+             'adds the pinned SHA). All need the checkout that --dry-run creates.'
     )
     barebox_parser.add_argument(
         '--list',
@@ -819,6 +824,11 @@ def build_parser() -> argparse.ArgumentParser:
         '--sysimage',
         metavar='name',
         help='Target sysimage (required for --dry-run and other build actions)'
+    )
+    barebox_parser.add_argument(
+        '--verbose',
+        action='store_true',
+        help='With status, list every commit and patch with its category and upstream state'
     )
     barebox_parser.add_argument(
         '--dry-run',
@@ -917,7 +927,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if args.command == 'barebox':
         if args.action:
-            return run_barebox_remotes(args.action)
+            return run_barebox_remotes(args.action, args.sysimage, args.verbose)
         if args.list == 'sysimage':
             return run_barebox_list()
         if args.dry_run:

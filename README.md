@@ -128,6 +128,7 @@ U-Boot and Barebox commands are meant for helping you muck with the bootloader. 
 ./mnt-build barebox --sysimage pocket-reform-system-rk3588 # no options will build the bootloader
 ./mnt-build barebox add-remotes   # add the remotes listed under "mnt-reform-barebox" in remotes.json (nothing is fetched)
 ./mnt-build barebox fetch         # fetch every remote, and the tags from origin
+./mnt-build barebox status        # how far MNT's barebox is from upstream, and what is left to upstream (--verbose lists each commit)
 ```
 
 The barebox checkout has two remotes. `origin` is MNT's `mnt-reform-barebox`, which the build checks out. `upstream` is Pengutronix's barebox, where the work goes before MNT pulls it into origin. Both commands need the checkout that `--dry-run` creates.
