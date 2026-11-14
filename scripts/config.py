@@ -34,19 +34,18 @@ def log_arch_name_for_arch(arch: str) -> str:
     return arch_aliases.get(arch, arch)
 
 
-class KernelRemote(NamedTuple):
+class GitRemote(NamedTuple):
     name: str
     url: str
     push_url: Optional[str]
-    # The remote the kernel checkout must have as "origin". It is the first
-    # place to look for mnt-v{version} branches.
+    # The remote the checkout must have as "origin".
     is_origin: bool
 
 
-def load_kernel_remotes(path: Path) -> list[KernelRemote]:
-    """Read the kernel remotes from REMOTES_FILE.
+def load_remotes(path: Path, checkout: str) -> list[GitRemote]:
+    """Read one checkout's remotes from REMOTES_FILE.
 
-    {"kernel": {"remotes": [
+    {"<checkout>": {"remotes": [
         {"name": ..., "url": ..., "push-url": ..., "is-origin": true}, ...]}}
 
     "push-url" and "is-origin" are optional. At most one remote may be the origin.
@@ -56,16 +55,16 @@ def load_kernel_remotes(path: Path) -> list[KernelRemote]:
     except json.JSONDecodeError as e:
         raise ValueError(f"{path}: not valid JSON: {e}")
     try:
-        entries = data["kernel"]["remotes"]
+        entries = data[checkout]["remotes"]
     except (KeyError, TypeError):
-        raise ValueError(f'{path}: expected {{"kernel": {{"remotes": [...]}}}}')
+        raise ValueError(f'{path}: expected {{"{checkout}": {{"remotes": [...]}}}}')
     if not isinstance(entries, list):
-        raise ValueError(f'{path}: "kernel"."remotes" must be a list')
+        raise ValueError(f'{path}: "{checkout}"."remotes" must be a list')
 
     types = {"name": str, "url": str, "push-url": str, "is-origin": bool}
-    remotes: list[KernelRemote] = []
+    remotes: list[GitRemote] = []
     for index, entry in enumerate(entries):
-        where = f"{path}: kernel remote #{index + 1}"
+        where = f"{path}: {checkout} remote #{index + 1}"
         if not isinstance(entry, dict):
             raise ValueError(f"{where}: expected an object")
         unknown = sorted(set(entry) - set(types))
@@ -79,7 +78,7 @@ def load_kernel_remotes(path: Path) -> list[KernelRemote]:
                 raise ValueError(f'{where}: "{key}" must be a {types[key].__name__}')
         if any(r.name == entry["name"] for r in remotes):
             raise ValueError(f'{where}: duplicate name "{entry["name"]}"')
-        remotes.append(KernelRemote(
+        remotes.append(GitRemote(
             entry["name"], entry["url"], entry.get("push-url"), entry.get("is-origin", False)
         ))
 
@@ -89,10 +88,17 @@ def load_kernel_remotes(path: Path) -> list[KernelRemote]:
     return remotes
 
 
+def load_kernel_remotes(path: Path) -> list[GitRemote]:
+    return load_remotes(path, "kernel")
+
+
 def load_bootloader_url(path: Path, project: str) -> str:
     """Return the clone URL for a U-Boot or barebox project from REMOTES_FILE.
 
     {"bootloaders": {"<project>": {"url": ...}, ...}}
+
+    A project with no entry there is looked up as the checkout of that name,
+    which has a "remotes" list. Its is-origin remote supplies the URL.
     """
     try:
         data = json.loads(path.read_text())
@@ -100,11 +106,15 @@ def load_bootloader_url(path: Path, project: str) -> str:
         raise ValueError(f"{path}: not found")
     except json.JSONDecodeError as e:
         raise ValueError(f"{path}: not valid JSON: {e}")
-    bootloaders = data.get("bootloaders") if isinstance(data, dict) else None
+    bootloaders = data.get("bootloaders", {}) if isinstance(data, dict) else None
     if not isinstance(bootloaders, dict):
         raise ValueError(f'{path}: expected {{"bootloaders": {{"<project>": {{"url": ...}}}}}}')
     entry = bootloaders.get(project)
     if entry is None:
+        if isinstance(data.get(project), dict) and "remotes" in data[project]:
+            origin = next((r for r in load_remotes(path, project) if r.is_origin), None)
+            if origin:
+                return origin.url
         raise ValueError(f'{path}: no "bootloaders" entry for "{project}"')
     where = f'{path}: bootloader "{project}"'
     if not isinstance(entry, dict):

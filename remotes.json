@@ -29,6 +29,20 @@
       }
     ]
   },
+  "mnt-reform-barebox": {
+    "remotes": [
+      {
+        "name": "mnt-reform-barebox",
+        "url": "https://source.mnt.re/reform/mnt-reform-barebox.git",
+        "is-origin": true
+      },
+      {
+        "name": "upstream",
+        "url": "https://github.com/barebox/barebox.git",
+        "is-origin": false
+      }
+    ]
+  },
   "reform-tools": {
     "url": "https://source.mnt.re/reform/reform-tools.git"
   },
@@ -41,9 +55,6 @@
     },
     "reform-rk3588-uboot": {
       "url": "https://source.mnt.re/reform/reform-rk3588-uboot.git"
-    },
-    "mnt-reform-barebox": {
-      "url": "https://source.mnt.re/reform/mnt-reform-barebox.git"
     }
   }
 }

@@ -14,6 +14,7 @@ from config import (
     parse_kernel_version, version_key, version_sort_key,
 )
 from errors import BuildError
+from git_remotes import GitRemotes
 from logging_setup import Colors, Spinner
 from runner import CommandRunner
 
@@ -39,6 +40,8 @@ class KernelRepo:
         self.config = config
         self.logger = logger
         self.run_command = (runner or CommandRunner(config, logger)).run
+        self.remotes = GitRemotes(config.linux_dir, config.build_dir / REMOTES_FILE,
+                                  "kernel", self.run_command, logger)
         # git ls-remote answers, keyed by (remote, args). One status run asks
         # each remote once, however many checks need the answer.
         self._ls_remote_cache: dict = {}
@@ -68,40 +71,10 @@ class KernelRepo:
         self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} Kernel repo cleaned, still on {branch}")
 
     def _load_kernel_remotes(self):
-        """Return (wanted, existing): REMOTES_FILE entries and the checkout's remotes."""
-        linux_dir = self.config.linux_dir
-        if not (linux_dir / ".git").exists():
-            raise BuildError(f"Not a git repository: {linux_dir}")
-
-        remotes_file = self.config.build_dir / REMOTES_FILE
-        if not remotes_file.is_file():
-            raise BuildError(f"Remotes file not found: {remotes_file}")
-        try:
-            wanted = load_kernel_remotes(remotes_file)
-        except ValueError as e:
-            raise BuildError(str(e))
-
-        existing = {}
-        for name in self.run_command(['git', 'remote'], cwd=linux_dir, log_cmd=False).stdout.split():
-            existing[name] = self.run_command(
-                ['git', 'remote', 'get-url', name], cwd=linux_dir, log_cmd=False
-            ).stdout.strip()
-        return wanted, existing
+        return self.remotes.load()
 
     def check_origin_remote(self):
-        """Warn unless the checkout's remote 'origin' is the repo marked is-origin."""
-        wanted, existing = self._load_kernel_remotes()
-        wanted_origin = next((r for r in wanted if r.is_origin), None)
-        if wanted_origin is None:
-            return
-        origin = existing.get('origin')
-        if origin is not None and normalize_git_url(origin) == normalize_git_url(wanted_origin.url):
-            return
-
-        self.logger.warning(
-            f"origin is not {wanted_origin.name} ({wanted_origin.url}). "
-            f"Current origin is: {origin or 'not set'}"
-        )
+        self.remotes.check_origin()
 
     def _ls_remote(self, name: str, *args: str) -> Optional[dict]:
         """Return {ref: sha} from git ls-remote, or None if the remote did not answer."""
@@ -226,94 +199,25 @@ class KernelRepo:
             )
 
     def fetch_remotes(self):
-        linux_dir = self.config.linux_dir
-        _, existing = self._load_kernel_remotes()
-
         # The kernel tags point at commits no branch has, so a plain fetch
         # would not bring them.
         origin = self._origin_remote()
-        failed = []
-        for name in existing:
-            self.logger.info(f"Fetching '{name}'...")
-            if name == self._resolve_kernel_remote(MAINLINE_KERNEL_REMOTE):
-                # Linus's tags carry the -rc releases. His branches are not needed.
-                cmd = ['git', 'fetch', '--no-progress', '--no-tags', name, '+refs/tags/v*:refs/tags/v*']
-            else:
-                cmd = ['git', 'fetch', '--no-progress', *(['--tags'] if name == origin else []), name]
-            result = self.run_command(
-                cmd,
-                cwd=linux_dir, check=False, stream_output=True
-            )
-            if result.returncode != 0:
-                failed.append(name)
-                self.logger.error(f"Fetch from '{name}' failed")
-            else:
-                self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} {name}: fetched")
+        mainline = self._resolve_kernel_remote(MAINLINE_KERNEL_REMOTE)
 
-        if failed:
-            raise BuildError(f"Could not fetch from: {', '.join(failed)}")
+        def args_for(name: str) -> List[str]:
+            if name == mainline:
+                # Linus's tags carry the -rc releases. His branches are not needed.
+                return ['--no-tags', name, '+refs/tags/v*:refs/tags/v*']
+            return [*(['--tags'] if name == origin else []), name]
+
+        self.remotes.fetch(args_for)
 
     def ensure_remotes(self):
-        linux_dir = self.config.linux_dir
-        wanted, existing = self._load_kernel_remotes()
-        remotes_file = self.config.build_dir / REMOTES_FILE
-
-        added = 0
-        for listed in wanted:
-            url, push_url = listed.url, listed.push_url
-            # The is-origin repo goes in as "origin", whatever it is listed as.
-            name = "origin" if listed.is_origin else listed.name
-            target = name
-            if name in existing:
-                if normalize_git_url(existing[name]) != normalize_git_url(url):
-                    raise BuildError(
-                        f"Remote '{name}' in {linux_dir} points at {existing[name]}, "
-                        f"but {remotes_file.name} expects {url}. Fix one of them by hand."
-                    )
-                self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} {name}: present")
-            else:
-                # The same repo may already be here under another name (e.g. origin).
-                alias = next(
-                    (n for n, u in existing.items()
-                     if normalize_git_url(u) == normalize_git_url(url)),
-                    None
-                )
-                if alias:
-                    target = alias
-                    self.logger.info(
-                        f"{Colors.GREEN}✓{Colors.RESET} {name}: present as '{alias}'"
-                    )
-                else:
-                    self.run_command(['git', 'remote', 'add', name, url], cwd=linux_dir)
-                    existing[name] = url
-                    added += 1
-                    self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} {name}: added ({url})")
-
-            if push_url:
-                current_push = self.run_command(
-                    ['git', 'remote', 'get-url', '--push', target], cwd=linux_dir, log_cmd=False
-                ).stdout.strip()
-                if current_push != push_url:
-                    self.run_command(
-                        ['git', 'remote', 'set-url', '--push', target, push_url], cwd=linux_dir
-                    )
-                    self.logger.info(f"  {target}: push URL set to {push_url}")
-
-        self.logger.info(f"Remotes added: {added}")
+        self.remotes.ensure()
 
     def _resolve_kernel_remote(self, listed: str) -> Optional[str]:
         """Name in the checkout of a remote listed in REMOTES_FILE, if it is set up."""
-        wanted, existing = self._load_kernel_remotes()
-        url = {r.name: r.url for r in wanted}.get(listed)
-        if url is None:
-            return None
-        if listed in existing:
-            return listed
-        # The same repo may already be here under another name (e.g. origin).
-        return next(
-            (n for n, u in existing.items() if normalize_git_url(u) == normalize_git_url(url)),
-            None
-        )
+        return self.remotes.resolve(listed)
 
     def _kernel_branch_remotes(self) -> List[str]:
         """Remotes in the checkout to look for mnt-v branches on, in order of preference."""
@@ -328,9 +232,7 @@ class KernelRepo:
 
     def _origin_remote(self) -> Optional[str]:
         """Name in the checkout of the is-origin repo."""
-        wanted, _ = self._load_kernel_remotes()
-        listed = next((r.name for r in wanted if r.is_origin), None)
-        return self._resolve_kernel_remote(listed) if listed else None
+        return self.remotes.origin()
 
     def _ref_exists(self, ref: str) -> bool:
         return self._ref_sha(ref) is not None

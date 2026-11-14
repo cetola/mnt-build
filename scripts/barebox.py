@@ -11,8 +11,13 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 from config import REMOTES_FILE, load_bootloader_url
+from errors import BuildError
+from git_remotes import GitRemotes
+from logging_setup import setup_logging
+from runner import CommandRunner
 
 
 @dataclass
@@ -125,6 +130,43 @@ class BareboxManager:
         print("[barebox] Checkout ready at: barebox/")
         return 0
 
+    def _remotes(self) -> GitRemotes:
+        logger = setup_logging(None)
+        runner = CommandRunner(SimpleNamespace(log_file=None), logger)
+        return GitRemotes(self._barebox_root, self.root / REMOTES_FILE,
+                          "mnt-reform-barebox",
+                          runner.run, logger)
+
+    def _ensure_remotes(self) -> bool:
+        try:
+            self._remotes().ensure()
+        except BuildError as e:
+            print(f"[barebox] ERROR: {e}", file=sys.stderr)
+            return False
+        return True
+
+    def _require_checkout(self) -> bool:
+        if (self._barebox_root / ".git").exists():
+            return True
+        print(f"[barebox] ERROR: no checkout at {self._barebox_root}. "
+              "Run: mnt-build barebox --sysimage <name> --dry-run", file=sys.stderr)
+        return False
+
+    def add_remotes(self) -> int:
+        return 0 if self._require_checkout() and self._ensure_remotes() else 1
+
+    def fetch(self) -> int:
+        if not self._require_checkout():
+            return 1
+        remotes = self._remotes()
+        try:
+            origin = remotes.origin()
+            remotes.fetch(lambda name: [*(['--tags'] if name == origin else []), name])
+        except BuildError as e:
+            print(f"[barebox] ERROR: {e}", file=sys.stderr)
+            return 1
+        return 0
+
     def prepare(self, sysimage: str) -> int:
         """Clone barebox repo, checkout tag, apply local patches. Stops before building."""
         info = self.get_info(sysimage)
@@ -150,17 +192,8 @@ class BareboxManager:
                 capture_output=True, text=True, check=True,
             ).stdout.strip()
 
-            origin = subprocess.run(
-                ["git", "-C", str(checkout_dir), "remote", "get-url", "origin"],
-                capture_output=True, text=True,
-            ).stdout.strip()
-            if origin != repo_url:
-                print(f"[barebox] Setting origin to {repo_url} (was {origin or 'unset'})")
-                subprocess.run(
-                    ["git", "-C", str(checkout_dir), "remote",
-                     "set-url" if origin else "add", "origin", repo_url],
-                    check=True,
-                )
+            if not self._ensure_remotes():
+                return 1
 
             expected = self._resolve_ref(checkout_dir, info.tag)
             if expected is None:
@@ -185,6 +218,8 @@ class BareboxManager:
 
         print(f"[barebox] Cloning {repo_url} ...")
         subprocess.run(["git", "clone", repo_url, str(checkout_dir)], check=True)
+        if not self._ensure_remotes():
+            return 1
 
         print(f"[barebox] Checking out {info.tag} ...")
         subprocess.run(

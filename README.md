@@ -126,7 +126,11 @@ U-Boot and Barebox commands are meant for helping you muck with the bootloader. 
 ./mnt-build barebox --sysimage pocket-reform-system-rk3588 --clean
 ./mnt-build barebox --sysimage pocket-reform-system-rk3588 --menuconfig
 ./mnt-build barebox --sysimage pocket-reform-system-rk3588 # no options will build the bootloader
+./mnt-build barebox add-remotes   # add the remotes listed under "mnt-reform-barebox" in remotes.json (nothing is fetched)
+./mnt-build barebox fetch         # fetch every remote, and the tags from origin
 ```
+
+The barebox checkout has two remotes. `origin` is MNT's `mnt-reform-barebox`, which the build checks out. `upstream` is Pengutronix's barebox, where the work goes before MNT pulls it into origin. Both commands need the checkout that `--dry-run` creates.
 
 The two differences worth knowing:
 - **Sysimage support**: U-Boot supports all sysimages; barebox is currently only available for the RK3588/RK3588S sysimages (`reform-next-system-rk3588`, `pocket-reform-system-rk3588`, `pocket-reform-system-rk3588s`).

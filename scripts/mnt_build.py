@@ -453,6 +453,11 @@ def run_barebox_list() -> int:
     return 0
 
 
+def run_barebox_remotes(action: str) -> int:
+    manager = BareboxManager(Path(__file__).parent.parent)
+    return manager.add_remotes() if action == 'add-remotes' else manager.fetch()
+
+
 def run_barebox_build(sysimage: str) -> int:
     """Prepares the checkout if needed, then builds."""
     mnt_build_root = Path(__file__).parent.parent
@@ -796,6 +801,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     barebox_parser = subparsers.add_parser('barebox', help='Barebox development workflow')
     barebox_parser.add_argument(
+        'action',
+        nargs='?',
+        choices=['add-remotes', 'fetch'],
+        help='add-remotes: add any remote listed under "mnt-reform-barebox" in remotes.json '
+             'that the checkout lacks (nothing is fetched). '
+             'fetch: fetch the latest from every remote in the checkout, and the '
+             'tags from origin. Both need the checkout that --dry-run creates.'
+    )
+    barebox_parser.add_argument(
         '--list',
         choices=['sysimage'],
         metavar='sysimage',
@@ -902,6 +916,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         parser.error("mnt-build uboot requires an action (e.g. --list sysimage or --sysimage <name> --dry-run)")
 
     if args.command == 'barebox':
+        if args.action:
+            return run_barebox_remotes(args.action)
         if args.list == 'sysimage':
             return run_barebox_list()
         if args.dry_run:
@@ -923,7 +939,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.sysimage:
             return run_barebox_build(args.sysimage)
         parser.error("mnt-build barebox requires an action "
-                     "(e.g. --list sysimage or --sysimage <name> --dry-run)")
+                     "(e.g. add-remotes, fetch, --list sysimage or --sysimage <name> --dry-run)")
 
     parser.error(f"Unknown command: {args.command}")
     return 2
