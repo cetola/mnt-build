@@ -30,7 +30,13 @@
 		stdout-path = "serial2:1500000n8";
 	};
 
+	/*
+	 * Analog audio (I2S0 + TLV320AIC3100) is disabled on purpose, for now.
+	 * Re-enable the sound card, the codec and &i2s0_8ch together once
+	 * the CM5 has a board.
+	 */
 	analog-sound {
+		status = "disabled";
 		compatible = "audio-graph-card";
 		label = "rk3588-tlv320aic3100";
 
@@ -193,7 +199,7 @@
 		IOVDD-supply = <&vcc_3v3_s3>;
 		DVDD-supply = <&vcc1v8_sys>;
 
-		status = "okay";
+		status = "disabled";
 
 		port {
 			tlv320aic3100_p0: endpoint {
@@ -215,7 +221,7 @@
 		     &i2s0_sclk
 		     &i2s0_sdi0
 		     &i2s0_sdo0>;
-	status = "okay";
+	status = "disabled";
 
 	i2s0_8ch_p0: port {
 		i2s0_8ch_p0_0: endpoint {
