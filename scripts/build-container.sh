@@ -40,11 +40,15 @@ try_download_alarm_pkg() {
     local repo="$1" pkg="$2" outfile="$3" workdir="$4"
     for mirror in "${ALARM_MIRRORS[@]}"; do
         curl -fsSL "${mirror}/${repo}/${repo}.db" -o "${workdir}/repo.db" 2>/dev/null || continue
-        local entry file
-        entry="$(bsdtar -tf "${workdir}/repo.db" | grep -E "^${pkg}-[^/]+/desc$" | head -n1 || true)"
-        [ -n "${entry}" ] || continue
-        file="$(bsdtar -xOf "${workdir}/repo.db" "${entry}" \
-                | awk 'found{print;exit} /^%FILENAME%$/{found=1}' || true)"
+        local entry file="" desc
+        # The entry directory is name-version-release, so a prefix also matches
+        # other packages (openssl-3, zlib-static). Compare %NAME% itself.
+        while read -r entry; do
+            desc="$(bsdtar -xOf "${workdir}/repo.db" "${entry}" || true)"
+            [ "$(awk 'found{print;exit} /^%NAME%$/{found=1}' <<<"${desc}")" = "${pkg}" ] || continue
+            file="$(awk 'found{print;exit} /^%FILENAME%$/{found=1}' <<<"${desc}")"
+            break
+        done < <(bsdtar -tf "${workdir}/repo.db" | grep -E "^${pkg}-[^/]+/desc$" || true)
         [ -n "${file}" ] || continue
         curl -fL "${mirror}/${repo}/${file}" -o "${outfile}" 2>/dev/null || continue
         echo "  ${pkg}: ${mirror}/${repo}/${file}"
