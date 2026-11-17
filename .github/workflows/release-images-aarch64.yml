@@ -11,7 +11,7 @@ on:
         required: true
         type: string
       images:
-        description: Images as sysimage[:bootloader[:uboot_sha]], separated by spaces or commas. Bootloader defaults to uboot-prebuilt.
+        description: Images as sysimage[:bootloader[:uboot_sha]], separated by spaces or commas. Bootloader defaults to uboot-prebuilt, or barebox-source for boards without U-Boot support.
         required: true
         type: string
         default: pocket-reform-system-a311d pocket-reform-system-imx8mp pocket-reform-system-rk3588s pocket-reform-system-rk3588 reform-next-system-rk3588
@@ -65,7 +65,6 @@ jobs:
           errors=0
           for spec in ${IMAGES//,/ }; do
             IFS=: read -r sysimage bootloader uboot_sha extra <<< "$spec"
-            bootloader="${bootloader:-uboot-prebuilt}"
             if [[ -n "${extra:-}" ]]; then
               echo "::error::$spec: too many ':' fields"; errors=1; continue
             fi
@@ -74,6 +73,10 @@ jobs:
             fi
             if contains "$sysimage" "${seen[@]}"; then
               echo "::error::$sysimage is listed twice. Both images would get the same file name."; errors=1; continue
+            fi
+            bootloader="${bootloader:-$(default_bootloader_for "$sysimage")}"
+            if [[ "$bootloader" == uboot-* ]] && is_barebox_only_sysimage "$sysimage"; then
+              echo "::error::$sysimage: no U-Boot support, use $sysimage:barebox-source"; errors=1; continue
             fi
             case "$bootloader" in
               uboot-prebuilt|uboot-source) ;;

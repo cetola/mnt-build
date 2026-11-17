@@ -61,7 +61,7 @@ FLASHBIN_OFFSET=0
 SD_BOOT=false
 BOOTLOADER_FILENAME=""
 INSTALLED_KERNEL_VERSION=""
-SELECTED_BOOTLOADER="uboot-prebuilt"
+SELECTED_BOOTLOADER=""
 BAREBOX_PROJECT=""
 BAREBOX_TAG=""
 
@@ -103,9 +103,12 @@ Options:
                             - pocket-reform-system-imx8mp
                             - pocket-reform-system-rk3588s
   --bootloader <choice>     Bootloader to use. One of:
-                              uboot-prebuilt  (default) fetch MNT's prebuilt U-Boot
+                              uboot-prebuilt  fetch MNT's prebuilt U-Boot
                               uboot-source    build U-Boot from source
                               barebox-source  build barebox from source
+                            Default is uboot-prebuilt, except for sysimages without
+                            U-Boot support (pocket-reform-system-rk3588s), which
+                            default to barebox-source and refuse the uboot options.
                             barebox-source is only available for RK3588/S sysimages
                             (reform-next-system-rk3588, pocket-reform-system-rk3588,
                             pocket-reform-system-rk3588s).
@@ -182,6 +185,12 @@ apply_barebox_bootloader() {
 }
 
 apply_bootloader_choice() {
+  if [[ -z "${SELECTED_BOOTLOADER}" ]]; then
+    SELECTED_BOOTLOADER="$(default_bootloader_for "$SYSIMAGE")"
+  elif [[ "${SELECTED_BOOTLOADER}" == uboot-* ]] && is_barebox_only_sysimage "$SYSIMAGE"; then
+    die "--bootloader ${SELECTED_BOOTLOADER}: $SYSIMAGE has no U-Boot support, use barebox-source"
+  fi
+
   case "${SELECTED_BOOTLOADER}" in
     barebox-source)
       apply_barebox_bootloader

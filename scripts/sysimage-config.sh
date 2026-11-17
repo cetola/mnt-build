@@ -18,6 +18,28 @@ readonly BAREBOX_SUPPORTED_SYSIMAGES=(
   pocket-reform-system-rk3588s
 )
 
+# Sysimages with no U-Boot support. They default to barebox-source and refuse
+# the uboot-* bootloaders. Each must also be in BAREBOX_SUPPORTED_SYSIMAGES.
+readonly BAREBOX_ONLY_SYSIMAGES=(
+  pocket-reform-system-rk3588s
+)
+
+is_barebox_only_sysimage() {
+  local s
+  for s in "${BAREBOX_ONLY_SYSIMAGES[@]}"; do
+    [[ "$s" == "$1" ]] && return 0
+  done
+  return 1
+}
+
+default_bootloader_for() {
+  if is_barebox_only_sysimage "$1"; then
+    printf 'barebox-source'
+  else
+    printf 'uboot-prebuilt'
+  fi
+}
+
 # Default barebox repo and ref used for all supported sysimages.
 # mnt-reform-barebox layers MNT additions (build.sh, mnt-reform-defconfig, CI)
 # as commits on top of upstream barebox releases. MNT release tags (v2026.06.0
