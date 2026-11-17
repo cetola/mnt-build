@@ -18,7 +18,6 @@ from git_remotes import GitRemotes
 from logging_setup import Colors, Spinner
 from runner import CommandRunner
 
-# Seconds to wait for a remote to answer a status check before calling it unreachable.
 REMOTE_STATUS_TIMEOUT = 10
 # Seconds to wait for a single-branch fetch before giving up on that remote.
 REMOTE_FETCH_TIMEOUT = 600
@@ -202,12 +201,8 @@ class KernelRepo:
         # The kernel tags point at commits no branch has, so a plain fetch
         # would not bring them.
         origin = self._origin_remote()
-        mainline = self._resolve_kernel_remote(MAINLINE_KERNEL_REMOTE)
 
         def args_for(name: str) -> List[str]:
-            if name == mainline:
-                # Linus's tags carry the -rc releases. His branches are not needed.
-                return ['--no-tags', name, '+refs/tags/v*:refs/tags/v*']
             return [*(['--tags'] if name == origin else []), name]
 
         self.remotes.fetch(args_for)
@@ -696,7 +691,6 @@ class KernelRepo:
                 candidates.sort(key=lambda c: (tuple(-n for n in c[0][0]), c[0][1], c[0][2]))
                 source = candidates[0][1]
             else:
-                # The first release of a series that had release candidates.
                 rc_tags = self._rc_tags(self._series())
                 if not rc_tags:
                     raise BuildError(
