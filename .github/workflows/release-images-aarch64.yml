@@ -40,7 +40,7 @@ permissions:
 
 jobs:
   plan:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
     steps:
@@ -133,7 +133,7 @@ jobs:
   publish:
     needs: build
     if: ${{ inputs.publish }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
     steps:
