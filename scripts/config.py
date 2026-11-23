@@ -7,9 +7,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-DEFAULT_KERNEL_VERSION = '7.3.5'
+DEFAULT_KERNEL_VERSION = '7.3.6'
 DEFAULT_LOCALVERSION_NAME = 'reform'
-DEFAULT_LOCALVERSION_REV = 2
+DEFAULT_LOCALVERSION_REV = 1
 DEFAULT_CROSS_COMPILE = "aarch64-linux-gnu-"
 DEFAULT_KERNEL_ONLY = False
 DEFAULT_KERNEL_DIR = "mnt-linux"
