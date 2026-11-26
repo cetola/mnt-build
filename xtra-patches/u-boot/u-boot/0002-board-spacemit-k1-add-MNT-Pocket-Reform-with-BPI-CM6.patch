@@ -1,11 +1,7 @@
-From 1fd623970becf2a2358b9dff42cb230ad463d28d Mon Sep 17 00:00:00 2001
+From b7aaa0276b2b200e9d2cdb09122c67331c34a777 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Thu, 26 Nov 2026 00:14:02 +0000
 Subject: [PATCH 2/3] board: spacemit: k1: add MNT Pocket Reform with BPI-CM6
-
-The RCM4 has no board EEPROM, so SPL falls back to
-CONFIG_DEFAULT_DEVICE_TREE and the DDR defaults (LPDDR4X, 2 CS,
-2400 MT/s), which match the module.
 
 Remove USB2 nodes the k1.dtsi lacks. The SD card is reached through
 3.3 V level shifters, so the DT sets no-1-8-v and 25 MHz. The native
@@ -19,8 +15,8 @@ Signed-off-by: Stephano Cetola <stephano@cetola.net>
  ...bananapi-cm6-mnt-pocket-reform-u-boot.dtsi | 108 ++++++++++++
  board/spacemit/k1/mnt_pocket_reform.env       |  12 ++
  .../spacemit_k1_mnt_pocket_reform_defconfig   |  15 ++
- .../k1-bananapi-cm6-mnt-pocket-reform.dts     | 161 ++++++++++++++++++
- 4 files changed, 296 insertions(+)
+ .../k1-bananapi-cm6-mnt-pocket-reform.dts     | 159 ++++++++++++++++++
+ 4 files changed, 294 insertions(+)
  create mode 100644 arch/riscv/dts/k1-bananapi-cm6-mnt-pocket-reform-u-boot.dtsi
  create mode 100644 board/spacemit/k1/mnt_pocket_reform.env
  create mode 100644 configs/spacemit_k1_mnt_pocket_reform_defconfig
@@ -181,10 +177,10 @@ index 00000000..d05d49d5
 +# CONFIG_TOOLS_LIBCRYPTO is not set
 diff --git a/dts/upstream/src/riscv/spacemit/k1-bananapi-cm6-mnt-pocket-reform.dts b/dts/upstream/src/riscv/spacemit/k1-bananapi-cm6-mnt-pocket-reform.dts
 new file mode 100644
-index 00000000..904f9764
+index 00000000..ea4d8b75
 --- /dev/null
 +++ b/dts/upstream/src/riscv/spacemit/k1-bananapi-cm6-mnt-pocket-reform.dts
-@@ -0,0 +1,161 @@
+@@ -0,0 +1,159 @@
 +// SPDX-License-Identifier: GPL-2.0 OR MIT
 +/*
 + * Copyright (c) 2026 Stephano Cetola
@@ -319,8 +315,6 @@ index 00000000..904f9764
 +};
 +
 +&eth0 {
-+	/delete-property/ nvmem-cells;
-+	/delete-property/ nvmem-cell-names;
 +	status = "okay";
 +};
 +

@@ -1,4 +1,4 @@
-From ddae5c96f003162766e55d26aba8739c4b7261f3 Mon Sep 17 00:00:00 2001
+From 8bfd56e2c4cdbd1b29b0ef2e337701f03e2506f7 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Thu, 26 Nov 2026 00:14:02 +0000
 Subject: [PATCH 3/3] mmc: spacemit: keep the base clock when max-frequency is

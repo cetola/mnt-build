@@ -320,6 +320,7 @@ class BuildConfig:
         release_base = f"{parsed[0]}.{parsed[1]}.{parsed[2]}-rc{parsed[3]}" if parsed and parsed[3] else version
         kernel_release = f"{release_base}{localversion}"
         build_version = f"{version}.{DEFAULT_LOCALVERSION_NAME}{localversion_rev}"
+        tar_arch = log_arch_name_for_arch(arch)
         log_build_version = (
             f"{version}_{log_arch_name_for_arch(arch)}."
             f"{DEFAULT_LOCALVERSION_NAME}{localversion_rev}"
@@ -361,9 +362,9 @@ class BuildConfig:
             defconfig_file=build_dir / "configs" / defconfig_name_for_arch(arch),
             config_file=build_dir / "configs" / f"config-{version}-mnt-reform-{arch}",
             dtb_files=dtb_files,
-            output_tar=linux_dir / f"kernel-{build_version}.tar.gz",
-            output_headers_tar=linux_dir / f"headers-{build_version}.tar.gz",
-            output_lpc_module_tar=linux_dir / f"reform2_lpc-{build_version}.tar.gz",
+            output_tar=linux_dir / f"kernel-{build_version}-{tar_arch}.tar.gz",
+            output_headers_tar=linux_dir / f"headers-{build_version}-{tar_arch}.tar.gz",
+            output_lpc_module_tar=linux_dir / f"reform2_lpc-{build_version}-{tar_arch}.tar.gz",
             log_file=build_dir / f"build-{log_build_version}-{timestamp}.log",
             log_build_version=log_build_version,
             timestamp=timestamp,
