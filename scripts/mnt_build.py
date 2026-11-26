@@ -16,6 +16,7 @@ from kernel_repo import KernelRepo
 from config import (
     BuildConfig,
     DEFAULT_CROSS_COMPILE,
+    default_cross_compile_for_arch,
     DEFAULT_KERNEL_DIR,
     DEFAULT_KERNEL_ONLY,
     DEFAULT_KERNEL_VERSION,
@@ -47,7 +48,7 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
               kernel: str = DEFAULT_KERNEL_DIR,
               shallow_clone: bool = False) -> int:
     if cross_compile is None:
-        cross_compile = DEFAULT_CROSS_COMPILE
+        cross_compile = default_cross_compile_for_arch(arch)
     normalized_cross_compile = cross_compile.strip()
     if normalized_cross_compile.lower() in {"none", "native", "off", "false"}:
         normalized_cross_compile = ""
@@ -609,12 +610,13 @@ def build_parser() -> argparse.ArgumentParser:
     build_parser.add_argument(
         '--arch',
         default='arm64',
-        help='Kernel ARCH to build for (default: arm64).'
+        help='Kernel ARCH to build for: arm64 (default), riscv or x86_64.'
     )
     build_parser.add_argument(
         '--cross-compile',
-        default=DEFAULT_CROSS_COMPILE,
-        help=f'CROSS_COMPILE prefix (default: {DEFAULT_CROSS_COMPILE}). '
+        default=None,
+        help=f'CROSS_COMPILE prefix (default: {DEFAULT_CROSS_COMPILE} for arm64, '
+             'riscv64-linux-gnu- for riscv, none for x86_64). '
              'Use "" or "none" for native build with no prefix. '
              'This does not change ARCH; use --arch to override that.'
     )
@@ -634,7 +636,7 @@ def build_parser() -> argparse.ArgumentParser:
     mode_group.add_argument(
         '--dtbs-only',
         action='store_true',
-        help='Build DTBs only; skip kernel image, modules, and tarballs. ARM64 only.'
+        help='Build DTBs only; skip kernel image, modules, and tarballs. Not for x86_64.'
     )
     mode_group.add_argument(
         '--modules-only',

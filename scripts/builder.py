@@ -11,7 +11,8 @@ from typing import List, Optional
 
 from config import (
     BuildConfig, DEFAULT_CROSS_COMPILE, DEFAULT_KERNEL_ONLY,
-    EXTRA_DTB_PATHS, REFORM_TOOLS_TAG, VENDOR_CONFIG_MAP,
+    EXTRA_DTB_PATHS_BY_ARCH, REFORM_TOOLS_TAG, VENDOR_CONFIG_MAP_BY_ARCH,
+    arch_uses_dtbs,
 )
 from errors import BuildError, PatchStats
 from kernel_repo import KernelRepo
@@ -59,7 +60,7 @@ class KernelBuilder:
         return args
 
     def _uses_dtbs(self) -> bool:
-        return self.arch == "arm64"
+        return arch_uses_dtbs(self.arch)
 
     def kernel_image_path(self) -> Path:
         return self.config.linux_dir / self._kernel_image_relative_path()
@@ -356,15 +357,21 @@ class KernelBuilder:
         # List of (source_path, name, vendor, config_sym)
         all_dts: list[tuple] = []
 
+        vendor_map = VENDOR_CONFIG_MAP_BY_ARCH[self.arch]
+        other_arch_vendors = {
+            vendor for arch, vendors in VENDOR_CONFIG_MAP_BY_ARCH.items()
+            if arch != self.arch for vendor in vendors
+        }
         xtra_dir = self.config.xtra_dtbs_dir
         if xtra_dir.exists():
             for vendor_dir in sorted(xtra_dir.iterdir()):
                 if not vendor_dir.is_dir():
                     continue
                 vendor = vendor_dir.name
-                config_sym = VENDOR_CONFIG_MAP.get(vendor)
+                config_sym = vendor_map.get(vendor)
                 if config_sym is None:
-                    self.logger.warning(f"Unknown vendor '{vendor}' in xtra-dtbs, skipping")
+                    if vendor not in other_arch_vendors:
+                        self.logger.warning(f"Unknown vendor '{vendor}' in xtra-dtbs, skipping")
                     continue
                 for dts_file in sorted(vendor_dir.glob("*.dts")):
                     all_dts.append((dts_file, dts_file.name, vendor, config_sym))
@@ -376,7 +383,7 @@ class KernelBuilder:
         for source, name, vendor, _ in all_dts:
             if not source.exists():
                 raise BuildError(f"Custom DTS file not found: {source}")
-            dts_dest = self.config.linux_dir / f"arch/arm64/boot/dts/{vendor}/{name}"
+            dts_dest = self.config.linux_dir / f"arch/{self._kernel_srcarch()}/boot/dts/{vendor}/{name}"
             shutil.copy2(source, dts_dest)
             self.logger.info(f"  Copied {name} to {vendor}/")
 
@@ -389,7 +396,7 @@ class KernelBuilder:
 
         for vendor, dtb_entries in vendors_to_update.items():
             self.logger.info(f"Modifying {vendor} dts Makefile...")
-            makefile = self.config.linux_dir / f"arch/arm64/boot/dts/{vendor}/Makefile"
+            makefile = self.config.linux_dir / f"arch/{self._kernel_srcarch()}/boot/dts/{vendor}/Makefile"
             makefile_content = makefile.read_text() if makefile.exists() else ""
 
             entries_to_add = []
@@ -402,9 +409,10 @@ class KernelBuilder:
                 with open(makefile, "a") as f:
                     f.write("\n" + "".join(entries_to_add))
 
-        if EXTRA_DTB_PATHS:
-            self.logger.info(f"Also shipping {len(EXTRA_DTB_PATHS)} upstream DTB(s) (built by kernel, not copied):")
-            for path in EXTRA_DTB_PATHS:
+        extra_dtb_paths = EXTRA_DTB_PATHS_BY_ARCH.get(self.arch, [])
+        if extra_dtb_paths:
+            self.logger.info(f"Also shipping {len(extra_dtb_paths)} upstream DTB(s) (built by kernel, not copied):")
+            for path in extra_dtb_paths:
                 self.logger.info(f"  {Path(path).name}")
 
         self._record_created_files()

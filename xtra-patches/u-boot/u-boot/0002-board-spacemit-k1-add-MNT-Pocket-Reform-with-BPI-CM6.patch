@@ -1,0 +1,351 @@
+From 1fd623970becf2a2358b9dff42cb230ad463d28d Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Thu, 26 Nov 2026 00:14:02 +0000
+Subject: [PATCH 2/3] board: spacemit: k1: add MNT Pocket Reform with BPI-CM6
+
+The RCM4 has no board EEPROM, so SPL falls back to
+CONFIG_DEFAULT_DEVICE_TREE and the DDR defaults (LPDDR4X, 2 CS,
+2400 MT/s), which match the module.
+
+Remove USB2 nodes the k1.dtsi lacks. The SD card is reached through
+3.3 V level shifters, so the DT sets no-1-8-v and 25 MHz. The native
+card detect is not wired. SPL and U-Boot treat the card as present.
+
+The K1 config sets no load addresses, so the board environment adds
+them for extlinux boot. The kernel gets 224 MiB before the DTB.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ ...bananapi-cm6-mnt-pocket-reform-u-boot.dtsi | 108 ++++++++++++
+ board/spacemit/k1/mnt_pocket_reform.env       |  12 ++
+ .../spacemit_k1_mnt_pocket_reform_defconfig   |  15 ++
+ .../k1-bananapi-cm6-mnt-pocket-reform.dts     | 161 ++++++++++++++++++
+ 4 files changed, 296 insertions(+)
+ create mode 100644 arch/riscv/dts/k1-bananapi-cm6-mnt-pocket-reform-u-boot.dtsi
+ create mode 100644 board/spacemit/k1/mnt_pocket_reform.env
+ create mode 100644 configs/spacemit_k1_mnt_pocket_reform_defconfig
+ create mode 100644 dts/upstream/src/riscv/spacemit/k1-bananapi-cm6-mnt-pocket-reform.dts
+
+diff --git a/arch/riscv/dts/k1-bananapi-cm6-mnt-pocket-reform-u-boot.dtsi b/arch/riscv/dts/k1-bananapi-cm6-mnt-pocket-reform-u-boot.dtsi
+new file mode 100644
+index 00000000..8a193646
+--- /dev/null
++++ b/arch/riscv/dts/k1-bananapi-cm6-mnt-pocket-reform-u-boot.dtsi
+@@ -0,0 +1,108 @@
++// SPDX-License-Identifier: GPL-2.0+ OR MIT
++
++#include "binman.dtsi"
++
++/ {
++	memory@0 {
++		device_type = "memory";
++		reg = <0x00000000 0x00000000 0x00000000 0x80000000>;
++	};
++};
++
++&uart0 {
++	bootph-pre-ram;
++};
++
++&osc_32k {
++	bootph-pre-ram;
++};
++
++&vctcxo_1m {
++	bootph-pre-ram;
++};
++
++&vctcxo_3m {
++	bootph-pre-ram;
++};
++
++&vctcxo_24m {
++	bootph-pre-ram;
++};
++
++&syscon_mpmu {
++	bootph-pre-ram;
++};
++
++&pll {
++	bootph-pre-ram;
++};
++
++&syscon_apmu {
++	bootph-pre-ram;
++};
++
++&syscon_apbc {
++	bootph-pre-ram;
++};
++
++/* SPL looks up the DDR supplies by regulator-name; aldo1 is SD vqmmc */
++&i2c8 {
++	bootph-pre-ram;
++
++	pmic@41 {
++		bootph-pre-ram;
++
++		regulators {
++			buck1 {
++				regulator-name = "vdd_core";
++				bootph-pre-ram;
++			};
++
++			buck3 {
++				regulator-name = "vdd_1v8";
++				bootph-pre-ram;
++			};
++
++			aldo1 {
++				bootph-pre-ram;
++			};
++		};
++	};
++};
++
++&emmc {
++	bootph-pre-ram;
++	max-frequency = <204800000>;
++};
++
++/*
++ * RCM4 leaves the native card detect open and SPL has no GPIO75 pinmux;
++ * the loader booted from this card, so treat it as present.
++ */
++&sdhci0 {
++	bootph-pre-ram;
++	broken-cd;
++};
++
++&binman {
++	u-boot-spl-ddr {
++		type = "section";
++		filename = "u-boot-spl-ddr.bin";
++		pad-byte = <0xff>;
++
++		u-boot-spl {
++		};
++
++		ddr-fw {
++			type = "blob";
++			filename = "ddr_fw.bin";
++			align = <64>;
++		};
++
++		u-boot-any {
++			type = "section";
++			size = <0>;
++			offset = <0>;
++		};
++	};
++};
+diff --git a/board/spacemit/k1/mnt_pocket_reform.env b/board/spacemit/k1/mnt_pocket_reform.env
+new file mode 100644
+index 00000000..671e08e8
+--- /dev/null
++++ b/board/spacemit/k1/mnt_pocket_reform.env
+@@ -0,0 +1,12 @@
++/* All below 2 GiB, after OpenSBI (0x0) and U-Boot (0x200000). */
++kernel_addr_r=0x10000000
++kernel_comp_addr_r=0x30000000
++kernel_comp_size=0x8000000
++fdt_addr_r=0x1e000000
++fdtoverlay_addr_r=0x1e100000
++scriptaddr=0x1e200000
++pxefile_addr_r=0x1e300000
++ramdisk_addr_r=0x20000000
++fdtfile=spacemit/k1-bananapi-cm6-mnt-pocket-reform.dtb
++bootmeths=extlinux
++boot_targets=mmc1 mmc0
+diff --git a/configs/spacemit_k1_mnt_pocket_reform_defconfig b/configs/spacemit_k1_mnt_pocket_reform_defconfig
+new file mode 100644
+index 00000000..d05d49d5
+--- /dev/null
++++ b/configs/spacemit_k1_mnt_pocket_reform_defconfig
+@@ -0,0 +1,15 @@
++#include <configs/spacemit_k1_defconfig>
++
++CONFIG_DEFAULT_DEVICE_TREE="spacemit/k1-bananapi-cm6-mnt-pocket-reform"
++CONFIG_OF_LIST="spacemit/k1-bananapi-cm6-mnt-pocket-reform"
++CONFIG_SYS_MMCSD_RAW_MODE_U_BOOT_USE_SECTOR=y
++CONFIG_SYS_MMCSD_RAW_MODE_U_BOOT_SECTOR=0x800
++CONFIG_ENV_SOURCE_FILE="mnt_pocket_reform"
++CONFIG_SPL_STACK_R_MALLOC_SIMPLE_LEN=0x400000
++CONFIG_BOOTSTD_DEFAULTS=y
++CONFIG_CMD_BOOTFLOW_FULL=y
++CONFIG_USE_BOOTCOMMAND=y
++CONFIG_BOOTCOMMAND="bootflow scan -lb"
++CONFIG_BOOTSTD_FULL=y
++# CONFIG_TOOLS_KWBIMAGE is not set
++# CONFIG_TOOLS_LIBCRYPTO is not set
+diff --git a/dts/upstream/src/riscv/spacemit/k1-bananapi-cm6-mnt-pocket-reform.dts b/dts/upstream/src/riscv/spacemit/k1-bananapi-cm6-mnt-pocket-reform.dts
+new file mode 100644
+index 00000000..904f9764
+--- /dev/null
++++ b/dts/upstream/src/riscv/spacemit/k1-bananapi-cm6-mnt-pocket-reform.dts
+@@ -0,0 +1,161 @@
++// SPDX-License-Identifier: GPL-2.0 OR MIT
++/*
++ * Copyright (c) 2026 Stephano Cetola
++ */
++
++/dts-v1/;
++
++#include "k1-bananapi-cm6.dtsi"
++
++#include <dt-bindings/leds/common.h>
++
++/ {
++	model = "MNT Pocket Reform with Banana Pi BPI-CM6 K1 Module";
++	compatible = "mntre,pocket-reform-bpi-cm6", "bananapi,bpi-cm6", "spacemit,k1";
++
++	aliases {
++		ethernet0 = &eth0;
++		serial0 = &uart0;
++		mmc0 = &emmc;
++		mmc1 = &sdhci0;
++	};
++
++	chosen {
++		stdout-path = "serial0:115200n8";
++	};
++
++	leds {
++		compatible = "gpio-leds";
++
++		led-activity {
++			color = <LED_COLOR_ID_GREEN>;
++			function = LED_FUNCTION_ACTIVITY;
++			gpios = <&gpio K1_GPIO(97) GPIO_ACTIVE_LOW>;
++			linux,default-trigger = "heartbeat";
++		};
++
++		led-power {
++			color = <LED_COLOR_ID_RED>;
++			function = LED_FUNCTION_POWER;
++			gpios = <&gpio K1_GPIO(96) GPIO_ACTIVE_LOW>;
++			default-state = "on";
++		};
++	};
++
++	/* PR motherboard 3V3; sysctl owns the enables */
++	reg_pr_3v3: regulator-pr-3v3 {
++		compatible = "regulator-fixed";
++		regulator-name = "pr_3v3";
++		regulator-min-microvolt = <3300000>;
++		regulator-max-microvolt = <3300000>;
++		regulator-always-on;
++		regulator-boot-on;
++	};
++
++	/* system controller (RP2040); no K1 SPI block on these pins */
++	spi {
++		compatible = "spi-gpio";
++		#address-cells = <1>;
++		#size-cells = <0>;
++		sck-gpios = <&gpio K1_GPIO(50) GPIO_ACTIVE_HIGH>;	/* pin 37, CM4 GPIO7 */
++		miso-gpios = <&gpio K1_GPIO(58) GPIO_ACTIVE_HIGH>;	/* pin 34, CM4 GPIO5 */
++		mosi-gpios = <&gpio K1_GPIO(83) GPIO_ACTIVE_HIGH>;	/* pin 30, CM4 GPIO6 */
++		cs-gpios = <&gpio K1_GPIO(70) GPIO_ACTIVE_LOW>;		/* pin 54, CM4 GPIO4 */
++		num-chipselects = <1>;
++
++		mnt_sc: system-controller@0 {
++			compatible = "mntre,system-controller";
++			reg = <0>;
++			spi-max-frequency = <1000000>;
++			gpio-controller;
++			#gpio-cells = <2>;
++
++			backlight {
++			};
++		};
++	};
++};
++
++&pinctrl {
++	i2c6_2_cfg: i2c6-2-cfg {
++		i2c6-2-pins {
++			pinmux = <K1_PADCONF(56, 5)>,	/* AP_I2C6_SCL, pin 35 */
++				 <K1_PADCONF(57, 5)>;	/* AP_I2C6_SDA, pin 36 */
++			bias-pull-up = <0>;
++		};
++	};
++};
++
++&uart0 {
++	pinctrl-names = "default";
++	pinctrl-0 = <&uart0_2_cfg>;
++	status = "okay";
++};
++
++&i2c6 {
++	pinctrl-names = "default";
++	pinctrl-0 = <&i2c6_2_cfg>;
++	clock-frequency = <100000>;
++	status = "okay";
++
++	codec@18 {
++		compatible = "ti,tlv320aic3100";
++		reg = <0x18>;
++		status = "disabled";
++	};
++
++	rtc@68 {
++		compatible = "nxp,pcf8523";
++		reg = <0x68>;
++	};
++};
++
++&aldo1 {
++	regulator-min-microvolt = <3300000>;
++	regulator-max-microvolt = <3300000>;
++};
++
++&sdhci0 {
++	pinctrl-names = "default";
++	pinctrl-0 = <&mmc1_cfg>;
++	bus-width = <4>;
++	cd-gpios = <&gpio K1_GPIO(75) GPIO_ACTIVE_LOW>;
++	no-mmc;
++	no-sdio;
++	no-1-8-v;
++	disable-wp;
++	cap-sd-highspeed;
++	max-frequency = <25000000>;
++	vmmc-supply = <&reg_pr_3v3>;
++	vqmmc-supply = <&aldo1>;
++	status = "okay";
++};
++
++&eth0 {
++	/delete-property/ nvmem-cells;
++	/delete-property/ nvmem-cell-names;
++	status = "okay";
++};
++
++&pdma {
++	status = "disabled";
++};
++
++&combo_phy {
++	status = "okay";
++};
++
++&pcie1_phy {
++	pinctrl-names = "default";
++	pinctrl-0 = <&pcie1_3_cfg>;
++	status = "okay";
++};
++
++&pcie1_port {
++	phys = <&pcie1_phy>;
++	vpcie3v3-supply = <&reg_pr_3v3>;
++};
++
++&pcie1 {
++	status = "okay";
++};
+-- 
+2.43.0
+

@@ -28,6 +28,11 @@ class SysimageUBootInfo:
     patch_count: int
     has_checkout: bool
     config_source: str
+    build_script: str = ""
+    defconfig: str = ""
+    cross_compile: str = ""
+    flashbin_offset: int = 0
+    head_bytes: int = 0
 
 
 class UBootManager:
@@ -93,6 +98,11 @@ class UBootManager:
             patch_count=self._patch_count(project),
             has_checkout=self._has_checkout(project),
             config_source=self._format_config_source(data),
+            build_script=data.get("BOOTLOADER_BUILD_SCRIPT", ""),
+            defconfig=data.get("UBOOT_DEFCONFIG", ""),
+            cross_compile=data.get("UBOOT_CROSS_COMPILE", ""),
+            flashbin_offset=int(data.get("FLASHBIN_OFFSET", "0") or "0"),
+            head_bytes=int(data.get("BOOTLOADER_HEAD_BYTES", "0") or "0"),
         )
 
     def prepare(self, sysimage: str) -> int:
@@ -215,6 +225,8 @@ class UBootManager:
         return proc.returncode
 
     def build(self, sysimage: str, cross_compile: str = "aarch64-linux-gnu-") -> int:
+        info = self.get_info(sysimage)
+        cross_compile = info.cross_compile or cross_compile
         print("[uboot] Checking build prerequisites ...", flush=True)
         missing = self._check_build_prerequisites(cross_compile)
         if missing:
@@ -226,7 +238,6 @@ class UBootManager:
             return 1
 
         start_time = time.monotonic()
-        info = self.get_info(sysimage)
         checkout_dir = self._uboot_root / info.project
 
         if not checkout_dir.is_dir():
@@ -251,7 +262,16 @@ class UBootManager:
 
         build_script = checkout_dir / "build.sh"
         with open(log_path, "w") as log_fh:
-            if build_script.is_file():
+            if info.build_script:
+                script = self.root / "scripts" / info.build_script
+                print(f"[uboot] Running {script.relative_to(self.root)} ...")
+                env = {**build_env, "UBOOT_DEFCONFIG": info.defconfig,
+                       "CROSS_COMPILE": cross_compile}
+                rc = self._run_logged(
+                    ["bash", str(script), str(checkout_dir), info.filename],
+                    str(checkout_dir), env, log_fh,
+                )
+            elif build_script.is_file():
                 print("[uboot] Running build.sh ...")
                 rc = self._run_logged(["bash", "./build.sh"], str(checkout_dir), build_env, log_fh)
             else:
@@ -318,10 +338,15 @@ class UBootManager:
             "",
             "To write to SD card:",
         ]
+        skip_blocks = info.flashbin_offset // 512
+        skip = f" skip={skip_blocks}" if skip_blocks else ""
         if seek_blocks:
-            lines.append(f"  dd if={rel_artifact} of=/dev/<device> bs=512 seek={seek_blocks} conv=notrunc,fsync")
+            lines.append(f"  dd if={rel_artifact} of=/dev/<device> bs=512 seek={seek_blocks}{skip} conv=notrunc,fsync")
         else:
-            lines.append(f"  dd if={rel_artifact} of=/dev/<device> conv=notrunc,fsync")
+            lines.append(f"  dd if={rel_artifact} of=/dev/<device>{skip} conv=notrunc,fsync")
+        if info.head_bytes:
+            lines.append(f"  dd if={rel_artifact} of=/dev/<device> bs=1 count={info.head_bytes} conv=notrunc,fsync")
+            lines.append("  (MBR cards only: the blob covers sectors 1-33, where a GPT header lives)")
         lines += [
             "  (replace <device> with your SD card, e.g. sda or mmcblk0)",
             "=" * 52,

@@ -1,0 +1,34 @@
+From 6ec4e8941a677985813648bcbf91cd124c6f5827 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Thu, 26 Nov 2026 00:14:02 +0000
+Subject: [PATCH 1/3] mmc: spacemit: honour no-1-8-v
+
+Probe overwrites host->quirks, so the no-1-8-v handling in
+mmc_of_parse() is undone when sdhci_setup_cfg() adds the UHS modes from
+the capability register again. A board whose SD lines go through 3.3 V
+only level shifters then switches the card to 1.8 V signalling and fails
+tuning.
+
+Set SDHCI_QUIRK_NO_1_8_V when the property is present.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/mmc/spacemit_sdhci.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/mmc/spacemit_sdhci.c b/drivers/mmc/spacemit_sdhci.c
+index fdedb9a3..4474c709 100644
+--- a/drivers/mmc/spacemit_sdhci.c
++++ b/drivers/mmc/spacemit_sdhci.c
+@@ -604,6 +604,8 @@ static int spacemit_sdhci_probe(struct udevice *dev)
+ 	/* Set quirks */
+ 	host->quirks = SDHCI_QUIRK_WAIT_SEND_CMD |
+ 		       SDHCI_QUIRK_32BIT_DMA_ADDR;
++	if (dev_read_bool(dev, "no-1-8-v"))
++		host->quirks |= SDHCI_QUIRK_NO_1_8_V;
+ 	host->host_caps = MMC_MODE_HS | MMC_MODE_HS_52MHz;
+ 	host->max_clk = plat->cfg.f_max;
+ 
+-- 
+2.43.0
+

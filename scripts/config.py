@@ -11,6 +11,11 @@ DEFAULT_KERNEL_VERSION = '7.3.6'
 DEFAULT_LOCALVERSION_NAME = 'reform'
 DEFAULT_LOCALVERSION_REV = 1
 DEFAULT_CROSS_COMPILE = "aarch64-linux-gnu-"
+CROSS_COMPILE_BY_ARCH = {
+    "arm64": "aarch64-linux-gnu-",
+    "riscv": "riscv64-linux-gnu-",
+    "x86_64": "",
+}
 DEFAULT_KERNEL_ONLY = False
 DEFAULT_KERNEL_DIR = "mnt-linux"
 REMOTES_FILE = "remotes.json"
@@ -27,9 +32,14 @@ def defconfig_name_for_arch(arch: str) -> str:
     return f"defconfig_{arch}"
 
 
+def default_cross_compile_for_arch(arch: str) -> str:
+    return CROSS_COMPILE_BY_ARCH.get(arch, DEFAULT_CROSS_COMPILE)
+
+
 def log_arch_name_for_arch(arch: str) -> str:
     arch_aliases = {
         "arm64": "aarch64",
+        "riscv": "riscv64",
     }
     return arch_aliases.get(arch, arch)
 
@@ -236,15 +246,29 @@ DTS_CONFIGS = [
     }
 ]
 
-VENDOR_CONFIG_MAP = {
-    "rockchip": "CONFIG_ARCH_ROCKCHIP",
-    "freescale": "CONFIG_ARCH_MXC",
-    "amlogic":   "CONFIG_ARCH_MESON",
+# Kernel ARCHs that build DTBs, and the xtra-dtbs/ vendor directories each one owns.
+VENDOR_CONFIG_MAP_BY_ARCH = {
+    "arm64": {
+        "rockchip": "CONFIG_ARCH_ROCKCHIP",
+        "freescale": "CONFIG_ARCH_MXC",
+        "amlogic":   "CONFIG_ARCH_MESON",
+    },
+    "riscv": {
+        "spacemit": "CONFIG_ARCH_SPACEMIT",
+    },
 }
+VENDOR_CONFIG_MAP = VENDOR_CONFIG_MAP_BY_ARCH["arm64"]
 
-EXTRA_DTB_PATHS = [
-    "arch/arm64/boot/dts/rockchip/rk3588s-radxa-cm5-io.dtb",
-]
+# Upstream DTBs shipped as they are (built by the kernel, not copied in).
+EXTRA_DTB_PATHS_BY_ARCH = {
+    "arm64": ["arch/arm64/boot/dts/rockchip/rk3588s-radxa-cm5-io.dtb"],
+    "riscv": ["arch/riscv/boot/dts/spacemit/k1-bananapi-cm6-io.dtb"],
+}
+EXTRA_DTB_PATHS = EXTRA_DTB_PATHS_BY_ARCH["arm64"]
+
+
+def arch_uses_dtbs(arch: str) -> bool:
+    return arch in VENDOR_CONFIG_MAP_BY_ARCH
 
 
 @dataclass
@@ -305,19 +329,21 @@ class BuildConfig:
 
         dtb_files = []
         xtra_dtbs_dir = build_dir / "xtra-dtbs"
-        if arch == "arm64":
-            dtb_files = [
-                linux_dir / f"arch/arm64/boot/dts/{dts_config['vendor']}/{dts_config['name'].replace('.dts', '.dtb')}"
-                for dts_config in DTS_CONFIGS
-            ]
+        if arch_uses_dtbs(arch):
+            vendor_map = VENDOR_CONFIG_MAP_BY_ARCH[arch]
+            if arch == "arm64":
+                dtb_files = [
+                    linux_dir / f"arch/arm64/boot/dts/{dts_config['vendor']}/{dts_config['name'].replace('.dts', '.dtb')}"
+                    for dts_config in DTS_CONFIGS
+                ]
             if xtra_dtbs_dir.exists():
                 for vendor_dir in sorted(xtra_dtbs_dir.iterdir()):
-                    if vendor_dir.is_dir() and vendor_dir.name in VENDOR_CONFIG_MAP:
+                    if vendor_dir.is_dir() and vendor_dir.name in vendor_map:
                         for dts_file in sorted(vendor_dir.glob("*.dts")):
                             dtb_files.append(
-                                linux_dir / f"arch/arm64/boot/dts/{vendor_dir.name}/{dts_file.stem}.dtb"
+                                linux_dir / f"arch/{arch}/boot/dts/{vendor_dir.name}/{dts_file.stem}.dtb"
                             )
-            for extra_path in EXTRA_DTB_PATHS:
+            for extra_path in EXTRA_DTB_PATHS_BY_ARCH.get(arch, []):
                 dtb_files.append(linux_dir / extra_path)
 
         return cls(

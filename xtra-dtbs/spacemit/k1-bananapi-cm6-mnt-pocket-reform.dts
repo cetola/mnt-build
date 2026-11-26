@@ -1,0 +1,170 @@
+// SPDX-License-Identifier: GPL-2.0 OR MIT
+/*
+ * Copyright (c) 2026 Stephano Cetola
+ */
+
+/dts-v1/;
+
+#include "k1-bananapi-cm6.dtsi"
+
+#include <dt-bindings/leds/common.h>
+
+/ {
+	model = "MNT Pocket Reform with Banana Pi BPI-CM6 K1 Module";
+	compatible = "mntre,pocket-reform-bpi-cm6", "bananapi,bpi-cm6", "spacemit,k1";
+
+	aliases {
+		ethernet0 = &eth0;
+		serial0 = &uart0;
+		mmc0 = &emmc;
+		mmc1 = &sdhci0;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		led-activity {
+			color = <LED_COLOR_ID_GREEN>;
+			function = LED_FUNCTION_ACTIVITY;
+			gpios = <&gpio K1_GPIO(97) GPIO_ACTIVE_LOW>;
+			linux,default-trigger = "heartbeat";
+		};
+
+		led-power {
+			color = <LED_COLOR_ID_RED>;
+			function = LED_FUNCTION_POWER;
+			gpios = <&gpio K1_GPIO(96) GPIO_ACTIVE_LOW>;
+			default-state = "on";
+		};
+	};
+
+	/* PR motherboard 3V3; sysctl owns the enables */
+	reg_pr_3v3: regulator-pr-3v3 {
+		compatible = "regulator-fixed";
+		regulator-name = "pr_3v3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+	/* system controller (RP2040); no K1 SPI block on these pins */
+	spi {
+		compatible = "spi-gpio";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		sck-gpios = <&gpio K1_GPIO(50) GPIO_ACTIVE_HIGH>;	/* pin 37, CM4 GPIO7 */
+		miso-gpios = <&gpio K1_GPIO(58) GPIO_ACTIVE_HIGH>;	/* pin 34, CM4 GPIO5 */
+		mosi-gpios = <&gpio K1_GPIO(83) GPIO_ACTIVE_HIGH>;	/* pin 30, CM4 GPIO6 */
+		cs-gpios = <&gpio K1_GPIO(70) GPIO_ACTIVE_LOW>;		/* pin 54, CM4 GPIO4 */
+		num-chipselects = <1>;
+
+		mnt_sc: system-controller@0 {
+			compatible = "mntre,system-controller";
+			reg = <0>;
+			spi-max-frequency = <1000000>;
+			gpio-controller;
+			#gpio-cells = <2>;
+
+			backlight {
+			};
+		};
+	};
+};
+
+&pinctrl {
+	i2c6_2_cfg: i2c6-2-cfg {
+		i2c6-2-pins {
+			pinmux = <K1_PADCONF(56, 5)>,	/* AP_I2C6_SCL, pin 35 */
+				 <K1_PADCONF(57, 5)>;	/* AP_I2C6_SDA, pin 36 */
+			bias-pull-up = <0>;
+		};
+	};
+};
+
+&uart0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart0_2_cfg>;
+	status = "okay";
+};
+
+&i2c6 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c6_2_cfg>;
+	clock-frequency = <100000>;
+	status = "okay";
+
+	codec@18 {
+		compatible = "ti,tlv320aic3100";
+		reg = <0x18>;
+		status = "disabled";
+	};
+
+	rtc@68 {
+		compatible = "nxp,pcf8523";
+		reg = <0x68>;
+	};
+};
+
+&aldo1 {
+	regulator-min-microvolt = <3300000>;
+	regulator-max-microvolt = <3300000>;
+};
+
+&sdhci0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&mmc1_cfg>;
+	bus-width = <4>;
+	cd-gpios = <&gpio K1_GPIO(75) GPIO_ACTIVE_LOW>;
+	no-mmc;
+	no-sdio;
+	no-1-8-v;
+	disable-wp;
+	cap-sd-highspeed;
+	max-frequency = <25000000>;
+	vmmc-supply = <&reg_pr_3v3>;
+	vqmmc-supply = <&aldo1>;
+	status = "okay";
+};
+
+&eth0 {
+	/delete-property/ nvmem-cells;
+	/delete-property/ nvmem-cell-names;
+	status = "okay";
+};
+
+&usbphy0 {
+	status = "okay";
+};
+
+&usb2_0 {
+	dr_mode = "host";
+	status = "okay";
+};
+
+&pdma {
+	status = "disabled";
+};
+
+&combo_phy {
+	status = "okay";
+};
+
+&pcie1_phy {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pcie1_3_cfg>;
+	status = "okay";
+};
+
+&pcie1_port {
+	phys = <&pcie1_phy>;
+	vpcie3v3-supply = <&reg_pr_3v3>;
+};
+
+&pcie1 {
+	status = "okay";
+};
