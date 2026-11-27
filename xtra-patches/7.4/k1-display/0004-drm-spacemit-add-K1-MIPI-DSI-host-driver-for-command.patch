@@ -1,11 +1,12 @@
-From a92cd3c71cb1ea89447f336fd38c0200a1fd27f0 Mon Sep 17 00:00:00 2001
+From cfdab332a125e894dab7060c091097ad64fde243 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Fri, 27 Nov 2026 21:56:50 +0000
 Subject: [PATCH 4/5] drm/spacemit: add K1 MIPI DSI host driver for commands
 
 Add a MIPI DSI host for the SpacemiT K1 that can send and receive
 commands. The link is brought up on the first transfer, at a fixed
-1 Gbps per lane. There is no video mode and no DRM bridge yet.
+1 Gbps per lane, and reset after a failed transfer. There is no video
+mode and no DRM bridge yet.
 
 Packet header ECC and payload CRC are computed in software, as the
 vendor driver does. Unlike that driver, report failed and unrecognized
@@ -13,14 +14,16 @@ reads as errors.
 
 Register layout and sequences come from the SpacemiT vendor kernel.
 
+On hardware, a low-power write completes. Reads do not yet.
+
 Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---
  drivers/gpu/drm/Kconfig                    |   1 +
  drivers/gpu/drm/Makefile                   |   1 +
  drivers/gpu/drm/spacemit/Kconfig           |  15 +
  drivers/gpu/drm/spacemit/Makefile          |   2 +
- drivers/gpu/drm/spacemit/spacemit-k1-dsi.c | 506 +++++++++++++++++++++
- 5 files changed, 525 insertions(+)
+ drivers/gpu/drm/spacemit/spacemit-k1-dsi.c | 510 +++++++++++++++++++++
+ 5 files changed, 529 insertions(+)
  create mode 100644 drivers/gpu/drm/spacemit/Kconfig
  create mode 100644 drivers/gpu/drm/spacemit/Makefile
  create mode 100644 drivers/gpu/drm/spacemit/spacemit-k1-dsi.c
@@ -80,10 +83,10 @@ index 0000000000000..093f16f567317
 +obj-$(CONFIG_DRM_SPACEMIT_K1_DSI) += spacemit-k1-dsi.o
 diff --git a/drivers/gpu/drm/spacemit/spacemit-k1-dsi.c b/drivers/gpu/drm/spacemit/spacemit-k1-dsi.c
 new file mode 100644
-index 0000000000000..448cb7524221f
+index 0000000000000..368299f2430da
 --- /dev/null
 +++ b/drivers/gpu/drm/spacemit/spacemit-k1-dsi.c
-@@ -0,0 +1,506 @@
+@@ -0,0 +1,510 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * SpacemiT K1 MIPI DSI host controller driver
@@ -467,13 +470,17 @@ index 0000000000000..448cb7524221f
 +	}
 +
 +	ret = k1_dsi_send(dsi, msg);
-+	if (ret)
-+		return ret;
++	if (!ret)
++		ret = msg->rx_len ? k1_dsi_receive(dsi, msg) : msg->tx_len;
 +
-+	if (msg->rx_len)
-+		return k1_dsi_receive(dsi, msg);
++	/*
++	 * A transfer that did not complete leaves the controller busy. Reset
++	 * it, so that the next transfer starts from a clean state.
++	 */
++	if (ret < 0)
++		k1_dsi_link_down(dsi);
 +
-+	return msg->tx_len;
++	return ret;
 +}
 +
 +static int k1_dsi_host_attach(struct mipi_dsi_host *host,
