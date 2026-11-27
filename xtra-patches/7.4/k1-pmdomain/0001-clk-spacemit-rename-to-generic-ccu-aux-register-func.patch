@@ -1,0 +1,65 @@
+From 30ec5bdafa021ac54bf287f02f1c2c6d547e73f2 Mon Sep 17 00:00:00 2001
+From: Yixun Lan <dlan@kernel.org>
+Date: Thu, 8 Oct 2026 02:57:55 +0000
+Subject: [PATCH 1/5] clk: spacemit: rename to generic ccu aux register
+ function
+
+The APMU (Application Subsystem Power Management Unit) register region
+block not only provides clock and reset support, but also the pm domain
+management capabilities, so function of aux registration is being renamed
+to a more generic one, in order to prepare for future addition of pm
+domain driver.
+
+No functional change is introduced therefore.
+
+Tested-by: Iker Pedrosa <ikerpedrosam@gmail.com>
+Reviewed-by: Iker Pedrosa <ikerpedrosam@gmail.com>
+Link: https://patch.msgid.link/20261008-04-k3-clk-pm-aux-v1-1-8372d7307694@kernel.org
+Signed-off-by: Yixun Lan <dlan@kernel.org>
+---
+ drivers/clk/spacemit/ccu_common.c | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/clk/spacemit/ccu_common.c b/drivers/clk/spacemit/ccu_common.c
+index 1ec07e2d5369f..b96f55a80918e 100644
+--- a/drivers/clk/spacemit/ccu_common.c
++++ b/drivers/clk/spacemit/ccu_common.c
+@@ -78,16 +78,16 @@ static void spacemit_adev_unregister(void *data)
+ 	auxiliary_device_uninit(adev);
+ }
+ 
+-static int spacemit_ccu_reset_register(struct device *dev,
++static int spacemit_ccu_aux_register(struct device *dev,
+ 				       struct regmap *regmap,
+-				       const char *reset_name)
++				       const char *name)
+ {
+ 	struct spacemit_ccu_adev *cadev;
+ 	struct auxiliary_device *adev;
+ 	int ret;
+ 
+-	/* Nothing to do if the CCU does not implement a reset controller */
+-	if (!reset_name)
++	/* Nothing to do if the CCU does not implement a reset/pm controller */
++	if (!name)
+ 		return 0;
+ 
+ 	cadev = kzalloc_obj(*cadev);
+@@ -97,7 +97,7 @@ static int spacemit_ccu_reset_register(struct device *dev,
+ 	cadev->regmap = regmap;
+ 
+ 	adev = &cadev->adev;
+-	adev->name = reset_name;
++	adev->name = name;
+ 	adev->dev.parent = dev;
+ 	adev->dev.release = spacemit_cadev_release;
+ 	adev->dev.of_node = dev->of_node;
+@@ -164,7 +164,7 @@ int spacemit_ccu_probe(struct platform_device *pdev, const char *compat)
+ 	if (ret)
+ 		return dev_err_probe(dev, ret, "failed to register clocks\n");
+ 
+-	ret = spacemit_ccu_reset_register(dev, base_regmap, data->reset_name);
++	ret = spacemit_ccu_aux_register(dev, base_regmap, data->reset_name);
+ 	if (ret)
+ 		return dev_err_probe(dev, ret, "failed to register resets\n");
+ 

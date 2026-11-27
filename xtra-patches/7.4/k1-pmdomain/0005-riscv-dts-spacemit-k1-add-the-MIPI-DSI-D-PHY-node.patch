@@ -1,0 +1,44 @@
+From 05f68a65d0de09f1723f661e83412cb700b67a0b Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Fri, 27 Nov 2026 21:12:11 +0000
+Subject: [PATCH 5/5] riscv: dts: spacemit: k1: add the MIPI DSI D-PHY node
+
+Add the D-PHY of the DSI output, in the LCD power domain. Nothing uses
+it yet.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ arch/riscv/boot/dts/spacemit/k1.dtsi | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/arch/riscv/boot/dts/spacemit/k1.dtsi b/arch/riscv/boot/dts/spacemit/k1.dtsi
+index 1d82028a16192..c78fc9b303a01 100644
+--- a/arch/riscv/boot/dts/spacemit/k1.dtsi
++++ b/arch/riscv/boot/dts/spacemit/k1.dtsi
+@@ -5,6 +5,7 @@
+ 
+ #include <dt-bindings/clock/spacemit,k1-syscon.h>
+ #include <dt-bindings/phy/phy.h>
++#include <dt-bindings/power/spacemit,k1-power.h>
+ 
+ #include "k1-pdma.h"
+ 
+@@ -890,6 +891,18 @@ pll: clock-controller@d4090000 {
+ 			#clock-cells = <1>;
+ 		};
+ 
++		mipi_dphy: phy@d421a980 {
++			compatible = "spacemit,k1-mipi-dphy";
++			reg = <0x0 0xd421a980 0x0 0x80>;
++			clocks = <&syscon_apmu CLK_DPU_HCLK>,
++				 <&syscon_apmu CLK_DPU_ESC>,
++				 <&syscon_apmu CLK_DPU_BIT>;
++			clock-names = "bus", "esc", "hs";
++			resets = <&syscon_apmu RESET_MIPI>;
++			power-domains = <&syscon_apmu K1_PMDOMAIN_LCD>;
++			#phy-cells = <0>;
++		};
++
+ 		syscon_apmu: system-controller@d4282800 {
+ 			compatible = "spacemit,k1-syscon-apmu";
+ 			reg = <0x0 0xd4282800 0x0 0x400>;
