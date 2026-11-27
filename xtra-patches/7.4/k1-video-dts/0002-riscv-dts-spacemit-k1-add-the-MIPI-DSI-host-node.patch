@@ -1,0 +1,54 @@
+From 726c7cc7581c3102075204668a2e77777964b599 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Fri, 27 Nov 2026 21:56:50 +0000
+Subject: [PATCH] riscv: dts: spacemit: k1: add the MIPI DSI host node
+
+Also define K1_HAS_DSI, so that a board file shared with older kernels
+can add its panel only when the node exists.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ arch/riscv/boot/dts/spacemit/k1.dtsi | 23 +++++++++++++++++++++++
+ 1 file changed, 23 insertions(+)
+
+diff --git a/arch/riscv/boot/dts/spacemit/k1.dtsi b/arch/riscv/boot/dts/spacemit/k1.dtsi
+index c78fc9b303a01..1fcb485577305 100644
+--- a/arch/riscv/boot/dts/spacemit/k1.dtsi
++++ b/arch/riscv/boot/dts/spacemit/k1.dtsi
+@@ -9,6 +9,9 @@
+ 
+ #include "k1-pdma.h"
+ 
++/* Lets board files shared with older kernels test for the DSI node. */
++#define K1_HAS_DSI
++
+ /dts-v1/;
+ / {
+ 	#address-cells = <2>;
+@@ -891,6 +894,26 @@ pll: clock-controller@d4090000 {
+ 			#clock-cells = <1>;
+ 		};
+ 
++		mipi_dsi: dsi@d421a800 {
++			compatible = "spacemit,k1-mipi-dsi";
++			reg = <0x0 0xd421a800 0x0 0x180>;
++			clocks = <&syscon_apmu CLK_DPU_HCLK>,
++				 <&syscon_apmu CLK_DPU_MCLK>,
++				 <&syscon_apmu CLK_DPU_ESC>;
++			clock-names = "bus", "core", "esc";
++			resets = <&syscon_apmu RESET_MIPI>,
++				 <&syscon_apmu RESET_DPU_HCLK>,
++				 <&syscon_apmu RESET_DPU_MCLK>,
++				 <&syscon_apmu RESET_DPU_ESC>;
++			reset-names = "mipi", "bus", "core", "esc";
++			power-domains = <&syscon_apmu K1_PMDOMAIN_LCD>;
++			phys = <&mipi_dphy>;
++			phy-names = "dphy";
++			#address-cells = <1>;
++			#size-cells = <0>;
++			status = "disabled";
++		};
++
+ 		mipi_dphy: phy@d421a980 {
+ 			compatible = "spacemit,k1-mipi-dphy";
+ 			reg = <0x0 0xd421a980 0x0 0x80>;

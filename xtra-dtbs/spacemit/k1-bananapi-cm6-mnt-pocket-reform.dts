@@ -175,3 +175,19 @@
 &pcie1 {
 	status = "okay";
 };
+
+#ifdef K1_HAS_DSI
+/* internal panel; commands only until there is a display controller driver */
+&mipi_dsi {
+	status = "okay";
+
+	panel@0 {
+		compatible = "jdi,lt070me05000";
+		reg = <0>;
+		reset-gpios = <&mnt_sc 0 GPIO_ACTIVE_LOW>;
+		dispv2-gpios = <&mnt_sc 8 GPIO_ACTIVE_HIGH>;	/* v2 backlight unlock */
+		enable-gpios = <&gpio K1_GPIO(71) GPIO_ACTIVE_HIGH>;	/* backlight enable */
+		burst-mode;
+	};
+};
+#endif
