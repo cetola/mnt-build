@@ -1,0 +1,33 @@
+From 325632e1ad02b33f163c9c917ecf48a361678b91 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Thu, 26 Nov 2026 04:12:39 +0000
+Subject: [PATCH] usb: chipidea: usb2: keep stream mode enabled on SpacemiT K1
+
+The SpacemiT vendor EHCI driver leaves stream mode enabled (USBMODE
+SDIS clear). With CI_HDRC_DISABLE_STREAMING, on a BPI-CM6 in the MNT
+RCM4 adapter, devices behind a second-tier hub fail to enumerate
+(-EPIPE, -EPROTO) or are reset repeatedly, while the vendor driver
+runs the same hardware without errors.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/usb/chipidea/ci_hdrc_usb2.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/drivers/usb/chipidea/ci_hdrc_usb2.c b/drivers/usb/chipidea/ci_hdrc_usb2.c
+index 0572c6aac4f07..d208272fde87d 100644
+--- a/drivers/usb/chipidea/ci_hdrc_usb2.c
++++ b/drivers/usb/chipidea/ci_hdrc_usb2.c
+@@ -36,8 +36,7 @@ static const struct ci_hdrc_platform_data ci_zevio_pdata = {
+ 
+ static const struct ci_hdrc_platform_data ci_k1_pdata = {
+ 	.capoffset	= DEF_CAPOFFSET,
+-	.flags		= CI_HDRC_DISABLE_STREAMING |
+-			  CI_HDRC_FORCE_VBUS_ACTIVE_ALWAYS |
++	.flags		= CI_HDRC_FORCE_VBUS_ACTIVE_ALWAYS |
+ 			  CI_HDRC_DUAL_ROLE_NOT_OTG,
+ };
+ 
+-- 
+2.43.0
+

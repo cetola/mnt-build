@@ -1,0 +1,158 @@
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.remote-ip=54.204.34.130
+ARC-Seal: i=1; d=subspace.kernel.org; s=arc20261015; a=rsa-sha256; cv=none;
+	t=1795095752;
+	b=a1beSnBGocVTTyMMssjmcoWA/vnejDmZBY66VeufBhuIvX+1+d9Ip3ZIh+eOwTFABTh6
+	 DnwF0yVSYPN5SfzzLQ2UBCUYRmwhs2CX4zHjYCwa/8BNxf+oALyyo7vNrMq/jAjrPFqxZ
+	 WucB3VTv9C9Kx0iYn8v+ZPbkpMt0V/6TI7EPhmH2lfT7QzxP6k0KctwOE9KinV0mZNg3a
+	 GHDhzu0nxrzFRw7V2XRv9KTshu6PEH85atidLn9ou3gjoMb76ZZ/PYIsBrhzxphiILxlS
+	 1dj6DNHdMvm9d7HMbXac6+9ySnek+6wBErbI7CSKMYRsb2c1NZACPYn8alAU3s/CNCA==
+ARC-Message-Signature: i=1; d=subspace.kernel.org; s=arc20261015;
+	a=rsa-sha256; c=relaxed/relaxed; t=1795095752;
+	h=DMARC-Filter:DKIM-Signature:X-QQ-mid:X-QQ-Originating-IP:Received:
+	 X-QQ-SSF:X-QQ-GoodBg:X-BIZMAIL-ID:EX-QQ-RecipientCnt:From:Date:
+	 Subject:MIME-Version:Content-Type:Content-Transfer-Encoding:
+	 Message-Id:References:In-Reply-To:To:Cc:X-Mailer:
+	 X-Developer-Signature:X-Developer-Key:X-QQ-SENDSIZE:Feedback-ID:
+	 X-QQ-XMAILINFO:X-QQ-XMRINFO:X-QQ-RECHKSPAM;
+	bh=o7r3ZVjdaaHSXOLU8RPvhLIxxKrBAHiA5Kh6IGyVjpo=;
+	b=j6j96qWXSwcFHSXrEL8gipe932bLxILSrZLIJquukmxRAQOmmW4WTsX6Q1LSQmQwQxOp
+	 Wc9QG6eZTsXGfsVnyOWZ9b7pC48wBZ9GjiC0bOf5mZeJxpqgpeTuDnpjApC+tkBNdnpWg
+	 t5xe8IoYs4tpBqYdR/nHYKQNrpfVLiogDfq65ZcyX0LFPTVZKO2wXW9r2LGM5EisvClyu
+	 0DIP+jjB/77lXsf9m1X55qqkRXhub822j/Yv31V9bSLzNQynMZv9FqvEREuTnv2a4pI05
+	 OYPfZKwlsTk7wU8SNcvOGfLwF0AP6O7Y9jmaC0Va+ooZZIMuE4Hhp6hbVKXsszQI6Nw==
+ARC-Authentication-Results: i=1; smtp.subspace.kernel.org;
+	dmarc=none header.from=linux.spacemit.com;
+	spf=none smtp.mailfrom=linux.spacemit.com;
+	dkim=pass header.d=linux.spacemit.com header.i=@linux.spacemit.com header.a=rsa-sha256 header.s=mxsw2412 header.b="xeT/TWmF";
+	arc=none smtp.remote-ip=54.204.34.130
+Received: from smtpbguseast2.qq.com (smtpbguseast2.qq.com [54.204.34.130])
+	(using TLSv1.2 with cipher ECDHE-ECDSA-AES256-GCM-SHA384 (256/256 bits))
+	(No client certificate requested)
+	by smtp.subspace.kernel.org (Postfix) with ESMTPS id EC8A960A262A
+	for <spacemit@lists.linux.dev>; Thu, 19 Nov 2026 13:42:30 +0000 (UTC)
+DMARC-Filter: OpenDMARC Filter v1.4.2 smtp.subspace.kernel.org EC8A960A262A
+Authentication-Results: smtp.subspace.kernel.org; dmarc=none (p=none dis=none) header.from=linux.spacemit.com
+Authentication-Results: smtp.subspace.kernel.org; spf=none smtp.mailfrom=linux.spacemit.com
+Authentication-Results: smtp.subspace.kernel.org;
+	dkim=pass (1024-bit key) header.d=linux.spacemit.com header.i=@linux.spacemit.com header.a=rsa-sha256 header.s=mxsw2412 header.b=xeT/TWmF
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=linux.spacemit.com;
+	s=mxsw2412; t=1795095724;
+	bh=o7r3ZVjdaaHSXOLU8RPvhLIxxKrBAHiA5Kh6IGyVjpo=;
+	h=From:Date:Subject:MIME-Version:Message-Id:To;
+	b=xeT/TWmFr5Q8zRsc768PnyNDnf/fV8coFMeigU3XyXsKR3jNoHSW9SORsX6cha1hR
+	 iyW8hWoczaPsyE5wAvRJ1lY9sO9NYvQAweqv7l+thJZjZLEJk8ivoNxcSLwfMvh5st
+	 hzcrldfdGmVV+zWoNnHk1yuQFuCoRemKJtKZeh6c=
+X-QQ-mid: zesmtpgz7t1795095723tdec0d11a
+X-QQ-Originating-IP: vSWV7FEtXe5qcnty5tw0a24FtQdR8Q47PyboIQGlWSo=
+Received: from LT-PANJUNZHONG.dc.com ( [120.237.158.181])
+	by bizesmtp.qq.com (ESMTP) with
+	id ; Thu, 19 Nov 2026 21:42:01 +0800 (CST)
+X-QQ-SSF: 0000000000000000000000000000000
+X-QQ-GoodBg: 0
+X-BIZMAIL-ID: 3058943775656225345
+EX-QQ-RecipientCnt: 15
+From: Junzhong Pan <panjunzhong@linux.spacemit.com>
+Date: Thu, 19 Nov 2026 21:41:53 +0800
+Subject: [PATCH v6 4/5] usb: chipidea: usb2: add optional reset support
+X-Mailing-List: spacemit@lists.linux.dev
+List-Id: <spacemit.lists.linux.dev>
+List-Post: <mailto:spacemit@lists.linux.dev>
+List-Help: <mailto:spacemit+help@lists.linux.dev>
+List-Subscribe: <mailto:spacemit+subscribe@lists.linux.dev>
+List-Unsubscribe: <mailto:spacemit+unsubscribe@lists.linux.dev>
+List-Owner: <mailto:spacemit+owner@lists.linux.dev>
+Precedence: list
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+Message-Id: <20261119-b4-spacemit-k1-usb2-v6-4-4a9add848728@linux.spacemit.com>
+References: <20261119-b4-spacemit-k1-usb2-v6-0-4a9add848728@linux.spacemit.com>
+In-Reply-To: <20261119-b4-spacemit-k1-usb2-v6-0-4a9add848728@linux.spacemit.com>
+To: Greg Kroah-Hartman <gregkh@linuxfoundation.org>,
+ Rob Herring <robh@kernel.org>, Krzysztof Kozlowski <krzk+dt@kernel.org>,
+ Conor Dooley <conor+dt@kernel.org>, Peter Chen <peter.chen@kernel.org>,
+ Xu Yang <xu.yang_2@nxp.com>, Peng Fan <peng.fan@nxp.com>
+Cc: linux-usb@vger.kernel.org, devicetree@vger.kernel.org,
+ linux-kernel@vger.kernel.org, Yixun Lan <dlan@kernel.org>,
+ Troy Mitchell <troy.mitchell@linux.spacemit.com>, spacemit@lists.linux.dev,
+ Junzhong Pan <panjunzhong@linux.spacemit.com>,
+ Ze Huang <huang.ze@linux.dev>
+X-Mailer: b4 0.14.3
+X-Developer-Signature: v=1; a=ed25519-sha256; t=1795095710; l=1684;
+ i=panjunzhong@linux.spacemit.com; s=20260306; h=from:subject:message-id;
+ bh=nFOZIU/Ylf8z5EmSV9gLS22+A/wBYB8yjoD+NE2hD6w=;
+ b=F5QHcItps7+ypMj1XfPz3HsQXkOXDIeZD3310D0W3K10ktsfWRDPb/tNSzVC8PJ2m1vWXzW9l
+ aKQrA+tf2/qCFq4VtiZIdKBf8Y4KO3grs+AgOQYjpPU2QP1nYS6ylRm
+X-Developer-Key: i=panjunzhong@linux.spacemit.com; a=ed25519;
+ pk=bY08BOg2T9H93/jG8fEE/tVmdXoQQMp9M2rtzPFoyJg=
+X-QQ-SENDSIZE: 520
+Feedback-ID: zesmtpgz:linux.spacemit.com:qybglogicsvrgz:qybglogicsvrgz5b-2
+X-QQ-XMAILINFO: NF8U9ZVtcraipSn7GZf1bxdqpKDJH5un1BXXcjKYV548EwiLC9GFN5db
+	NvOYzEdOqQbSNO5pwwKsSQixMI08lafOSaeAdglIAcQ+1JYy7bzm8ZLLcVwFqgKuxAO2/1h
+	rR+kJ4AZ8JMj4BDfM9ycrrSf9A+DV3QRUEJXsZGTZYrljctRf/7UPdOR84g9JU9Lm1W12GI
+	d6nfU1FFVlEB8UZTXL5YrW5ehsLytCcfGx61RBB79d3oPN8FQ0J6PFfo/8Lp7j5J7E86LHB
+	H+L+KVPQd0Rc9T//9lYrJKPqgXbnHMcJ4pUwaNzC2jg6fXjrGzc9PJgAKygJBQUD3GuFu65
+	2cWuk2NZ6BuKFYItGRv5fLLclQ4wsf0x/Y8i28Iv3k84yAtWNonMnmOYIawq6T+VD8sY1+x
+	1SUXpZrj40eRvGrkzu3zAHWa6KetRp8YJxE8VMIbRCPagYBOOxET8xLOLcylCHJ82MZ4O15
+	XhLB3eo8OlbtHFsgm0d41DkA3e+lG699UTL0g1CqYhqq1nskfQrB6YHOvmBHS85uOWwM2pp
+	Zy/ZlL16Tk9fPI2PB6qqYWfNw/GRNDSsSRDKIMu/T3Ol4p8W+K1KFQdLFotYYBLpoe2mxX6
+	zjRGTB6jCIlpNgvag/o0zhX2gJsyXh3VmLveDTBNOhDu9q9cy2NbedOlkQy0llxuXv/Z4SR
+	97HMhEZ2tCr5u2rq7aD8iFyP86Ie3MnnQL401miinh5pAAvCXa/oQJZWz6A1Om7N6BR7eTy
+	2BQIcGf5fb54witfivTbeH99SIcT4XN5d8J25K32MvSRPeVEzzCaR1arHFUZztIZjv0yqE7
+	uY7XAp7bfbZFaeHfe8QXszHxQgtfKNLI8PE4DkoEbyd8k99C29S1NBWAOA6j7LR4KJ493yL
+	OLG7BZKmJsTvjHfgoCuIHJFBYRxcqzrWTCxWGjanPtcs3ThtnJxaRB8GzOpx6GoN41Rc51d
+	Jf99FmPHbngFqxmYtTu9bJMVm0ZEnRTWuqKAInMdrWhwUlzOYoOnA3GJb9LXVe7B2lvkn+L
+	cs8D1AXfGlfjoxzk+j9ws+GLPFyRJAfPWXNL35BXRgHAl2DmeyWGlJeZPmdFtMKxiLXD6Fk
+	Gi6G0rVNzTss9UGIXo8tKEyzNYis2x62g==
+X-QQ-XMRINFO: OWPUhxQsoeAVwkVaQIEGSKwwgKCxK/fD5g==
+X-QQ-RECHKSPAM: 0
+
+The USB2 controller of SpacemiT K1 SoC requires reset support, to keep
+compatibility, add optional reset support.
+
+Tested-by: Ze Huang <huang.ze@linux.dev>
+Reviewed-by: Troy Mitchell <troy.mitchell@linux.spacemit.com>
+Reviewed-by: Yixun Lan <dlan@kernel.org>
+Acked-by: Peter Chen <peter.chen@kernel.org>
+Signed-off-by: Junzhong Pan <panjunzhong@linux.spacemit.com>
+---
+ drivers/usb/chipidea/ci_hdrc_usb2.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/drivers/usb/chipidea/ci_hdrc_usb2.c b/drivers/usb/chipidea/ci_hdrc_usb2.c
+index 264546247a08..226e3cab6ca0 100644
+--- a/drivers/usb/chipidea/ci_hdrc_usb2.c
++++ b/drivers/usb/chipidea/ci_hdrc_usb2.c
+@@ -12,6 +12,7 @@
+ #include <linux/phy/phy.h>
+ #include <linux/platform_device.h>
+ #include <linux/property.h>
++#include <linux/reset.h>
+ #include <linux/usb/chipidea.h>
+ #include <linux/usb/hcd.h>
+ #include <linux/usb/ulpi.h>
+@@ -48,6 +49,7 @@ static int ci_hdrc_usb2_probe(struct platform_device *pdev)
+ 	struct ci_hdrc_platform_data *ci_pdata = dev_get_platdata(dev);
+ 	const struct ci_hdrc_platform_data *data;
+ 	struct clk *clk;
++	struct reset_control *reset;
+ 	int ret;
+ 
+ 	if (!ci_pdata) {
+@@ -67,6 +69,11 @@ static int ci_hdrc_usb2_probe(struct platform_device *pdev)
+ 		return dev_err_probe(dev, PTR_ERR(clk),
+ 				     "failed to get or enable the clock\n");
+ 
++	reset = devm_reset_control_get_optional_exclusive_deasserted(dev, NULL);
++	if (IS_ERR(reset))
++		return dev_err_probe(dev, PTR_ERR(reset),
++				     "failed to get or deassert the reset control\n");
++
+ 	ci_pdata->name = dev_name(dev);
+ 
+ 	ci_pdev = ci_hdrc_add_device(dev, pdev->resource,
+
+-- 
+2.34.1
+
