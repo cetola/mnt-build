@@ -1,4 +1,4 @@
-From b5877afe71e53369ffb20cc324697f0f14576f04 Mon Sep 17 00:00:00 2001
+From 97bb80c34d6e0c6c0db3be5fd1f46d09ed7557ea Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Fri, 27 Nov 2026 21:05:16 +0000
 Subject: [PATCH 2/2] phy: spacemit: add K1 MIPI DSI D-PHY driver
@@ -18,8 +18,8 @@ Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---
  drivers/phy/spacemit/Kconfig            |  17 ++
  drivers/phy/spacemit/Makefile           |   1 +
- drivers/phy/spacemit/phy-k1-mipi-dphy.c | 341 ++++++++++++++++++++++++
- 3 files changed, 359 insertions(+)
+ drivers/phy/spacemit/phy-k1-mipi-dphy.c | 348 ++++++++++++++++++++++++
+ 3 files changed, 366 insertions(+)
  create mode 100644 drivers/phy/spacemit/phy-k1-mipi-dphy.c
 
 diff --git a/drivers/phy/spacemit/Kconfig b/drivers/phy/spacemit/Kconfig
@@ -62,10 +62,10 @@ index f679c1851b4f0..5a48b4b460200 100644
  obj-$(CONFIG_PHY_SPACEMIT_K3_COMBO_PHY)		+= phy-k3-combo.o
 diff --git a/drivers/phy/spacemit/phy-k1-mipi-dphy.c b/drivers/phy/spacemit/phy-k1-mipi-dphy.c
 new file mode 100644
-index 0000000000000..6930ff301d73a
+index 0000000000000..1a1666817dc63
 --- /dev/null
 +++ b/drivers/phy/spacemit/phy-k1-mipi-dphy.c
-@@ -0,0 +1,341 @@
+@@ -0,0 +1,348 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * SpacemiT K1 MIPI DSI D-PHY driver
@@ -275,25 +275,27 @@ index 0000000000000..6930ff301d73a
 +	if (!dphy->cfg.hs_clk_rate)
 +		return -EINVAL;
 +
-+	ret = clk_set_rate(dphy->hs_clk, dphy->cfg.hs_clk_rate);
++	esc_rate = clk_get_rate(dphy->esc_clk);
++	if (!esc_rate)
++		return -EINVAL;
++
++	/* The clock has to be running for a frequency change to complete. */
++	ret = clk_prepare_enable(dphy->hs_clk);
 +	if (ret)
 +		return ret;
++
++	ret = clk_set_rate(dphy->hs_clk, dphy->cfg.hs_clk_rate);
++	if (ret)
++		goto err_disable;
 +
 +	/* A slower link than requested cannot carry the video stream. */
 +	hs_rate = clk_get_rate(dphy->hs_clk);
 +	if (hs_rate < dphy->cfg.hs_clk_rate || hs_rate > K1_DPHY_MAX_HS_RATE) {
 +		dev_err(&phy->dev, "cannot use HS rate %lu for requested %lu\n",
 +			hs_rate, dphy->cfg.hs_clk_rate);
-+		return -EINVAL;
++		ret = -EINVAL;
++		goto err_disable;
 +	}
-+
-+	esc_rate = clk_get_rate(dphy->esc_clk);
-+	if (!esc_rate)
-+		return -EINVAL;
-+
-+	ret = clk_prepare_enable(dphy->hs_clk);
-+	if (ret)
-+		return ret;
 +
 +	k1_dphy_calc_timing(&dphy->cfg, esc_rate, &timing);
 +
@@ -311,6 +313,11 @@ index 0000000000000..6930ff301d73a
 +	       dphy->base + K1_DPHY_CTRL_2);
 +
 +	return 0;
++
++err_disable:
++	clk_disable_unprepare(dphy->hs_clk);
++
++	return ret;
 +}
 +
 +static int k1_dphy_power_off(struct phy *phy)
