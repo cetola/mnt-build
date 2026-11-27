@@ -1,4 +1,4 @@
-From 5773369b0ba776e34c3c79e0bb16c4a5bab7c08c Mon Sep 17 00:00:00 2001
+From cccda5ffb7d758260b209512c5391e3083732208 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Fri, 27 Nov 2026 21:56:50 +0000
 Subject: [PATCH 3/5] dt-bindings: display: spacemit: add K1 MIPI DSI host
@@ -7,16 +7,16 @@ Describe the DSI host controller of the SpacemiT K1 SoC.
 
 Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---
- .../spacemit/spacemit,k1-mipi-dsi.yaml        | 92 +++++++++++++++++++
- 1 file changed, 92 insertions(+)
+ .../spacemit/spacemit,k1-mipi-dsi.yaml        | 128 ++++++++++++++++++
+ 1 file changed, 128 insertions(+)
  create mode 100644 Documentation/devicetree/bindings/display/spacemit/spacemit,k1-mipi-dsi.yaml
 
 diff --git a/Documentation/devicetree/bindings/display/spacemit/spacemit,k1-mipi-dsi.yaml b/Documentation/devicetree/bindings/display/spacemit/spacemit,k1-mipi-dsi.yaml
 new file mode 100644
-index 0000000000000..c53f568ebd9ec
+index 0000000000000..e4a7994957dd8
 --- /dev/null
 +++ b/Documentation/devicetree/bindings/display/spacemit/spacemit,k1-mipi-dsi.yaml
-@@ -0,0 +1,92 @@
+@@ -0,0 +1,128 @@
 +# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
 +%YAML 1.2
 +---
@@ -36,7 +36,9 @@ index 0000000000000..c53f568ebd9ec
 +    const: spacemit,k1-mipi-dsi
 +
 +  reg:
-+    maxItems: 1
++    items:
++      - description: DSI host controller registers
++      - description: Registers that route the display controller to the host
 +
 +  clocks:
 +    items:
@@ -73,6 +75,22 @@ index 0000000000000..c53f568ebd9ec
 +  phy-names:
 +    const: dphy
 +
++  ports:
++    $ref: /schemas/graph.yaml#/properties/ports
++
++    properties:
++      port@0:
++        $ref: /schemas/graph.yaml#/properties/port
++        description: Pixel input from the display controller
++
++      port@1:
++        $ref: /schemas/graph.yaml#/properties/port
++        description: Output to the panel or bridge
++
++    required:
++      - port@0
++      - port@1
++
 +required:
 +  - compatible
 +  - reg
@@ -83,6 +101,7 @@ index 0000000000000..c53f568ebd9ec
 +  - power-domains
 +  - phys
 +  - phy-names
++  - ports
 +
 +unevaluatedProperties: false
 +
@@ -93,7 +112,7 @@ index 0000000000000..c53f568ebd9ec
 +
 +    dsi@d421a800 {
 +        compatible = "spacemit,k1-mipi-dsi";
-+        reg = <0xd421a800 0x180>;
++        reg = <0xd421a800 0x180>, <0xd421a1a8 0x14>;
 +        clocks = <&syscon_apmu CLK_DPU_HCLK>,
 +                 <&syscon_apmu CLK_DPU_MCLK>,
 +                 <&syscon_apmu CLK_DPU_ESC>;
@@ -108,4 +127,21 @@ index 0000000000000..c53f568ebd9ec
 +        phy-names = "dphy";
 +        #address-cells = <1>;
 +        #size-cells = <0>;
++
++        ports {
++            #address-cells = <1>;
++            #size-cells = <0>;
++
++            port@0 {
++                reg = <0>;
++            };
++
++            port@1 {
++                reg = <1>;
++
++                endpoint {
++                    remote-endpoint = <&panel_in>;
++                };
++            };
++        };
 +    };

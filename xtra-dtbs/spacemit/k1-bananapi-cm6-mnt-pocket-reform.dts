@@ -177,7 +177,7 @@
 };
 
 #ifdef K1_HAS_DSI
-/* internal panel; commands only until there is a display controller driver */
+/* internal panel; no picture until there is a display controller driver */
 &mipi_dsi {
 	status = "okay";
 
@@ -188,6 +188,18 @@
 		dispv2-gpios = <&mnt_sc 8 GPIO_ACTIVE_HIGH>;	/* v2 backlight unlock */
 		enable-gpios = <&gpio K1_GPIO(71) GPIO_ACTIVE_HIGH>;	/* backlight enable */
 		burst-mode;
+
+		port {
+			panel_in: endpoint {
+				remote-endpoint = <&mipi_dsi_out>;
+			};
+		};
+	};
+};
+
+&mipi_dsi_out_port {
+	mipi_dsi_out: endpoint {
+		remote-endpoint = <&panel_in>;
 	};
 };
 #endif
