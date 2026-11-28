@@ -1,0 +1,40 @@
+From 7655590bab7384aa8b39e754c01a1d9430718221 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Sat, 28 Nov 2026 01:02:55 +0000
+Subject: [PATCH] riscv: dts: spacemit: bananapi-cm6: power the DSI D-PHY
+
+DLDO1 of the PMIC feeds AVDD12_DSI on the module. Nothing referred to it,
+so it was switched off after boot. Fix it at 1.2 V and give it to the
+D-PHY.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ arch/riscv/boot/dts/spacemit/k1-bananapi-cm6.dtsi | 11 ++++++++---
+ 1 file changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/arch/riscv/boot/dts/spacemit/k1-bananapi-cm6.dtsi b/arch/riscv/boot/dts/spacemit/k1-bananapi-cm6.dtsi
+index 81c40df2a3663..c390c5d460fc0 100644
+--- a/arch/riscv/boot/dts/spacemit/k1-bananapi-cm6.dtsi
++++ b/arch/riscv/boot/dts/spacemit/k1-bananapi-cm6.dtsi
+@@ -175,9 +175,10 @@ aldo4 {
+ 				regulator-max-microvolt = <3400000>;
+ 			};
+ 
+-			dldo1 {
+-				regulator-min-microvolt = <500000>;
+-				regulator-max-microvolt = <3400000>;
++			/* AVDD12_DSI */
++			reg_dsi_1v2: dldo1 {
++				regulator-min-microvolt = <1200000>;
++				regulator-max-microvolt = <1200000>;
+ 				regulator-boot-on;
+ 			};
+ 
+@@ -215,3 +216,7 @@ dldo7 {
+ 		};
+ 	};
+ };
++
++&mipi_dphy {
++	avdd12-supply = <&reg_dsi_1v2>;
++};

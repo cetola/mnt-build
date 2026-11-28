@@ -1,4 +1,4 @@
-From 97bb80c34d6e0c6c0db3be5fd1f46d09ed7557ea Mon Sep 17 00:00:00 2001
+From 65667ed46691d51806050dfbddee8559ffa1102d Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Fri, 27 Nov 2026 21:05:16 +0000
 Subject: [PATCH 2/2] phy: spacemit: add K1 MIPI DSI D-PHY driver
@@ -12,21 +12,23 @@ The register layout and hardware timing adjustments come from the
 SpacemiT vendor kernel. Unlike that code, clamp the wakeup count so that
 it cannot spill into the TA_GO field.
 
-Compile tested only.
+The analog 1.2 V supply is switched on with the PHY. With it off the
+registers work and transfers appear to complete, but nothing reaches the
+panel.
 
 Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---
- drivers/phy/spacemit/Kconfig            |  17 ++
+ drivers/phy/spacemit/Kconfig            |  18 ++
  drivers/phy/spacemit/Makefile           |   1 +
- drivers/phy/spacemit/phy-k1-mipi-dphy.c | 348 ++++++++++++++++++++++++
- 3 files changed, 366 insertions(+)
+ drivers/phy/spacemit/phy-k1-mipi-dphy.c | 366 ++++++++++++++++++++++++
+ 3 files changed, 385 insertions(+)
  create mode 100644 drivers/phy/spacemit/phy-k1-mipi-dphy.c
 
 diff --git a/drivers/phy/spacemit/Kconfig b/drivers/phy/spacemit/Kconfig
-index b5f36621b2075..d01f6d91eea3b 100644
+index b5f36621b2075..169ced3875a75 100644
 --- a/drivers/phy/spacemit/Kconfig
 +++ b/drivers/phy/spacemit/Kconfig
-@@ -2,6 +2,23 @@
+@@ -2,6 +2,24 @@
  #
  # Phy drivers for SpacemiT platforms
  #
@@ -36,6 +38,7 @@ index b5f36621b2075..d01f6d91eea3b 100644
 +	depends on COMMON_CLK
 +	depends on HAS_IOMEM
 +	depends on OF
++	depends on REGULATOR
 +	select GENERIC_PHY
 +	select GENERIC_PHY_MIPI_DPHY
 +	default ARCH_SPACEMIT
@@ -62,10 +65,10 @@ index f679c1851b4f0..5a48b4b460200 100644
  obj-$(CONFIG_PHY_SPACEMIT_K3_COMBO_PHY)		+= phy-k3-combo.o
 diff --git a/drivers/phy/spacemit/phy-k1-mipi-dphy.c b/drivers/phy/spacemit/phy-k1-mipi-dphy.c
 new file mode 100644
-index 0000000000000..1a1666817dc63
+index 0000000000000..d0381b8ca7f6b
 --- /dev/null
 +++ b/drivers/phy/spacemit/phy-k1-mipi-dphy.c
-@@ -0,0 +1,348 @@
+@@ -0,0 +1,366 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * SpacemiT K1 MIPI DSI D-PHY driver
@@ -88,6 +91,7 @@ index 0000000000000..1a1666817dc63
 +#include <linux/phy/phy-mipi-dphy.h>
 +#include <linux/platform_device.h>
 +#include <linux/pm_runtime.h>
++#include <linux/regulator/consumer.h>
 +#include <linux/reset.h>
 +#include <linux/time64.h>
 +
@@ -135,6 +139,7 @@ index 0000000000000..1a1666817dc63
 +	struct clk *bus_clk;
 +	struct clk *esc_clk;
 +	struct clk *hs_clk;
++	struct regulator *avdd12;
 +	struct phy_configure_opts_mipi_dphy cfg;
 +};
 +
@@ -279,10 +284,18 @@ index 0000000000000..1a1666817dc63
 +	if (!esc_rate)
 +		return -EINVAL;
 +
++	/*
++	 * Without it the registers still work and transfers appear to be sent,
++	 * but nothing appears on the lanes.
++	 */
++	ret = regulator_enable(dphy->avdd12);
++	if (ret)
++		return ret;
++
 +	/* The clock has to be running for a frequency change to complete. */
 +	ret = clk_prepare_enable(dphy->hs_clk);
 +	if (ret)
-+		return ret;
++		goto err_supply;
 +
 +	ret = clk_set_rate(dphy->hs_clk, dphy->cfg.hs_clk_rate);
 +	if (ret)
@@ -316,6 +329,8 @@ index 0000000000000..1a1666817dc63
 +
 +err_disable:
 +	clk_disable_unprepare(dphy->hs_clk);
++err_supply:
++	regulator_disable(dphy->avdd12);
 +
 +	return ret;
 +}
@@ -330,6 +345,7 @@ index 0000000000000..1a1666817dc63
 +	writel(0, dphy->base + K1_DPHY_ANA_PWR_CTRL);
 +
 +	clk_disable_unprepare(dphy->hs_clk);
++	regulator_disable(dphy->avdd12);
 +
 +	return 0;
 +}
@@ -375,6 +391,11 @@ index 0000000000000..1a1666817dc63
 +	if (IS_ERR(dphy->hs_clk))
 +		return dev_err_probe(dev, PTR_ERR(dphy->hs_clk),
 +				     "failed to get high-speed clock\n");
++
++	dphy->avdd12 = devm_regulator_get(dev, "avdd12");
++	if (IS_ERR(dphy->avdd12))
++		return dev_err_probe(dev, PTR_ERR(dphy->avdd12),
++				     "failed to get the 1.2 V supply\n");
 +
 +	/* Shared with the DSI host controller. */
 +	reset = devm_reset_control_get_shared_deasserted(dev, NULL);

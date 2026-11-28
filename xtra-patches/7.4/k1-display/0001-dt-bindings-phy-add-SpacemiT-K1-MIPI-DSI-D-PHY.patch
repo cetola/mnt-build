@@ -1,4 +1,4 @@
-From 52a8c8e84af87a86966005147200708a6fddfb9c Mon Sep 17 00:00:00 2001
+From 86374580937c0969c47abd7440907163030fae89 Mon Sep 17 00:00:00 2001
 From: Stephano Cetola <stephano@cetola.net>
 Date: Fri, 27 Nov 2026 21:05:16 +0000
 Subject: [PATCH 1/2] dt-bindings: phy: add SpacemiT K1 MIPI DSI D-PHY
@@ -9,16 +9,16 @@ controller.
 
 Signed-off-by: Stephano Cetola <stephano@cetola.net>
 ---
- .../bindings/phy/spacemit,k1-mipi-dphy.yaml   | 68 +++++++++++++++++++
- 1 file changed, 68 insertions(+)
+ .../bindings/phy/spacemit,k1-mipi-dphy.yaml   | 73 +++++++++++++++++++
+ 1 file changed, 73 insertions(+)
  create mode 100644 Documentation/devicetree/bindings/phy/spacemit,k1-mipi-dphy.yaml
 
 diff --git a/Documentation/devicetree/bindings/phy/spacemit,k1-mipi-dphy.yaml b/Documentation/devicetree/bindings/phy/spacemit,k1-mipi-dphy.yaml
 new file mode 100644
-index 0000000000000..a1037025dbad2
+index 0000000000000..d60f2b4902da8
 --- /dev/null
 +++ b/Documentation/devicetree/bindings/phy/spacemit,k1-mipi-dphy.yaml
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,73 @@
 +# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
 +%YAML 1.2
 +---
@@ -60,6 +60,9 @@ index 0000000000000..a1037025dbad2
 +  power-domains:
 +    maxItems: 1
 +
++  avdd12-supply:
++    description: 1.2 V analog supply of the PHY
++
 +  "#phy-cells":
 +    const: 0
 +
@@ -69,6 +72,7 @@ index 0000000000000..a1037025dbad2
 +  - clocks
 +  - clock-names
 +  - resets
++  - avdd12-supply
 +  - "#phy-cells"
 +
 +additionalProperties: false
@@ -85,5 +89,6 @@ index 0000000000000..a1037025dbad2
 +                 <&syscon_apmu CLK_DPU_BIT>;
 +        clock-names = "bus", "esc", "hs";
 +        resets = <&syscon_apmu RESET_MIPI>;
++        avdd12-supply = <&reg_dsi_1v2>;
 +        #phy-cells = <0>;
 +    };
