@@ -6,8 +6,10 @@
 /dts-v1/;
 
 #include "k1-bananapi-cm6.dtsi"
+#include "k1-opp.dtsi"
 
 #include <dt-bindings/leds/common.h>
+#include <dt-bindings/thermal/thermal.h>
 
 / {
 	model = "MNT Pocket Reform with Banana Pi BPI-CM6 K1 Module";
@@ -107,6 +109,107 @@
 	rtc@68 {
 		compatible = "nxp,pcf8523";
 		reg = <0x68>;
+	};
+};
+
+/* CPU rail: bucks 1 and 2 are joined, buck 1 senses it */
+&i2c8 {
+	pmic@41 {
+		regulators {
+			reg_cpu: buck1 {
+			};
+		};
+	};
+};
+
+&cpu_0 {
+	cpu-supply = <&reg_cpu>;
+	#cooling-cells = <2>;
+};
+
+&cpu_1 {
+	cpu-supply = <&reg_cpu>;
+	#cooling-cells = <2>;
+};
+
+&cpu_2 {
+	cpu-supply = <&reg_cpu>;
+	#cooling-cells = <2>;
+};
+
+&cpu_3 {
+	cpu-supply = <&reg_cpu>;
+	#cooling-cells = <2>;
+};
+
+&cpu_4 {
+	cpu-supply = <&reg_cpu>;
+	#cooling-cells = <2>;
+};
+
+&cpu_5 {
+	cpu-supply = <&reg_cpu>;
+	#cooling-cells = <2>;
+};
+
+&cpu_6 {
+	cpu-supply = <&reg_cpu>;
+	#cooling-cells = <2>;
+};
+
+&cpu_7 {
+	cpu-supply = <&reg_cpu>;
+	#cooling-cells = <2>;
+};
+
+/* Poll too: throttling did not start from the sensor interrupt alone */
+&{/thermal-zones/soc-thermal} {
+	polling-delay = <1000>;
+};
+
+&{/thermal-zones/package-thermal} {
+	polling-delay = <1000>;
+};
+
+&{/thermal-zones/gpu-thermal} {
+	polling-delay = <1000>;
+};
+
+&{/thermal-zones/cluster0-thermal} {
+	polling-delay = <500>;
+
+	trips {
+		cluster0_alert: cluster0-alert {
+		};
+	};
+
+	cooling-maps {
+		map0 {
+			trip = <&cluster0_alert>;
+			cooling-device = <&cpu_0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+					 <&cpu_1 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+					 <&cpu_2 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+					 <&cpu_3 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+		};
+	};
+};
+
+&{/thermal-zones/cluster1-thermal} {
+	polling-delay = <500>;
+
+	trips {
+		cluster1_alert: cluster1-alert {
+		};
+	};
+
+	cooling-maps {
+		map0 {
+			trip = <&cluster1_alert>;
+			cooling-device = <&cpu_4 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+					 <&cpu_5 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+					 <&cpu_6 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+					 <&cpu_7 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+		};
 	};
 };
 
