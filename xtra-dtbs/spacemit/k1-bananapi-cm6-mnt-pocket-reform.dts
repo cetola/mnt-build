@@ -177,7 +177,11 @@
 };
 
 #ifdef K1_HAS_DSI
-/* internal panel; no picture until there is a display controller driver */
+/* internal panel */
+&dpu {
+	status = "okay";
+};
+
 &mipi_dsi {
 	status = "okay";
 

@@ -1,0 +1,968 @@
+From 1fba06e1e020c8351ce2994d9afd6edcf90f3ec3 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Fri, 27 Nov 2026 23:49:59 +0000
+Subject: [PATCH] drm/spacemit: add K1 display controller driver
+
+Add a driver for the display controller of the SpacemiT K1: one CRTC
+with a linear XRGB8888 primary plane, feeding the DSI host through read
+channel 1, composer 2 and output control 2.
+
+Registers are written directly, and buffers are contiguous and read with
+the display MMU bypassed, which the vendor driver does not do on the
+hardware tested. Apart from that and the background colour, the register
+values computed for a 1200x1920 panel match those of the working vendor
+driver.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/gpu/drm/spacemit/Kconfig           |  15 +
+ drivers/gpu/drm/spacemit/Makefile          |   1 +
+ drivers/gpu/drm/spacemit/spacemit-k1-dpu.c | 908 +++++++++++++++++++++
+ 3 files changed, 924 insertions(+)
+ create mode 100644 drivers/gpu/drm/spacemit/spacemit-k1-dpu.c
+
+diff --git a/drivers/gpu/drm/spacemit/Kconfig b/drivers/gpu/drm/spacemit/Kconfig
+index cd3b5d6b4c047..2020995b73acd 100644
+--- a/drivers/gpu/drm/spacemit/Kconfig
++++ b/drivers/gpu/drm/spacemit/Kconfig
+@@ -14,3 +14,18 @@ config DRM_SPACEMIT_K1_DSI
+ 	  video. A picture also needs a display controller driver.
+ 
+ 	  If built as a module, it is called spacemit-k1-dsi.
++
++config DRM_SPACEMIT_K1_DPU
++	tristate "SpacemiT K1 display controller"
++	depends on DRM && OF
++	depends on ARCH_SPACEMIT || COMPILE_TEST
++	select DRM_BRIDGE_CONNECTOR
++	select DRM_CLIENT_SELECTION
++	select DRM_GEM_DMA_HELPER
++	select DRM_KMS_HELPER
++	help
++	  Support for the display controller of the SpacemiT K1 SoC, driving
++	  a single screen through the MIPI DSI host. It shows one linear
++	  XRGB8888 plane.
++
++	  If built as a module, it is called spacemit-k1-dpu.
+diff --git a/drivers/gpu/drm/spacemit/Makefile b/drivers/gpu/drm/spacemit/Makefile
+index 093f16f567317..447e52013e937 100644
+--- a/drivers/gpu/drm/spacemit/Makefile
++++ b/drivers/gpu/drm/spacemit/Makefile
+@@ -1,2 +1,3 @@
+ # SPDX-License-Identifier: GPL-2.0-only
+ obj-$(CONFIG_DRM_SPACEMIT_K1_DSI) += spacemit-k1-dsi.o
++obj-$(CONFIG_DRM_SPACEMIT_K1_DPU) += spacemit-k1-dpu.o
+diff --git a/drivers/gpu/drm/spacemit/spacemit-k1-dpu.c b/drivers/gpu/drm/spacemit/spacemit-k1-dpu.c
+new file mode 100644
+index 0000000000000..da135b4dec5a2
+--- /dev/null
++++ b/drivers/gpu/drm/spacemit/spacemit-k1-dpu.c
+@@ -0,0 +1,908 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * SpacemiT K1 display controller (DPU) driver
++ *
++ * One CRTC with a single linear XRGB8888 primary plane, scanned out of
++ * contiguous memory through the pipeline that feeds the DSI host: read
++ * channel 1, composer 2 and output control 2. Registers are written directly;
++ * the command list engine and the display MMU are not used.
++ *
++ * Register layout and programming sequences are taken from the SpacemiT vendor
++ * kernel.
++ *
++ * Copyright (C) 2023 Spacemit Co., Ltd.
++ * Copyright (C) 2026 Stephano Cetola <stephano@cetola.net>
++ */
++
++#include <linux/bitfield.h>
++#include <linux/bits.h>
++#include <linux/clk.h>
++#include <linux/dma-mapping.h>
++#include <linux/interrupt.h>
++#include <linux/io.h>
++#include <linux/iopoll.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/pm_runtime.h>
++#include <linux/reset.h>
++
++#include <drm/clients/drm_client_setup.h>
++#include <drm/drm_atomic.h>
++#include <drm/drm_atomic_helper.h>
++#include <drm/drm_atomic_state_helper.h>
++#include <drm/drm_bridge.h>
++#include <drm/drm_bridge_connector.h>
++#include <drm/drm_connector.h>
++#include <drm/drm_crtc.h>
++#include <drm/drm_drv.h>
++#include <drm/drm_encoder.h>
++#include <drm/drm_fb_dma_helper.h>
++#include <drm/drm_fbdev_dma.h>
++#include <drm/drm_fourcc.h>
++#include <drm/drm_framebuffer.h>
++#include <drm/drm_gem_atomic_helper.h>
++#include <drm/drm_gem_dma_helper.h>
++#include <drm/drm_gem_framebuffer_helper.h>
++#include <drm/drm_managed.h>
++#include <drm/drm_plane.h>
++#include <drm/drm_print.h>
++#include <drm/drm_probe_helper.h>
++#include <drm/drm_vblank.h>
++
++/* Control block. Pipeline 2 is the one wired to the DSI host. */
++#define K1_DPU_CTL2_ENABLE		0x560
++#define  K1_DPU_CTL2_ENABLE_RCH		GENMASK(11, 0)
++#define  K1_DPU_CTL2_ENABLE_OUTCTL	BIT(18)
++#define K1_DPU_CTL2_CFG			0x56c
++#define  K1_DPU_CTL2_CFG_RDY		BIT(0)
++#define K1_DPU_CTL2_MODE		0x588
++#define  K1_DPU_CTL2_MODE_VIDEO		BIT(0)
++#define  K1_DPU_CTL2_MODE_DEBUG		BIT(1)
++#define  K1_DPU_CTL2_MODE_INTER1	GENMASK(11, 8)
++#define K1_DPU_CTL2_START		0x58c
++#define  K1_DPU_CTL2_START_SW		BIT(0)
++
++/* Interrupts of online pipeline 2: mask, status (write 1 to clear), raw. */
++#define K1_DPU_INT_MASK			0x910
++#define K1_DPU_INT_STATUS		0x938
++#define K1_DPU_INT_RAW			0x960
++#define  K1_DPU_INT_VSYNC		BIT(0)
++#define  K1_DPU_INT_EOF			BIT(1)
++#define  K1_DPU_INT_CFG_RDY_CLR		BIT(4)
++#define  K1_DPU_INT_UNDERFLOW		BIT(9)
++
++/* DMA top */
++#define K1_DPU_DMA_ARB			0xa04
++#define  K1_DPU_DMA_ARB_RR_RATIO	GENMASK(7, 0)
++#define  K1_DPU_DMA_ARB_RR_MODE		BIT(12)
++#define  K1_DPU_DMA_ARB_PIXEL_TH	GENMASK(21, 16)
++#define K1_DPU_DMA_TIMEOUT		0xa08
++#define  K1_DPU_DMA_TIMEOUT_READ	GENMASK(15, 0)
++#define  K1_DPU_DMA_TIMEOUT_WRITE	GENMASK(31, 16)
++#define K1_DPU_DMA_CTRL0		0xa0c
++#define  K1_DPU_DMA_CTRL0_BURST		GENMASK(5, 3)
++#define K1_DPU_DMA_QOS			0xa1c
++#define  K1_DPU_DMA_QOS_ONLINE_READ	GENMASK(3, 0)
++#define  K1_DPU_DMA_QOS_OFFLINE_READ	GENMASK(7, 4)
++#define  K1_DPU_DMA_QOS_ONLINE_WRITE	GENMASK(11, 8)
++#define  K1_DPU_DMA_QOS_OFFLINE_WRITE	GENMASK(15, 12)
++#define  K1_DPU_DMA_QOS_CMDLIST		GENMASK(19, 16)
++#define  K1_DPU_QOS_LOW			2
++#define  K1_DPU_QOS_NORMAL		3
++#define  K1_DPU_QOS_HIGH		4
++#define K1_DPU_DMA_OUTS0		0xa20
++#define  K1_DPU_DMA_OUTS0_READ		GENMASK(7, 0)
++#define  K1_DPU_DMA_OUTS0_WRITE		GENMASK(15, 8)
++
++/* Read DMA channel */
++#define K1_DPU_RDMA(ch)			(0xa80 + (ch) * 0x100)
++#define K1_DPU_RDMA_CTRL		0x00
++#define  K1_DPU_RDMA_CTRL_OUTSTANDING	GENMASK(6, 2)
++#define  K1_DPU_RDMA_CTRL_COMPOSER	GENMASK(14, 12)
++#define  K1_DPU_RDMA_CTRL_BURST_LEN	GENMASK(24, 17)
++#define K1_DPU_RDMA_Y_OFFSET		0x04
++#define K1_DPU_RDMA_ADDR_LOW		0x20
++#define K1_DPU_RDMA_ADDR_HIGH		0x24
++#define K1_DPU_RDMA_STRIDE		0x38
++#define K1_DPU_RDMA_SIZE		0x3c
++#define K1_DPU_RDMA_CROP_START		0x40
++#define K1_DPU_RDMA_CROP_END		0x44
++#define K1_DPU_RDMA_FORMAT		0x70
++#define  K1_DPU_RDMA_FORMAT_XRGB8888	8
++#define K1_DPU_RDMA_LINE_BUF		0x78
++#define  K1_DPU_RDMA_LINE_BUF_SIZE	GENMASK(15, 0)
++#define  K1_DPU_XY_LOW			GENMASK(15, 0)
++#define  K1_DPU_XY_HIGH			GENMASK(31, 16)
++
++/*
++ * Display MMU: global settings and one translation unit per layer. A unit
++ * whose control register is zero passes physical addresses through.
++ */
++#define K1_DPU_MMU_TIMEOUT		0x1680
++#define  K1_DPU_MMU_TIMEOUT_VALUE	0x0001ffff
++#define K1_DPU_MMU_PORT_SEL		0x1684
++#define K1_DPU_MMU_DMAC(n)		(0x168c + (n) * 4)
++#define  K1_DPU_MMU_DMAC_OUTSTANDING	GENMASK(23, 16)
++#define  K1_DPU_MMU_DMAC_BURST		GENMASK(26, 24)
++#define  K1_DPU_MMU_NUM_DMAC		4
++#define K1_DPU_MMU_TBU_CTRL(n)		(0x1780 + (n) * 0x40)
++
++/* Composer and its layer slots */
++#define K1_DPU_CMP(n)			(0x4600 + (n) * 0x300)
++#define K1_DPU_CMP_CTRL			0x00
++#define  K1_DPU_CMP_CTRL_EN		BIT(0)
++#define  K1_DPU_CMP_CTRL_WIDTH		GENMASK(23, 8)
++#define K1_DPU_CMP_HEIGHT		0x04
++#define K1_DPU_CMP_BG_R			0x08
++#define K1_DPU_CMP_BG_G			0x0c
++#define K1_DPU_CMP_BG_B			0x10
++#define K1_DPU_CMP_BG_A			0x14
++#define K1_DPU_CMP_LAYER(n)		(0x38 + (n) * 0x20)
++#define K1_DPU_LAYER_CTRL		0x00
++#define  K1_DPU_LAYER_CTRL_EN		BIT(0)
++#define  K1_DPU_LAYER_CTRL_CHANNEL	GENMASK(4, 1)
++#define  K1_DPU_LAYER_CTRL_SOLID	BIT(5)
++#define K1_DPU_LAYER_LEFT		0x10
++#define  K1_DPU_LAYER_LEFT_X		GENMASK(23, 8)
++#define K1_DPU_LAYER_TOP_RIGHT		0x14
++#define K1_DPU_LAYER_BOTTOM		0x18
++#define  K1_DPU_LAYER_BOTTOM_Y		GENMASK(15, 0)
++#define  K1_DPU_LAYER_BLEND		GENMASK(17, 16)
++#define  K1_DPU_LAYER_BLEND_PREMULTI	1
++#define  K1_DPU_LAYER_ALPHA_SEL		BIT(18)
++#define K1_DPU_LAYER_ALPHA		0x1c
++#define  K1_DPU_LAYER_ALPHA_PLANE	GENMASK(23, 16)
++
++/* Output control of pipeline 2 and its post processing block */
++#define K1_DPU_OUT2			0x18000
++#define K1_DPU_OUT_IN_SIZE		(K1_DPU_OUT2 + 0x00)
++#define K1_DPU_OUT_PROC			(K1_DPU_OUT2 + 0x14)
++#define  K1_DPU_OUT_PROC_SCALE_EN	BIT(0)
++#define  K1_DPU_OUT_PROC_DITHER_EN	BIT(1)
++#define K1_DPU_OUT_TIMING_CTRL		(K1_DPU_OUT2 + 0x18)
++#define  K1_DPU_OUT_TIMING_CTRL_EN	BIT(5)
++#define K1_DPU_OUT_HBLANK		(K1_DPU_OUT2 + 0x1c)
++#define K1_DPU_OUT_H_PORCH		(K1_DPU_OUT2 + 0x80)
++#define K1_DPU_OUT_V_PORCH		(K1_DPU_OUT2 + 0x84)
++#define  K1_DPU_OUT_PORCH_FRONT		GENMASK(11, 0)
++#define  K1_DPU_OUT_PORCH_BACK		GENMASK(27, 16)
++#define K1_DPU_OUT_SYNC			(K1_DPU_OUT2 + 0x88)
++#define  K1_DPU_OUT_SYNC_H_WIDTH	GENMASK(9, 0)
++#define  K1_DPU_OUT_SYNC_H_POL		BIT(12)
++#define  K1_DPU_OUT_SYNC_V_WIDTH	GENMASK(25, 16)
++#define  K1_DPU_OUT_SYNC_V_POL		BIT(28)
++#define K1_DPU_OUT_ACTIVE		(K1_DPU_OUT2 + 0x8c)
++#define K1_DPU_OUT_FORMAT		(K1_DPU_OUT2 + 0x90)
++#define  K1_DPU_OUT_FORMAT_RGB888	2
++#define K1_DPU_OUT_BG_RG		(K1_DPU_OUT2 + 0x98)
++#define K1_DPU_OUT_BG_B			(K1_DPU_OUT2 + 0x9c)
++#define K1_DPU_OUT_EOF_DELAY		(K1_DPU_OUT2 + 0xa4)
++#define  K1_DPU_OUT_EOF_DELAY_LINES	16
++#define K1_DPU_OUT_SOF_PRE		(K1_DPU_OUT2 + 0xa8)
++#define K1_DPU_OUT_CFG_LINE		(K1_DPU_OUT2 + 0xac)
++#define K1_DPU_OUT_IRQ_MASK		(K1_DPU_OUT2 + 0xb8)
++#define K1_DPU_OUT_IRQ_STATUS		(K1_DPU_OUT2 + 0xc0)
++#define  K1_DPU_OUT_IRQ_EOF		(BIT(1) | BIT(6))
++#define  K1_DPU_OUT_IRQ_UNDERFLOW	(BIT(4) | BIT(9))
++#define K1_DPU_PP2_CTRL			(K1_DPU_OUT2 + 0x100)
++#define  K1_DPU_PP2_CTRL_EN		BIT(0)
++
++#define K1_DPU_RDMA_CHANNEL		1
++#define K1_DPU_COMPOSER			2
++/* The layer slot the vendor driver uses for the bottom plane. */
++#define K1_DPU_LAYER_SLOT		7
++/* Each read channel has two translation units. */
++#define K1_DPU_TBU			(K1_DPU_RDMA_CHANNEL * 2)
++/* Line buffer given to the channel, as configured by the vendor driver. */
++#define K1_DPU_LINE_BUF_SIZE		0x570
++#define K1_DPU_CORE_RATE		491520000
++
++#define K1_DPU_MAX_WIDTH		1920
++#define K1_DPU_MAX_HEIGHT		1920
++
++enum k1_dpu_clk {
++	K1_DPU_CLK_PIXEL,
++	K1_DPU_CLK_CORE,
++	K1_DPU_CLK_BUS,
++	K1_DPU_CLK_ESC,
++	K1_DPU_NUM_CLKS,
++};
++
++struct k1_dpu {
++	struct drm_device drm;
++	struct drm_plane plane;
++	struct drm_crtc crtc;
++	struct drm_encoder encoder;
++
++	void __iomem *base;
++	struct clk_bulk_data clks[K1_DPU_NUM_CLKS];
++	struct reset_control *resets;
++	int irq;
++
++	/* Hardware is powered. Only touched by commits, which are serialized. */
++	bool powered;
++	/* The pipeline has been started since it was powered. */
++	bool running;
++	/* Flip event waiting for the hardware to take the new configuration. */
++	struct drm_pending_vblank_event *event;
++};
++
++static inline struct k1_dpu *to_k1_dpu(struct drm_device *drm)
++{
++	return container_of(drm, struct k1_dpu, drm);
++}
++
++static u32 k1_dpu_read(struct k1_dpu *dpu, u32 reg)
++{
++	return readl(dpu->base + reg);
++}
++
++static void k1_dpu_write(struct k1_dpu *dpu, u32 reg, u32 val)
++{
++	writel(val, dpu->base + reg);
++}
++
++static void k1_dpu_rmw(struct k1_dpu *dpu, u32 reg, u32 mask, u32 val)
++{
++	k1_dpu_write(dpu, reg, (k1_dpu_read(dpu, reg) & ~mask) | val);
++}
++
++static u32 k1_dpu_xy(u32 high, u32 low)
++{
++	return FIELD_PREP(K1_DPU_XY_HIGH, high) |
++	       FIELD_PREP(K1_DPU_XY_LOW, low);
++}
++
++static void k1_dpu_init_dma(struct k1_dpu *dpu)
++{
++	unsigned int i;
++
++	k1_dpu_rmw(dpu, K1_DPU_DMA_ARB,
++		   K1_DPU_DMA_ARB_RR_RATIO | K1_DPU_DMA_ARB_RR_MODE |
++		   K1_DPU_DMA_ARB_PIXEL_TH,
++		   FIELD_PREP(K1_DPU_DMA_ARB_RR_RATIO, 0x10) |
++		   FIELD_PREP(K1_DPU_DMA_ARB_PIXEL_TH, 4));
++	k1_dpu_write(dpu, K1_DPU_DMA_TIMEOUT,
++		     FIELD_PREP(K1_DPU_DMA_TIMEOUT_READ, 0xfffe) |
++		     FIELD_PREP(K1_DPU_DMA_TIMEOUT_WRITE, 0xffff));
++	k1_dpu_rmw(dpu, K1_DPU_DMA_CTRL0, K1_DPU_DMA_CTRL0_BURST,
++		   FIELD_PREP(K1_DPU_DMA_CTRL0_BURST, 1));
++	k1_dpu_write(dpu, K1_DPU_DMA_QOS,
++		     FIELD_PREP(K1_DPU_DMA_QOS_ONLINE_READ, K1_DPU_QOS_NORMAL) |
++		     FIELD_PREP(K1_DPU_DMA_QOS_OFFLINE_READ, K1_DPU_QOS_LOW) |
++		     FIELD_PREP(K1_DPU_DMA_QOS_ONLINE_WRITE, K1_DPU_QOS_LOW) |
++		     FIELD_PREP(K1_DPU_DMA_QOS_OFFLINE_WRITE, K1_DPU_QOS_LOW) |
++		     FIELD_PREP(K1_DPU_DMA_QOS_CMDLIST, K1_DPU_QOS_HIGH));
++	k1_dpu_write(dpu, K1_DPU_DMA_OUTS0,
++		     FIELD_PREP(K1_DPU_DMA_OUTS0_READ, 8) |
++		     FIELD_PREP(K1_DPU_DMA_OUTS0_WRITE, 16));
++
++	k1_dpu_write(dpu, K1_DPU_MMU_TIMEOUT, K1_DPU_MMU_TIMEOUT_VALUE);
++	k1_dpu_write(dpu, K1_DPU_MMU_PORT_SEL, 0);
++	k1_dpu_rmw(dpu, K1_DPU_MMU_DMAC(0), K1_DPU_MMU_DMAC_BURST,
++		   FIELD_PREP(K1_DPU_MMU_DMAC_BURST, 1));
++	for (i = 0; i < K1_DPU_MMU_NUM_DMAC; i++)
++		k1_dpu_rmw(dpu, K1_DPU_MMU_DMAC(i), K1_DPU_MMU_DMAC_OUTSTANDING,
++			   FIELD_PREP(K1_DPU_MMU_DMAC_OUTSTANDING, 8));
++	k1_dpu_write(dpu, K1_DPU_MMU_TBU_CTRL(K1_DPU_TBU), 0);
++}
++
++static void k1_dpu_init_output(struct k1_dpu *dpu,
++			       const struct drm_display_mode *mode)
++{
++	u32 cmp = K1_DPU_CMP(K1_DPU_COMPOSER);
++	u32 size = k1_dpu_xy(mode->vdisplay, mode->hdisplay);
++
++	/* Black where no layer covers the screen. */
++	k1_dpu_write(dpu, cmp + K1_DPU_CMP_BG_R, 0);
++	k1_dpu_write(dpu, cmp + K1_DPU_CMP_BG_G, 0);
++	k1_dpu_write(dpu, cmp + K1_DPU_CMP_BG_B, 0);
++	k1_dpu_write(dpu, cmp + K1_DPU_CMP_BG_A, 0xff);
++	k1_dpu_write(dpu, cmp + K1_DPU_CMP_CTRL,
++		     K1_DPU_CMP_CTRL_EN |
++		     FIELD_PREP(K1_DPU_CMP_CTRL_WIDTH, mode->hdisplay));
++	k1_dpu_write(dpu, cmp + K1_DPU_CMP_HEIGHT, mode->vdisplay);
++
++	k1_dpu_write(dpu, K1_DPU_OUT_IN_SIZE, size);
++	k1_dpu_rmw(dpu, K1_DPU_OUT_PROC,
++		   K1_DPU_OUT_PROC_SCALE_EN | K1_DPU_OUT_PROC_DITHER_EN,
++		   K1_DPU_OUT_PROC_DITHER_EN);
++	k1_dpu_write(dpu, K1_DPU_OUT_TIMING_CTRL, K1_DPU_OUT_TIMING_CTRL_EN);
++	k1_dpu_write(dpu, K1_DPU_OUT_HBLANK, 0);
++	k1_dpu_write(dpu, K1_DPU_OUT_BG_RG, 0);
++	k1_dpu_write(dpu, K1_DPU_OUT_BG_B, 0);
++	k1_dpu_write(dpu, K1_DPU_OUT_SOF_PRE, 0);
++	k1_dpu_write(dpu, K1_DPU_OUT_CFG_LINE, 0);
++
++	k1_dpu_write(dpu, K1_DPU_OUT_H_PORCH,
++		     FIELD_PREP(K1_DPU_OUT_PORCH_FRONT,
++				mode->hsync_start - mode->hdisplay) |
++		     FIELD_PREP(K1_DPU_OUT_PORCH_BACK,
++				mode->htotal - mode->hsync_end));
++	k1_dpu_write(dpu, K1_DPU_OUT_V_PORCH,
++		     FIELD_PREP(K1_DPU_OUT_PORCH_FRONT,
++				mode->vsync_start - mode->vdisplay) |
++		     FIELD_PREP(K1_DPU_OUT_PORCH_BACK,
++				mode->vtotal - mode->vsync_end));
++	/* The vendor driver sets both polarity bits whatever the mode says. */
++	k1_dpu_write(dpu, K1_DPU_OUT_SYNC,
++		     FIELD_PREP(K1_DPU_OUT_SYNC_H_WIDTH,
++				mode->hsync_end - mode->hsync_start) |
++		     K1_DPU_OUT_SYNC_H_POL |
++		     FIELD_PREP(K1_DPU_OUT_SYNC_V_WIDTH,
++				mode->vsync_end - mode->vsync_start) |
++		     K1_DPU_OUT_SYNC_V_POL);
++	k1_dpu_write(dpu, K1_DPU_OUT_ACTIVE, size);
++	k1_dpu_write(dpu, K1_DPU_OUT_FORMAT, K1_DPU_OUT_FORMAT_RGB888);
++	k1_dpu_write(dpu, K1_DPU_OUT_EOF_DELAY, K1_DPU_OUT_EOF_DELAY_LINES);
++	k1_dpu_write(dpu, K1_DPU_OUT_IRQ_MASK,
++		     K1_DPU_OUT_IRQ_EOF | K1_DPU_OUT_IRQ_UNDERFLOW);
++
++	k1_dpu_rmw(dpu, K1_DPU_CTL2_MODE,
++		   K1_DPU_CTL2_MODE_VIDEO | K1_DPU_CTL2_MODE_DEBUG |
++		   K1_DPU_CTL2_MODE_INTER1,
++		   K1_DPU_CTL2_MODE_VIDEO |
++		   FIELD_PREP(K1_DPU_CTL2_MODE_INTER1, 0xf));
++
++	k1_dpu_rmw(dpu, K1_DPU_PP2_CTRL, K1_DPU_PP2_CTRL_EN, 0);
++}
++
++static int k1_dpu_wait_cfg_taken(struct k1_dpu *dpu)
++{
++	u32 val;
++	int ret;
++
++	ret = readl_poll_timeout(dpu->base + K1_DPU_CTL2_CFG, val,
++				 !(val & K1_DPU_CTL2_CFG_RDY), 100, 100000);
++	if (ret)
++		drm_err(&dpu->drm, "configuration was not taken\n");
++
++	return ret;
++}
++
++static int k1_dpu_power_on(struct k1_dpu *dpu,
++			   const struct drm_display_mode *mode)
++{
++	struct device *dev = dpu->drm.dev;
++	int ret;
++
++	ret = pm_runtime_resume_and_get(dev);
++	if (ret)
++		return ret;
++
++	ret = reset_control_deassert(dpu->resets);
++	if (ret)
++		goto err_pm;
++
++	ret = clk_bulk_prepare_enable(K1_DPU_NUM_CLKS, dpu->clks);
++	if (ret)
++		goto err_reset;
++
++	/* A rate change only completes while the clock is running. */
++	ret = clk_set_rate(dpu->clks[K1_DPU_CLK_CORE].clk, K1_DPU_CORE_RATE);
++	if (ret)
++		goto err_clk;
++	ret = clk_set_rate(dpu->clks[K1_DPU_CLK_PIXEL].clk,
++			   mode->clock * 1000UL);
++	if (ret)
++		goto err_clk;
++
++	drm_info(&dpu->drm, "pixel clock %lu Hz, core clock %lu Hz\n",
++		 clk_get_rate(dpu->clks[K1_DPU_CLK_PIXEL].clk),
++		 clk_get_rate(dpu->clks[K1_DPU_CLK_CORE].clk));
++
++	k1_dpu_write(dpu, K1_DPU_INT_MASK, 0);
++	k1_dpu_write(dpu, K1_DPU_INT_STATUS, ~0);
++	dpu->powered = true;
++	dpu->running = false;
++
++	return 0;
++
++err_clk:
++	clk_bulk_disable_unprepare(K1_DPU_NUM_CLKS, dpu->clks);
++err_reset:
++	reset_control_assert(dpu->resets);
++err_pm:
++	pm_runtime_put_sync(dev);
++
++	return ret;
++}
++
++static void k1_dpu_power_off(struct k1_dpu *dpu)
++{
++	clk_bulk_disable_unprepare(K1_DPU_NUM_CLKS, dpu->clks);
++	reset_control_assert(dpu->resets);
++	pm_runtime_put_sync(dpu->drm.dev);
++	dpu->powered = false;
++	dpu->running = false;
++}
++
++static void k1_dpu_send_event(struct k1_dpu *dpu)
++{
++	lockdep_assert_held(&dpu->drm.event_lock);
++
++	if (!dpu->event)
++		return;
++
++	drm_crtc_send_vblank_event(&dpu->crtc, dpu->event);
++	dpu->event = NULL;
++	drm_crtc_vblank_put(&dpu->crtc);
++}
++
++static irqreturn_t k1_dpu_irq(int irq, void *data)
++{
++	struct k1_dpu *dpu = data;
++	u32 status;
++
++	status = k1_dpu_read(dpu, K1_DPU_INT_RAW) &
++		 (K1_DPU_INT_VSYNC | K1_DPU_INT_EOF | K1_DPU_INT_CFG_RDY_CLR |
++		  K1_DPU_INT_UNDERFLOW);
++	if (!status)
++		return IRQ_NONE;
++
++	if (status & K1_DPU_INT_EOF)
++		k1_dpu_write(dpu, K1_DPU_OUT_IRQ_STATUS, K1_DPU_OUT_IRQ_EOF);
++	k1_dpu_write(dpu, K1_DPU_INT_STATUS, status);
++
++	if (status & K1_DPU_INT_UNDERFLOW)
++		drm_err_ratelimited(&dpu->drm, "scanout underflow\n");
++
++	if (status & K1_DPU_INT_VSYNC)
++		drm_crtc_handle_vblank(&dpu->crtc);
++
++	if (status & K1_DPU_INT_CFG_RDY_CLR) {
++		scoped_guard(spinlock, &dpu->drm.event_lock)
++			k1_dpu_send_event(dpu);
++	}
++
++	return IRQ_HANDLED;
++}
++
++static int k1_dpu_plane_atomic_check(struct drm_plane *plane,
++				     struct drm_atomic_commit *state)
++{
++	struct drm_plane_state *new_state =
++		drm_atomic_get_new_plane_state(state, plane);
++	struct drm_crtc_state *crtc_state = NULL;
++
++	if (new_state->crtc)
++		crtc_state = drm_atomic_get_new_crtc_state(state,
++							   new_state->crtc);
++
++	return drm_atomic_helper_check_plane_state(new_state, crtc_state,
++						   DRM_PLANE_NO_SCALING,
++						   DRM_PLANE_NO_SCALING,
++						   false, false);
++}
++
++static void k1_dpu_plane_atomic_update(struct drm_plane *plane,
++				       struct drm_atomic_commit *state)
++{
++	struct k1_dpu *dpu = to_k1_dpu(plane->dev);
++	struct drm_plane_state *new_state =
++		drm_atomic_get_new_plane_state(state, plane);
++	struct drm_framebuffer *fb = new_state->fb;
++	u32 rdma = K1_DPU_RDMA(K1_DPU_RDMA_CHANNEL);
++	u32 layer = K1_DPU_CMP(K1_DPU_COMPOSER) +
++		    K1_DPU_CMP_LAYER(K1_DPU_LAYER_SLOT);
++	u32 width, height, right, bottom;
++	dma_addr_t addr;
++
++	if (!dpu->powered || !fb || !new_state->visible)
++		return;
++
++	/* The primary plane always covers the whole screen. */
++	width = drm_rect_width(&new_state->dst);
++	height = drm_rect_height(&new_state->dst);
++	right = new_state->dst.x1 + width - 1;
++	bottom = new_state->dst.y1 + height - 1;
++	addr = drm_fb_dma_get_gem_addr(fb, new_state, 0);
++
++	k1_dpu_write(dpu, rdma + K1_DPU_RDMA_CTRL,
++		     FIELD_PREP(K1_DPU_RDMA_CTRL_BURST_LEN, 0xf) |
++		     FIELD_PREP(K1_DPU_RDMA_CTRL_COMPOSER, K1_DPU_COMPOSER) |
++		     FIELD_PREP(K1_DPU_RDMA_CTRL_OUTSTANDING, 0xf));
++	k1_dpu_write(dpu, rdma + K1_DPU_RDMA_Y_OFFSET, new_state->dst.y1);
++	k1_dpu_write(dpu, rdma + K1_DPU_RDMA_ADDR_LOW, lower_32_bits(addr));
++	k1_dpu_write(dpu, rdma + K1_DPU_RDMA_ADDR_HIGH, upper_32_bits(addr));
++	k1_dpu_write(dpu, rdma + K1_DPU_RDMA_STRIDE, fb->pitches[0]);
++	/* The address already points at the first visible pixel. */
++	k1_dpu_write(dpu, rdma + K1_DPU_RDMA_SIZE, k1_dpu_xy(height, width));
++	k1_dpu_write(dpu, rdma + K1_DPU_RDMA_CROP_START, 0);
++	k1_dpu_write(dpu, rdma + K1_DPU_RDMA_CROP_END,
++		     k1_dpu_xy(height - 1, width - 1));
++	k1_dpu_write(dpu, rdma + K1_DPU_RDMA_FORMAT,
++		     K1_DPU_RDMA_FORMAT_XRGB8888);
++	k1_dpu_write(dpu, rdma + K1_DPU_RDMA_LINE_BUF,
++		     FIELD_PREP(K1_DPU_RDMA_LINE_BUF_SIZE,
++				K1_DPU_LINE_BUF_SIZE));
++
++	k1_dpu_write(dpu, layer + K1_DPU_LAYER_LEFT,
++		     FIELD_PREP(K1_DPU_LAYER_LEFT_X, new_state->dst.x1));
++	k1_dpu_write(dpu, layer + K1_DPU_LAYER_TOP_RIGHT,
++		     k1_dpu_xy(right, new_state->dst.y1));
++	k1_dpu_write(dpu, layer + K1_DPU_LAYER_BOTTOM,
++		     FIELD_PREP(K1_DPU_LAYER_BOTTOM_Y, bottom) |
++		     FIELD_PREP(K1_DPU_LAYER_BLEND,
++				K1_DPU_LAYER_BLEND_PREMULTI));
++	k1_dpu_rmw(dpu, layer + K1_DPU_LAYER_ALPHA, K1_DPU_LAYER_ALPHA_PLANE,
++		   FIELD_PREP(K1_DPU_LAYER_ALPHA_PLANE, 0xff));
++	k1_dpu_write(dpu, layer + K1_DPU_LAYER_CTRL,
++		     K1_DPU_LAYER_CTRL_EN |
++		     FIELD_PREP(K1_DPU_LAYER_CTRL_CHANNEL,
++				K1_DPU_RDMA_CHANNEL));
++}
++
++static void k1_dpu_plane_atomic_disable(struct drm_plane *plane,
++					struct drm_atomic_commit *state)
++{
++	struct k1_dpu *dpu = to_k1_dpu(plane->dev);
++
++	if (!dpu->powered)
++		return;
++
++	k1_dpu_write(dpu, K1_DPU_CMP(K1_DPU_COMPOSER) +
++		     K1_DPU_CMP_LAYER(K1_DPU_LAYER_SLOT) + K1_DPU_LAYER_CTRL, 0);
++}
++
++static const struct drm_plane_helper_funcs k1_dpu_plane_helper_funcs = {
++	.atomic_check = k1_dpu_plane_atomic_check,
++	.atomic_update = k1_dpu_plane_atomic_update,
++	.atomic_disable = k1_dpu_plane_atomic_disable,
++};
++
++static const struct drm_plane_funcs k1_dpu_plane_funcs = {
++	.update_plane = drm_atomic_helper_update_plane,
++	.disable_plane = drm_atomic_helper_disable_plane,
++	.destroy = drm_plane_cleanup,
++	.atomic_create_state = drm_atomic_helper_plane_create_state,
++	.atomic_duplicate_state = drm_atomic_helper_plane_duplicate_state,
++	.atomic_destroy_state = drm_atomic_helper_plane_destroy_state,
++};
++
++static enum drm_mode_status
++k1_dpu_crtc_mode_valid(struct drm_crtc *crtc,
++		       const struct drm_display_mode *mode)
++{
++	if (mode->hdisplay > K1_DPU_MAX_WIDTH ||
++	    mode->vdisplay > K1_DPU_MAX_HEIGHT)
++		return MODE_BAD;
++
++	return MODE_OK;
++}
++
++static int k1_dpu_crtc_atomic_check(struct drm_crtc *crtc,
++				    struct drm_atomic_commit *state)
++{
++	struct drm_crtc_state *crtc_state =
++		drm_atomic_get_new_crtc_state(state, crtc);
++
++	/* There is only the one plane, so an active CRTC needs it. */
++	if (crtc_state->active)
++		return drm_atomic_helper_check_crtc_primary_plane(crtc_state);
++
++	return 0;
++}
++
++static void k1_dpu_crtc_atomic_enable(struct drm_crtc *crtc,
++				      struct drm_atomic_commit *state)
++{
++	struct k1_dpu *dpu = to_k1_dpu(crtc->dev);
++	const struct drm_display_mode *mode =
++		&drm_atomic_get_new_crtc_state(state, crtc)->adjusted_mode;
++	int ret;
++
++	ret = k1_dpu_power_on(dpu, mode);
++	if (ret) {
++		drm_err(&dpu->drm, "failed to power on: %d\n", ret);
++	} else {
++		k1_dpu_wait_cfg_taken(dpu);
++		k1_dpu_init_output(dpu, mode);
++		k1_dpu_init_dma(dpu);
++		k1_dpu_write(dpu, K1_DPU_INT_MASK,
++			     K1_DPU_INT_EOF | K1_DPU_INT_CFG_RDY_CLR |
++			     K1_DPU_INT_UNDERFLOW);
++		enable_irq(dpu->irq);
++	}
++
++	drm_crtc_vblank_on(crtc);
++}
++
++static void k1_dpu_crtc_atomic_flush(struct drm_crtc *crtc,
++				     struct drm_atomic_commit *state)
++{
++	struct k1_dpu *dpu = to_k1_dpu(crtc->dev);
++	struct drm_pending_vblank_event *event = crtc->state->event;
++
++	if (event) {
++		crtc->state->event = NULL;
++
++		scoped_guard(spinlock_irq, &dpu->drm.event_lock) {
++			if (dpu->powered && drm_crtc_vblank_get(crtc) == 0)
++				dpu->event = event;
++			else
++				drm_crtc_send_vblank_event(crtc, event);
++		}
++	}
++
++	if (!dpu->powered)
++		return;
++
++	k1_dpu_write(dpu, K1_DPU_CTL2_ENABLE,
++		     K1_DPU_CTL2_ENABLE_OUTCTL |
++		     FIELD_PREP(K1_DPU_CTL2_ENABLE_RCH,
++				BIT(K1_DPU_RDMA_CHANNEL)));
++	/* Make the framebuffer contents visible before the hardware reads. */
++	wmb();
++	k1_dpu_write(dpu, K1_DPU_CTL2_CFG, K1_DPU_CTL2_CFG_RDY);
++
++	if (!dpu->running) {
++		k1_dpu_write(dpu, K1_DPU_CTL2_START, K1_DPU_CTL2_START_SW);
++		dpu->running = true;
++		drm_info(&dpu->drm, "scanout started\n");
++	}
++}
++
++static void k1_dpu_crtc_atomic_disable(struct drm_crtc *crtc,
++				       struct drm_atomic_commit *state)
++{
++	struct k1_dpu *dpu = to_k1_dpu(crtc->dev);
++
++	if (dpu->running) {
++		k1_dpu_wait_cfg_taken(dpu);
++		k1_dpu_write(dpu, K1_DPU_OUT_TIMING_CTRL, 0);
++		k1_dpu_write(dpu, K1_DPU_CTL2_ENABLE,
++			     K1_DPU_CTL2_ENABLE_OUTCTL);
++		k1_dpu_write(dpu, K1_DPU_CTL2_CFG, K1_DPU_CTL2_CFG_RDY);
++		k1_dpu_wait_cfg_taken(dpu);
++	}
++
++	if (dpu->powered)
++		disable_irq(dpu->irq);
++
++	scoped_guard(spinlock_irq, &dpu->drm.event_lock)
++		k1_dpu_send_event(dpu);
++
++	drm_crtc_vblank_off(crtc);
++
++	if (dpu->powered) {
++		k1_dpu_write(dpu, K1_DPU_INT_MASK, 0);
++		k1_dpu_power_off(dpu);
++	}
++
++	scoped_guard(spinlock_irq, &dpu->drm.event_lock) {
++		if (crtc->state->event) {
++			drm_crtc_send_vblank_event(crtc, crtc->state->event);
++			crtc->state->event = NULL;
++		}
++	}
++}
++
++static int k1_dpu_crtc_enable_vblank(struct drm_crtc *crtc)
++{
++	struct k1_dpu *dpu = to_k1_dpu(crtc->dev);
++
++	if (!dpu->powered)
++		return -ENODEV;
++
++	k1_dpu_rmw(dpu, K1_DPU_INT_MASK, K1_DPU_INT_VSYNC, K1_DPU_INT_VSYNC);
++
++	return 0;
++}
++
++static void k1_dpu_crtc_disable_vblank(struct drm_crtc *crtc)
++{
++	struct k1_dpu *dpu = to_k1_dpu(crtc->dev);
++
++	if (dpu->powered)
++		k1_dpu_rmw(dpu, K1_DPU_INT_MASK, K1_DPU_INT_VSYNC, 0);
++}
++
++static const struct drm_crtc_helper_funcs k1_dpu_crtc_helper_funcs = {
++	.mode_valid = k1_dpu_crtc_mode_valid,
++	.atomic_check = k1_dpu_crtc_atomic_check,
++	.atomic_enable = k1_dpu_crtc_atomic_enable,
++	.atomic_flush = k1_dpu_crtc_atomic_flush,
++	.atomic_disable = k1_dpu_crtc_atomic_disable,
++};
++
++static const struct drm_crtc_funcs k1_dpu_crtc_funcs = {
++	.set_config = drm_atomic_helper_set_config,
++	.page_flip = drm_atomic_helper_page_flip,
++	.destroy = drm_crtc_cleanup,
++	.atomic_create_state = drm_atomic_helper_crtc_create_state,
++	.atomic_duplicate_state = drm_atomic_helper_crtc_duplicate_state,
++	.atomic_destroy_state = drm_atomic_helper_crtc_destroy_state,
++	.enable_vblank = k1_dpu_crtc_enable_vblank,
++	.disable_vblank = k1_dpu_crtc_disable_vblank,
++};
++
++static const struct drm_encoder_funcs k1_dpu_encoder_funcs = {
++	.destroy = drm_encoder_cleanup,
++};
++
++static const struct drm_mode_config_funcs k1_dpu_mode_config_funcs = {
++	.fb_create = drm_gem_fb_create,
++	.atomic_check = drm_atomic_helper_check,
++	.atomic_commit = drm_atomic_helper_commit,
++};
++
++/* Planes are programmed after the CRTC and the bridges are enabled. */
++static const struct drm_mode_config_helper_funcs k1_dpu_mode_config_helpers = {
++	.atomic_commit_tail = drm_atomic_helper_commit_tail_rpm,
++};
++
++DEFINE_DRM_GEM_DMA_FOPS(k1_dpu_fops);
++
++static const struct drm_driver k1_dpu_driver = {
++	.driver_features = DRIVER_GEM | DRIVER_MODESET | DRIVER_ATOMIC,
++	DRM_GEM_DMA_DRIVER_OPS,
++	DRM_FBDEV_DMA_DRIVER_OPS,
++	.fops = &k1_dpu_fops,
++	.name = "spacemit-k1",
++	.desc = "SpacemiT K1 display controller",
++	.major = 1,
++	.minor = 0,
++};
++
++static int k1_dpu_modeset_init(struct k1_dpu *dpu, struct drm_bridge *bridge)
++{
++	static const u32 formats[] = { DRM_FORMAT_XRGB8888 };
++	struct drm_device *drm = &dpu->drm;
++	struct drm_connector *connector;
++	int ret;
++
++	ret = drmm_mode_config_init(drm);
++	if (ret)
++		return ret;
++
++	drm->mode_config.min_width = 1;
++	drm->mode_config.min_height = 1;
++	drm->mode_config.max_width = K1_DPU_MAX_WIDTH;
++	drm->mode_config.max_height = K1_DPU_MAX_HEIGHT;
++	drm->mode_config.funcs = &k1_dpu_mode_config_funcs;
++	drm->mode_config.helper_private = &k1_dpu_mode_config_helpers;
++
++	ret = drm_universal_plane_init(drm, &dpu->plane, 0,
++				       &k1_dpu_plane_funcs, formats,
++				       ARRAY_SIZE(formats), NULL,
++				       DRM_PLANE_TYPE_PRIMARY, NULL);
++	if (ret)
++		return ret;
++	drm_plane_helper_add(&dpu->plane, &k1_dpu_plane_helper_funcs);
++
++	ret = drm_crtc_init_with_planes(drm, &dpu->crtc, &dpu->plane, NULL,
++					&k1_dpu_crtc_funcs, NULL);
++	if (ret)
++		return ret;
++	drm_crtc_helper_add(&dpu->crtc, &k1_dpu_crtc_helper_funcs);
++
++	ret = drm_encoder_init(drm, &dpu->encoder, &k1_dpu_encoder_funcs,
++			       DRM_MODE_ENCODER_DSI, NULL);
++	if (ret)
++		return ret;
++	dpu->encoder.possible_crtcs = drm_crtc_mask(&dpu->crtc);
++
++	ret = drm_bridge_attach(&dpu->encoder, bridge, NULL,
++				DRM_BRIDGE_ATTACH_NO_CONNECTOR);
++	if (ret)
++		return ret;
++
++	connector = drm_bridge_connector_init(drm, &dpu->encoder);
++	if (IS_ERR(connector))
++		return PTR_ERR(connector);
++
++	ret = drm_connector_attach_encoder(connector, &dpu->encoder);
++	if (ret)
++		return ret;
++
++	ret = drm_vblank_init(drm, 1);
++	if (ret)
++		return ret;
++
++	drm_mode_config_reset(drm);
++
++	return 0;
++}
++
++static int k1_dpu_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct k1_dpu *dpu;
++	int ret;
++
++	struct drm_bridge *bridge __free(drm_bridge_put) =
++		of_drm_get_bridge_by_endpoint(dev->of_node, 0, 0);
++	if (IS_ERR(bridge))
++		return dev_err_probe(dev, PTR_ERR(bridge),
++				     "failed to find the DSI bridge\n");
++
++	dpu = devm_drm_dev_alloc(dev, &k1_dpu_driver, struct k1_dpu, drm);
++	if (IS_ERR(dpu))
++		return PTR_ERR(dpu);
++	platform_set_drvdata(pdev, dpu);
++
++	dpu->base = devm_platform_ioremap_resource(pdev, 0);
++	if (IS_ERR(dpu->base))
++		return PTR_ERR(dpu->base);
++
++	dpu->clks[K1_DPU_CLK_PIXEL].id = "pixel";
++	dpu->clks[K1_DPU_CLK_CORE].id = "core";
++	dpu->clks[K1_DPU_CLK_BUS].id = "bus";
++	dpu->clks[K1_DPU_CLK_ESC].id = "esc";
++	ret = devm_clk_bulk_get(dev, K1_DPU_NUM_CLKS, dpu->clks);
++	if (ret)
++		return dev_err_probe(dev, ret, "failed to get clocks\n");
++
++	/* Shared with the DSI host and the D-PHY. */
++	dpu->resets = devm_reset_control_array_get_shared(dev);
++	if (IS_ERR(dpu->resets))
++		return dev_err_probe(dev, PTR_ERR(dpu->resets),
++				     "failed to get resets\n");
++
++	/* The high address register only holds two bits. */
++	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
++	if (ret)
++		return ret;
++
++	/* The line is only enabled while the controller is powered. */
++	dpu->irq = platform_get_irq(pdev, 0);
++	if (dpu->irq < 0)
++		return dpu->irq;
++	ret = devm_request_irq(dev, dpu->irq, k1_dpu_irq, IRQF_NO_AUTOEN,
++			       dev_name(dev), dpu);
++	if (ret)
++		return ret;
++
++	ret = devm_pm_runtime_enable(dev);
++	if (ret)
++		return ret;
++
++	ret = k1_dpu_modeset_init(dpu, bridge);
++	if (ret)
++		return ret;
++
++	ret = drm_dev_register(&dpu->drm, 0);
++	if (ret)
++		return ret;
++
++	drm_client_setup(&dpu->drm, NULL);
++
++	return 0;
++}
++
++static void k1_dpu_remove(struct platform_device *pdev)
++{
++	struct k1_dpu *dpu = platform_get_drvdata(pdev);
++
++	drm_dev_unregister(&dpu->drm);
++	drm_atomic_helper_shutdown(&dpu->drm);
++}
++
++static void k1_dpu_shutdown(struct platform_device *pdev)
++{
++	struct k1_dpu *dpu = platform_get_drvdata(pdev);
++
++	drm_atomic_helper_shutdown(&dpu->drm);
++}
++
++static const struct of_device_id k1_dpu_of_match[] = {
++	{ .compatible = "spacemit,k1-dpu" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, k1_dpu_of_match);
++
++static struct platform_driver k1_dpu_platform_driver = {
++	.probe = k1_dpu_probe,
++	.remove = k1_dpu_remove,
++	.shutdown = k1_dpu_shutdown,
++	.driver = {
++		.name = "spacemit-k1-dpu",
++		.of_match_table = k1_dpu_of_match,
++	},
++};
++module_platform_driver(k1_dpu_platform_driver);
++
++MODULE_DESCRIPTION("SpacemiT K1 display controller driver");
++MODULE_LICENSE("GPL");

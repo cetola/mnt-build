@@ -1,0 +1,58 @@
+From dfabb562c0c72708fc820de33bdfe95941dd1be8 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Fri, 27 Nov 2026 23:49:59 +0000
+Subject: [PATCH] riscv: dts: spacemit: k1: add the display controller node
+
+Connect it to the input of the MIPI DSI host.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ arch/riscv/boot/dts/spacemit/k1.dtsi | 28 ++++++++++++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+
+diff --git a/arch/riscv/boot/dts/spacemit/k1.dtsi b/arch/riscv/boot/dts/spacemit/k1.dtsi
+index 76201d8b9ce5e..e49016fd0d016 100644
+--- a/arch/riscv/boot/dts/spacemit/k1.dtsi
++++ b/arch/riscv/boot/dts/spacemit/k1.dtsi
+@@ -920,6 +920,10 @@ ports {
+ 
+ 				port@0 {
+ 					reg = <0>;
++
++					mipi_dsi_in: endpoint {
++						remote-endpoint = <&dpu_out>;
++					};
+ 				};
+ 
+ 				mipi_dsi_out_port: port@1 {
+@@ -1185,6 +1189,30 @@ multimedia-bus {
+ 			#size-cells = <2>;
+ 			dma-ranges = <0x0 0x00000000 0x0 0x00000000 0x0 0x80000000>,
+ 				     <0x0 0x80000000 0x1 0x00000000 0x3 0x80000000>;
++
++			dpu: display-controller@c0340000 {
++				compatible = "spacemit,k1-dpu";
++				reg = <0x0 0xc0340000 0x0 0x2a000>;
++				interrupts = <90>;
++				clocks = <&syscon_apmu CLK_DPU_PXCLK>,
++					 <&syscon_apmu CLK_DPU_MCLK>,
++					 <&syscon_apmu CLK_DPU_HCLK>,
++					 <&syscon_apmu CLK_DPU_ESC>;
++				clock-names = "pixel", "core", "bus", "esc";
++				resets = <&syscon_apmu RESET_MIPI>,
++					 <&syscon_apmu RESET_DPU_HCLK>,
++					 <&syscon_apmu RESET_DPU_MCLK>,
++					 <&syscon_apmu RESET_DPU_ESC>;
++				reset-names = "mipi", "bus", "core", "esc";
++				power-domains = <&syscon_apmu K1_PMDOMAIN_LCD>;
++				status = "disabled";
++
++				port {
++					dpu_out: endpoint {
++						remote-endpoint = <&mipi_dsi_in>;
++					};
++				};
++			};
+ 		};
+ 
+ 		network-bus {
