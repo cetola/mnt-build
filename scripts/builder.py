@@ -572,6 +572,174 @@ class KernelBuilder:
         self.logger.info(f"{Colors.GREEN}✓{Colors.RESET} LPC module built")
 
     # ------------------------------------------------------------------
+    # Rebuilding a few modules against an existing build
+    # ------------------------------------------------------------------
+
+    def resolve_module_targets(self, targets: List[str]) -> dict:
+        """Map module directories to the module names wanted from each.
+
+        A target is a directory in the kernel tree (all its modules), a path
+        to one .ko, or the name of a module installed by the last full build.
+        An empty set of names means every module in the directory.
+        """
+        order = self.modules_install_path() / "modules.order"
+        installed = order.read_text().split() if order.exists() else []
+        wanted: dict = {}
+        for target in targets:
+            path = Path(target.rstrip('/'))
+            if path.suffix == '.ko' and len(path.parts) > 1:
+                directory, name = path.parent, path.stem
+            elif len(path.parts) > 1:
+                directory, name = path, None
+            else:
+                stem = path.stem if path.suffix == '.ko' else path.name
+                matches = [Path(line) for line in installed if Path(line).stem == stem]
+                if len(matches) != 1:
+                    raise BuildError(
+                        f"'{target}' matches {len(matches)} modules in {order}. "
+                        "Give the module's directory or .ko path in the kernel tree instead."
+                    )
+                relative = matches[0].parts
+                if relative[0] == "kernel":
+                    relative = relative[1:]
+                directory, name = Path(*relative).parent, stem
+            names = wanted.setdefault(directory, set())
+            if name is None:
+                names.add('*')
+            else:
+                names.add(name)
+        return {d: (set() if '*' in n else n) for d, n in wanted.items()}
+
+    def _require_previous_build(self):
+        linux_dir = self.config.linux_dir
+        release_file = linux_dir / "include" / "config" / "kernel.release"
+        symvers = linux_dir / "Module.symvers"
+        if not ((linux_dir / ".config").exists() and release_file.exists() and symvers.exists()):
+            raise BuildError(
+                f"{linux_dir} has no finished kernel build to build modules against. "
+                "Run 'mnt-build build' first."
+            )
+        release = release_file.read_text().strip()
+        if release != self.config.kernel_release:
+            raise BuildError(
+                f"{linux_dir} was last built as {release}, not {self.config.kernel_release}. "
+                "Run 'mnt-build build' first."
+            )
+        with open(symvers) as f:
+            exporters = (line.split('\t')[2] for line in f if line.count('\t') >= 2)
+            if not any(exporter != "vmlinux" for exporter in exporters):
+                raise BuildError(
+                    f"{symvers} lists no symbols exported by modules. "
+                    "Run 'mnt-build build' or 'mnt-build build --modules-only' first."
+                )
+
+    def _require_unchanged_config(self):
+        """The modules must match the built kernel, so the config may not move."""
+        linux_dir = self.config.linux_dir
+        trial = linux_dir / ".config.mnt-module"
+        shutil.copy2(linux_dir / ".config", trial)
+        try:
+            self.run_command(
+                ['make', *self._make_kernel_vars(), f'KCONFIG_CONFIG={trial.name}',
+                 'olddefconfig'],
+                cwd=linux_dir
+            )
+
+            def settings(path: Path) -> set:
+                return {line for line in path.read_text().splitlines()
+                        if line.startswith('CONFIG_') or line.endswith('is not set')}
+
+            changed = settings(linux_dir / ".config") ^ settings(trial)
+        finally:
+            trial.unlink(missing_ok=True)
+            (linux_dir / (trial.name + ".old")).unlink(missing_ok=True)
+        if changed:
+            shown = '\n'.join(f"  {line}" for line in sorted(changed)[:10])
+            raise BuildError(
+                "The patches change the kernel config since the last build:\n"
+                f"{shown}\nRun 'mnt-build build' instead."
+            )
+
+    def _package_module(self, ko: Path, output_dir: Path) -> Path:
+        """Copy a built module to output_dir, signed and compressed as installed."""
+        linux_dir = self.config.linux_dir
+        release = self.config.kernel_release
+        if f"vermagic={release} ".encode() not in ko.read_bytes():
+            raise BuildError(f"{ko} was not built for {release}.")
+
+        dest = output_dir / ko.name
+        shutil.copy2(ko, dest)
+
+        settings = dict(
+            line.split('=', 1)
+            for line in (linux_dir / ".config").read_text().splitlines()
+            if line.startswith('CONFIG_') and '=' in line
+        )
+        if settings.get('CONFIG_MODULE_SIG_ALL') == 'y':
+            key = linux_dir / "certs" / "signing_key.pem"
+            cert = linux_dir / "certs" / "signing_key.x509"
+            digest = settings.get('CONFIG_MODULE_SIG_HASH', '').strip('"')
+            self.run_command(
+                [str(linux_dir / "scripts" / "sign-file"), digest, str(key), str(cert),
+                 str(dest)],
+                cwd=linux_dir
+            )
+
+        if settings.get('CONFIG_MODULE_COMPRESS_ALL') != 'y':
+            return dest
+        for option, command, suffix in (
+            ('CONFIG_MODULE_COMPRESS_XZ', ['xz', '--check=crc32', '--lzma2=dict=1MiB', '-f'], '.xz'),
+            ('CONFIG_MODULE_COMPRESS_ZSTD', ['zstd', '-T0', '--rm', '-f', '-q'], '.zst'),
+            ('CONFIG_MODULE_COMPRESS_GZIP', ['gzip', '-n', '-f'], '.gz'),
+        ):
+            if settings.get(option) == 'y':
+                self.run_command([*command, str(dest)], cwd=output_dir)
+                return dest.with_name(dest.name + suffix)
+        raise BuildError("Module compression is enabled but its format is not recognized.")
+
+    def build_selected_modules(self, targets: List[str]) -> List[Path]:
+        """Rebuild some modules against the last build, without touching it.
+
+        Uses 'make M=<directory>', which reads the symbol table of the whole
+        build and leaves it alone. A plain 'make path/to/module.ko' would
+        overwrite it.
+        """
+        self._require_previous_build()
+        self.prepare_kernel_source(skip_git_operations=True)
+        self.log_phase("Patching")
+        if self.apply_patches().failed:
+            raise BuildError("Not building modules from a partly patched tree.")
+        self._require_unchanged_config()
+        wanted = self.resolve_module_targets(targets)
+
+        output_dir = self.config.build_dir / "module-out" / self.config.kernel_release
+        output_dir.mkdir(parents=True, exist_ok=True)
+        built: List[Path] = []
+        self.log_phase("Compile")
+        for directory, names in wanted.items():
+            source = self.config.linux_dir / directory
+            if not (source / "Makefile").exists():
+                raise BuildError(f"No Makefile in {source}")
+            self.run_command(
+                ['make', f'-j{self.config.jobs}', *self._make_kernel_vars(),
+                 f'M={directory}', 'modules'],
+                cwd=self.config.linux_dir, stream_output=True
+            )
+            produced = [Path(line).stem for line in (source / "modules.order").read_text().split()]
+            missing = names - set(produced)
+            if missing:
+                raise BuildError(
+                    f"{directory} built no module named {', '.join(sorted(missing))}. "
+                    f"It built: {', '.join(produced) or 'nothing'}"
+                )
+            for name in produced:
+                if not names or name in names:
+                    built.append(self._package_module(source / f"{name}.ko", output_dir))
+        if not built:
+            raise BuildError("No modules were built.")
+        return built
+
+    # ------------------------------------------------------------------
     # Headers tree
     # ------------------------------------------------------------------
 

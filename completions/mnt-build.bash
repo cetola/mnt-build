@@ -9,7 +9,7 @@ _mnt_build_complete() {
   }
 
   local global_opts="--help --version"
-  local subcommands="build setup clean dev-kernel uboot barebox"
+  local subcommands="build module setup clean dev-kernel uboot barebox"
   local sysimages="pocket-reform-system-a311d reform-next-system-rk3588 pocket-reform-system-rk3588 pocket-reform-system-imx8mp pocket-reform-system-rk3588s"
 
   # Resolve subcommand, if any.
@@ -17,7 +17,7 @@ _mnt_build_complete() {
   local i
   for ((i=1; i<${#words[@]}; i++)); do
     case "${words[i]}" in
-      build|clean|dev-kernel|uboot|barebox)
+      build|module|clean|dev-kernel|uboot|barebox)
         subcmd="${words[i]}"
         break
         ;;
@@ -42,6 +42,19 @@ _mnt_build_complete() {
           ;;
       esac
       mapfile -t COMPREPLY < <(compgen -W "$build_opts" -- "$cur")
+      ;;
+    module)
+      local module_opts="--help --kversion --build-dir -j --jobs --localversion-rev --arch --cross-compile --kernel"
+      case "$prev" in
+        --build-dir)
+          mapfile -t COMPREPLY < <(compgen -d -- "$cur")
+          return 0
+          ;;
+        --kversion|--arch|--cross-compile|--localversion-rev|-j|--jobs|--kernel)
+          return 0
+          ;;
+      esac
+      mapfile -t COMPREPLY < <(compgen -W "$module_opts" -- "$cur")
       ;;
     setup)
       local setup_opts="--help --kversion --build-dir --kernel --localversion-rev --shallow-clone"

@@ -195,6 +195,49 @@ def run_build(version: str = DEFAULT_KERNEL_VERSION, build_dir: Optional[Path] =
             logger.error(f"Could not restore the kernel tree: {e}")
 
 
+def run_module(targets: list[str], version: str = DEFAULT_KERNEL_VERSION,
+               build_dir: Optional[Path] = None, jobs: Optional[int] = None,
+               localversion_rev: int = DEFAULT_LOCALVERSION_REV,
+               arch: str = "arm64", cross_compile: Optional[str] = None,
+               kernel: str = DEFAULT_KERNEL_DIR) -> int:
+    if cross_compile is None:
+        cross_compile = default_cross_compile_for_arch(arch)
+    cross_compile = cross_compile.strip()
+    if cross_compile.lower() in {"none", "native", "off", "false"}:
+        cross_compile = ""
+
+    config = BuildConfig.create(version=version, arch=arch, build_dir=build_dir, jobs=jobs,
+                                localversion_rev=localversion_rev, kernel=kernel)
+    config.build_dir.mkdir(parents=True, exist_ok=True)
+    logger = setup_logging(config.log_file)
+    builder = KernelBuilder(config, logger, arch=arch, cross_compile=cross_compile)
+
+    try:
+        logger.info(f"Rebuilding modules for {config.kernel_release} in {config.linux_dir}")
+        built = builder.build_selected_modules(targets)
+        log_phase(logger, "Summary")
+        for module in built:
+            logger.info(f"{Colors.GREEN}✓{Colors.RESET} {module}")
+        logger.info("These match the last full build only if no built-in code changed since.")
+        logger.info(f"Log file: {config.log_file}")
+        return 0
+    except BuildError as e:
+        logger.error(f"Build failed: {e}")
+        logger.error(f"Check log file for details: {config.log_file}")
+        return 1
+    except KeyboardInterrupt:
+        logger.warning("Build interrupted by user")
+        return 130
+    except Exception as e:
+        logger.exception(f"Unexpected error: {e}")
+        return 1
+    finally:
+        try:
+            builder.restore_kernel_tree()
+        except BuildError as e:
+            logger.error(f"Could not restore the kernel tree: {e}")
+
+
 def run_clean(build_dir: Optional[Path] = None, kernel: str = DEFAULT_KERNEL_DIR) -> int:
     config = BuildConfig.create(version=DEFAULT_KERNEL_VERSION, build_dir=build_dir, kernel=kernel)
     config.build_dir.mkdir(parents=True, exist_ok=True)
@@ -644,6 +687,38 @@ def build_parser() -> argparse.ArgumentParser:
         help='Build and install in-tree kernel modules only; skip kernel image, DTBs, and tarballs.'
     )
 
+    module_parser = subparsers.add_parser(
+        'module',
+        help='Rebuild only some kernel modules against the last build'
+    )
+    module_parser.add_argument(
+        'targets', nargs='+',
+        help='Module name from the last build, path to a .ko, or a directory in the '
+             'kernel tree (all its modules). Results go to '
+             '<build-dir>/module-out/<kernel release>/.'
+    )
+    module_parser.add_argument(
+        '--kversion', dest='kernel_version', default=DEFAULT_KERNEL_VERSION,
+        help=f'Kernel version of the last build (default: {DEFAULT_KERNEL_VERSION}).'
+    )
+    module_parser.add_argument('--build-dir', type=Path,
+                               help='Build directory (default: ~/mnt-build)')
+    module_parser.add_argument(
+        '--kernel', default=DEFAULT_KERNEL_DIR,
+        help=f'Kernel checkout dir under build_dir (default: {DEFAULT_KERNEL_DIR}). '
+             'It is used as checked out, like build --skip-git-ops.'
+    )
+    module_parser.add_argument('-j', '--jobs', type=int,
+                               help='Number of parallel jobs (default: number of CPUs)')
+    module_parser.add_argument(
+        '--localversion-rev', type=int, default=DEFAULT_LOCALVERSION_REV,
+        help=f'Kernel localversion revision (default: {DEFAULT_LOCALVERSION_REV})'
+    )
+    module_parser.add_argument('--arch', default='arm64',
+                               help='Kernel ARCH: arm64 (default), riscv or x86_64.')
+    module_parser.add_argument('--cross-compile', default=None,
+                               help='CROSS_COMPILE prefix, as for build.')
+
     setup_parser = subparsers.add_parser(
         'setup',
         help='Fetch what a build needs (the kernel tag and reform-tools) without building'
@@ -885,6 +960,12 @@ def main(argv: Optional[list[str]] = None) -> int:
             modules_only=args.modules_only,
             kernel=args.kernel,
         )
+
+    if args.command == 'module':
+        return run_module(targets=args.targets, version=args.kernel_version,
+                          build_dir=args.build_dir, jobs=args.jobs,
+                          localversion_rev=args.localversion_rev, arch=args.arch,
+                          cross_compile=args.cross_compile, kernel=args.kernel)
 
     if args.command == 'setup':
         return run_setup(version=args.kernel_version, build_dir=args.build_dir,
