@@ -1,0 +1,437 @@
+From 65667ed46691d51806050dfbddee8559ffa1102d Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Fri, 27 Nov 2026 21:05:16 +0000
+Subject: [PATCH 2/2] phy: spacemit: add K1 MIPI DSI D-PHY driver
+
+Add a generic PHY driver for the MIPI D-PHY of the SpacemiT K1 DSI
+output. It sets the high-speed clock, enables up to four data lanes in
+continuous clock mode and programs the timing registers from a
+phy_configure_opts_mipi_dphy.
+
+The register layout and hardware timing adjustments come from the
+SpacemiT vendor kernel. Unlike that code, clamp the wakeup count so that
+it cannot spill into the TA_GO field.
+
+The analog 1.2 V supply is switched on with the PHY. With it off the
+registers work and transfers appear to complete, but nothing reaches the
+panel.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/phy/spacemit/Kconfig            |  18 ++
+ drivers/phy/spacemit/Makefile           |   1 +
+ drivers/phy/spacemit/phy-k1-mipi-dphy.c | 366 ++++++++++++++++++++++++
+ 3 files changed, 385 insertions(+)
+ create mode 100644 drivers/phy/spacemit/phy-k1-mipi-dphy.c
+
+diff --git a/drivers/phy/spacemit/Kconfig b/drivers/phy/spacemit/Kconfig
+index b5f36621b2075..169ced3875a75 100644
+--- a/drivers/phy/spacemit/Kconfig
++++ b/drivers/phy/spacemit/Kconfig
+@@ -2,6 +2,24 @@
+ #
+ # Phy drivers for SpacemiT platforms
+ #
++config PHY_SPACEMIT_K1_MIPI_DPHY
++	tristate "SpacemiT K1 MIPI DSI D-PHY support"
++	depends on ARCH_SPACEMIT || COMPILE_TEST
++	depends on COMMON_CLK
++	depends on HAS_IOMEM
++	depends on OF
++	depends on REGULATOR
++	select GENERIC_PHY
++	select GENERIC_PHY_MIPI_DPHY
++	default ARCH_SPACEMIT
++	help
++	  Enable support for the MIPI D-PHY of the DSI output on the
++	  SpacemiT K1 SoC. The PHY drives up to four data lanes and is
++	  needed to connect a MIPI DSI panel. It is used by the K1 DSI
++	  host controller driver.
++
++	  If built as a module, it is called phy-k1-mipi-dphy.
++
+ config PHY_SPACEMIT_K1_PCIE
+ 	tristate "PCIe and combo PHY driver for the SpacemiT K1 SoC"
+ 	depends on ARCH_SPACEMIT || COMPILE_TEST
+diff --git a/drivers/phy/spacemit/Makefile b/drivers/phy/spacemit/Makefile
+index f679c1851b4f0..5a48b4b460200 100644
+--- a/drivers/phy/spacemit/Makefile
++++ b/drivers/phy/spacemit/Makefile
+@@ -1,4 +1,5 @@
+ # SPDX-License-Identifier: GPL-2.0-only
++obj-$(CONFIG_PHY_SPACEMIT_K1_MIPI_DPHY)	+= phy-k1-mipi-dphy.o
+ obj-$(CONFIG_PHY_SPACEMIT_K1_PCIE)		+= phy-k1-pcie.o
+ obj-$(CONFIG_PHY_SPACEMIT_K1_USB2)		+= phy-k1-usb2.o
+ obj-$(CONFIG_PHY_SPACEMIT_K3_COMBO_PHY)		+= phy-k3-combo.o
+diff --git a/drivers/phy/spacemit/phy-k1-mipi-dphy.c b/drivers/phy/spacemit/phy-k1-mipi-dphy.c
+new file mode 100644
+index 0000000000000..d0381b8ca7f6b
+--- /dev/null
++++ b/drivers/phy/spacemit/phy-k1-mipi-dphy.c
+@@ -0,0 +1,366 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * SpacemiT K1 MIPI DSI D-PHY driver
++ *
++ * Register layout and timing adjustments are taken from the SpacemiT vendor
++ * kernel.
++ *
++ * Copyright (C) 2023 Spacemit Co., Ltd.
++ * Copyright (C) 2026 Stephano Cetola <stephano@cetola.net>
++ */
++
++#include <linux/bitfield.h>
++#include <linux/bits.h>
++#include <linux/clk.h>
++#include <linux/io.h>
++#include <linux/math64.h>
++#include <linux/minmax.h>
++#include <linux/module.h>
++#include <linux/phy/phy.h>
++#include <linux/phy/phy-mipi-dphy.h>
++#include <linux/platform_device.h>
++#include <linux/pm_runtime.h>
++#include <linux/regulator/consumer.h>
++#include <linux/reset.h>
++#include <linux/time64.h>
++
++#define K1_DPHY_CTRL_1			0x04
++#define  K1_DPHY_CTRL_1_CONT_CLK	BIT(0)
++#define  K1_DPHY_CTRL_1_VDD_VALID	BIT(16)
++#define  K1_DPHY_CTRL_1_ADD_VALID	BIT(17)
++
++#define K1_DPHY_CTRL_2			0x08
++#define  K1_DPHY_CTRL_2_LANE_EN		GENMASK(7, 4)
++
++#define K1_DPHY_TIME_0			0x40
++#define  K1_DPHY_TIME_0_HS_PREP		GENMASK(7, 0)
++#define  K1_DPHY_TIME_0_HS_ZERO		GENMASK(15, 8)
++#define  K1_DPHY_TIME_0_HS_TRAIL	GENMASK(23, 16)
++#define  K1_DPHY_TIME_0_HS_EXIT		GENMASK(31, 24)
++
++#define K1_DPHY_TIME_1			0x44
++#define  K1_DPHY_TIME_1_WAKEUP		GENMASK(15, 0)
++#define  K1_DPHY_TIME_1_TA_GO		GENMASK(23, 16)
++#define  K1_DPHY_TIME_1_TA_GET		GENMASK(31, 24)
++
++#define K1_DPHY_TIME_2			0x48
++#define  K1_DPHY_TIME_2_CLK_LPX		GENMASK(7, 0)
++#define  K1_DPHY_TIME_2_CLK_ZERO	GENMASK(15, 8)
++#define  K1_DPHY_TIME_2_CLK_TRAIL	GENMASK(23, 16)
++#define  K1_DPHY_TIME_2_CLK_EXIT	GENMASK(31, 24)
++
++#define K1_DPHY_TIME_3			0x4c
++#define  K1_DPHY_TIME_3_REQ_READY	GENMASK(7, 0)
++#define  K1_DPHY_TIME_3_LPX		GENMASK(15, 8)
++
++#define K1_DPHY_ANA_PWR_CTRL		0x60
++#define  K1_DPHY_ANA_PWR_CTRL_PU	BIT(0)
++#define  K1_DPHY_ANA_PWR_CTRL_RST_N	BIT(8)
++
++#define K1_DPHY_MAX_LANES		4
++#define K1_DPHY_MAX_HS_RATE		1200000000UL
++/* The vendor value; the 50 ns allowed by the specification is untested. */
++#define K1_DPHY_MIN_LPX_PS		60000
++#define K1_DPHY_REQ_READY		0x3c
++
++struct k1_dphy {
++	void __iomem *base;
++	struct clk *bus_clk;
++	struct clk *esc_clk;
++	struct clk *hs_clk;
++	struct regulator *avdd12;
++	struct phy_configure_opts_mipi_dphy cfg;
++};
++
++struct k1_dphy_timing {
++	u32 time0;
++	u32 time1;
++	u32 time2;
++	u32 time3;
++};
++
++/* Number of escape clock periods that is strictly longer than @ps. */
++static u32 k1_dphy_cycles(u64 ps, u32 period_ps)
++{
++	return div_u64(ps, period_ps) + 1;
++}
++
++static void k1_dphy_calc_timing(const struct phy_configure_opts_mipi_dphy *cfg,
++				unsigned long esc_rate,
++				struct k1_dphy_timing *timing)
++{
++	u32 period = div_u64(PSEC_PER_SEC, esc_rate);
++	u32 ui = div64_u64(PSEC_PER_SEC + cfg->hs_clk_rate - 1,
++			   cfg->hs_clk_rate);
++	u32 hs_prep, hs_zero, hs_trail, hs_exit, clk_zero, clk_trail;
++	u32 lpx, ta_get, ta_go, wakeup;
++	s64 rest;
++
++	hs_prep = k1_dphy_cycles(cfg->hs_prepare, period);
++
++	/* The hardware appends three byte times to HS-ZERO by itself. */
++	rest = (s64)cfg->hs_prepare + cfg->hs_zero -
++	       (u64)(hs_prep + 1) * period - 24 * ui;
++	hs_zero = div_s64(rest, period) + 4;
++
++	/* The hardware also stretches HS-TRAIL by three periods. */
++	hs_trail = k1_dphy_cycles(cfg->hs_trail, period);
++	hs_trail = hs_trail > 3 ? hs_trail - 3 : 0;
++
++	hs_exit = k1_dphy_cycles(cfg->hs_exit, period);
++
++	rest = (s64)cfg->clk_prepare + cfg->clk_zero -
++	       (u64)(hs_prep + 1) * period;
++	clk_zero = div_s64(max(rest, 0), period) + 1;
++
++	clk_trail = k1_dphy_cycles(cfg->clk_trail, period);
++
++	lpx = k1_dphy_cycles(max(cfg->lpx, K1_DPHY_MIN_LPX_PS), period);
++	ta_get = 5 * lpx - 1;
++	ta_go = 4 * lpx - 1;
++
++	/*
++	 * At fast escape clocks the field cannot hold the 1 ms minimum, and
++	 * the value must not spill into TA_GO.
++	 */
++	wakeup = k1_dphy_cycles(cfg->wakeup * (PSEC_PER_SEC / USEC_PER_SEC),
++				period);
++	wakeup = min(wakeup, FIELD_MAX(K1_DPHY_TIME_1_WAKEUP));
++
++	timing->time0 = FIELD_PREP(K1_DPHY_TIME_0_HS_PREP, hs_prep) |
++			FIELD_PREP(K1_DPHY_TIME_0_HS_ZERO, hs_zero) |
++			FIELD_PREP(K1_DPHY_TIME_0_HS_TRAIL, hs_trail) |
++			FIELD_PREP(K1_DPHY_TIME_0_HS_EXIT, hs_exit);
++	timing->time1 = FIELD_PREP(K1_DPHY_TIME_1_WAKEUP, wakeup) |
++			FIELD_PREP(K1_DPHY_TIME_1_TA_GO, ta_go) |
++			FIELD_PREP(K1_DPHY_TIME_1_TA_GET, ta_get);
++	timing->time2 = FIELD_PREP(K1_DPHY_TIME_2_CLK_LPX, lpx) |
++			FIELD_PREP(K1_DPHY_TIME_2_CLK_ZERO, clk_zero) |
++			FIELD_PREP(K1_DPHY_TIME_2_CLK_TRAIL, clk_trail) |
++			FIELD_PREP(K1_DPHY_TIME_2_CLK_EXIT, hs_exit);
++	timing->time3 = FIELD_PREP(K1_DPHY_TIME_3_REQ_READY, K1_DPHY_REQ_READY) |
++			FIELD_PREP(K1_DPHY_TIME_3_LPX, lpx);
++}
++
++static int k1_dphy_init(struct phy *phy)
++{
++	struct k1_dphy *dphy = phy_get_drvdata(phy);
++	int ret;
++
++	ret = clk_prepare_enable(dphy->bus_clk);
++	if (ret)
++		return ret;
++
++	ret = clk_prepare_enable(dphy->esc_clk);
++	if (ret)
++		clk_disable_unprepare(dphy->bus_clk);
++
++	return ret;
++}
++
++static int k1_dphy_exit(struct phy *phy)
++{
++	struct k1_dphy *dphy = phy_get_drvdata(phy);
++
++	clk_disable_unprepare(dphy->esc_clk);
++	clk_disable_unprepare(dphy->bus_clk);
++
++	return 0;
++}
++
++static int k1_dphy_validate(struct phy *phy, enum phy_mode mode, int submode,
++			    union phy_configure_opts *opts)
++{
++	struct phy_configure_opts_mipi_dphy *cfg = &opts->mipi_dphy;
++
++	if (mode != PHY_MODE_MIPI_DPHY)
++		return -EINVAL;
++
++	if (!cfg->lanes || cfg->lanes > K1_DPHY_MAX_LANES)
++		return -EINVAL;
++
++	if (!cfg->hs_clk_rate || cfg->hs_clk_rate > K1_DPHY_MAX_HS_RATE)
++		return -EINVAL;
++
++	return phy_mipi_dphy_config_validate(cfg);
++}
++
++static int k1_dphy_configure(struct phy *phy, union phy_configure_opts *opts)
++{
++	struct k1_dphy *dphy = phy_get_drvdata(phy);
++	int ret;
++
++	ret = k1_dphy_validate(phy, PHY_MODE_MIPI_DPHY, 0, opts);
++	if (ret)
++		return ret;
++
++	dphy->cfg = opts->mipi_dphy;
++
++	return 0;
++}
++
++static int k1_dphy_power_on(struct phy *phy)
++{
++	struct k1_dphy *dphy = phy_get_drvdata(phy);
++	struct k1_dphy_timing timing;
++	unsigned long esc_rate, hs_rate;
++	int ret;
++
++	if (!dphy->cfg.hs_clk_rate)
++		return -EINVAL;
++
++	esc_rate = clk_get_rate(dphy->esc_clk);
++	if (!esc_rate)
++		return -EINVAL;
++
++	/*
++	 * Without it the registers still work and transfers appear to be sent,
++	 * but nothing appears on the lanes.
++	 */
++	ret = regulator_enable(dphy->avdd12);
++	if (ret)
++		return ret;
++
++	/* The clock has to be running for a frequency change to complete. */
++	ret = clk_prepare_enable(dphy->hs_clk);
++	if (ret)
++		goto err_supply;
++
++	ret = clk_set_rate(dphy->hs_clk, dphy->cfg.hs_clk_rate);
++	if (ret)
++		goto err_disable;
++
++	/* A slower link than requested cannot carry the video stream. */
++	hs_rate = clk_get_rate(dphy->hs_clk);
++	if (hs_rate < dphy->cfg.hs_clk_rate || hs_rate > K1_DPHY_MAX_HS_RATE) {
++		dev_err(&phy->dev, "cannot use HS rate %lu for requested %lu\n",
++			hs_rate, dphy->cfg.hs_clk_rate);
++		ret = -EINVAL;
++		goto err_disable;
++	}
++
++	k1_dphy_calc_timing(&dphy->cfg, esc_rate, &timing);
++
++	writel(K1_DPHY_ANA_PWR_CTRL_RST_N | K1_DPHY_ANA_PWR_CTRL_PU,
++	       dphy->base + K1_DPHY_ANA_PWR_CTRL);
++	writel(K1_DPHY_CTRL_1_ADD_VALID | K1_DPHY_CTRL_1_VDD_VALID |
++	       K1_DPHY_CTRL_1_CONT_CLK, dphy->base + K1_DPHY_CTRL_1);
++
++	writel(timing.time0, dphy->base + K1_DPHY_TIME_0);
++	writel(timing.time1, dphy->base + K1_DPHY_TIME_1);
++	writel(timing.time2, dphy->base + K1_DPHY_TIME_2);
++	writel(timing.time3, dphy->base + K1_DPHY_TIME_3);
++
++	writel(FIELD_PREP(K1_DPHY_CTRL_2_LANE_EN, GENMASK(dphy->cfg.lanes - 1, 0)),
++	       dphy->base + K1_DPHY_CTRL_2);
++
++	return 0;
++
++err_disable:
++	clk_disable_unprepare(dphy->hs_clk);
++err_supply:
++	regulator_disable(dphy->avdd12);
++
++	return ret;
++}
++
++static int k1_dphy_power_off(struct phy *phy)
++{
++	struct k1_dphy *dphy = phy_get_drvdata(phy);
++
++	writel(0, dphy->base + K1_DPHY_CTRL_2);
++	writel(K1_DPHY_CTRL_1_ADD_VALID | K1_DPHY_CTRL_1_VDD_VALID,
++	       dphy->base + K1_DPHY_CTRL_1);
++	writel(0, dphy->base + K1_DPHY_ANA_PWR_CTRL);
++
++	clk_disable_unprepare(dphy->hs_clk);
++	regulator_disable(dphy->avdd12);
++
++	return 0;
++}
++
++static const struct phy_ops k1_dphy_ops = {
++	.init = k1_dphy_init,
++	.exit = k1_dphy_exit,
++	.power_on = k1_dphy_power_on,
++	.power_off = k1_dphy_power_off,
++	.configure = k1_dphy_configure,
++	.validate = k1_dphy_validate,
++	.owner = THIS_MODULE,
++};
++
++static int k1_dphy_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct phy_provider *provider;
++	struct reset_control *reset;
++	struct k1_dphy *dphy;
++	struct phy *phy;
++	int ret;
++
++	dphy = devm_kzalloc_obj(dev, *dphy);
++	if (!dphy)
++		return -ENOMEM;
++
++	dphy->base = devm_platform_ioremap_resource(pdev, 0);
++	if (IS_ERR(dphy->base))
++		return PTR_ERR(dphy->base);
++
++	dphy->bus_clk = devm_clk_get(dev, "bus");
++	if (IS_ERR(dphy->bus_clk))
++		return dev_err_probe(dev, PTR_ERR(dphy->bus_clk),
++				     "failed to get bus clock\n");
++
++	dphy->esc_clk = devm_clk_get(dev, "esc");
++	if (IS_ERR(dphy->esc_clk))
++		return dev_err_probe(dev, PTR_ERR(dphy->esc_clk),
++				     "failed to get escape clock\n");
++
++	dphy->hs_clk = devm_clk_get(dev, "hs");
++	if (IS_ERR(dphy->hs_clk))
++		return dev_err_probe(dev, PTR_ERR(dphy->hs_clk),
++				     "failed to get high-speed clock\n");
++
++	dphy->avdd12 = devm_regulator_get(dev, "avdd12");
++	if (IS_ERR(dphy->avdd12))
++		return dev_err_probe(dev, PTR_ERR(dphy->avdd12),
++				     "failed to get the 1.2 V supply\n");
++
++	/* Shared with the DSI host controller. */
++	reset = devm_reset_control_get_shared_deasserted(dev, NULL);
++	if (IS_ERR(reset))
++		return dev_err_probe(dev, PTR_ERR(reset),
++				     "failed to deassert reset\n");
++
++	ret = devm_pm_runtime_enable(dev);
++	if (ret)
++		return ret;
++
++	phy = devm_phy_create(dev, NULL, &k1_dphy_ops);
++	if (IS_ERR(phy))
++		return dev_err_probe(dev, PTR_ERR(phy), "failed to create PHY\n");
++
++	phy_set_drvdata(phy, dphy);
++
++	provider = devm_of_phy_provider_register(dev, of_phy_simple_xlate);
++
++	return PTR_ERR_OR_ZERO(provider);
++}
++
++static const struct of_device_id k1_dphy_of_match[] = {
++	{ .compatible = "spacemit,k1-mipi-dphy" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, k1_dphy_of_match);
++
++static struct platform_driver k1_dphy_driver = {
++	.probe = k1_dphy_probe,
++	.driver = {
++		.name = "spacemit-k1-mipi-dphy",
++		.of_match_table = k1_dphy_of_match,
++	},
++};
++module_platform_driver(k1_dphy_driver);
++
++MODULE_DESCRIPTION("SpacemiT K1 MIPI DSI D-PHY driver");
++MODULE_LICENSE("GPL");

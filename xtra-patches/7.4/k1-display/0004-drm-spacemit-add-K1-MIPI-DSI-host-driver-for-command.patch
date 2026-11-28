@@ -1,0 +1,599 @@
+From cfdab332a125e894dab7060c091097ad64fde243 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Fri, 27 Nov 2026 21:56:50 +0000
+Subject: [PATCH 4/5] drm/spacemit: add K1 MIPI DSI host driver for commands
+
+Add a MIPI DSI host for the SpacemiT K1 that can send and receive
+commands. The link is brought up on the first transfer, at a fixed
+1 Gbps per lane, and reset after a failed transfer. There is no video
+mode and no DRM bridge yet.
+
+Packet header ECC and payload CRC are computed in software, as the
+vendor driver does. Unlike that driver, report failed and unrecognized
+reads as errors.
+
+Register layout and sequences come from the SpacemiT vendor kernel.
+
+On hardware, a low-power write completes. Reads do not yet.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/gpu/drm/Kconfig                    |   1 +
+ drivers/gpu/drm/Makefile                   |   1 +
+ drivers/gpu/drm/spacemit/Kconfig           |  15 +
+ drivers/gpu/drm/spacemit/Makefile          |   2 +
+ drivers/gpu/drm/spacemit/spacemit-k1-dsi.c | 510 +++++++++++++++++++++
+ 5 files changed, 529 insertions(+)
+ create mode 100644 drivers/gpu/drm/spacemit/Kconfig
+ create mode 100644 drivers/gpu/drm/spacemit/Makefile
+ create mode 100644 drivers/gpu/drm/spacemit/spacemit-k1-dsi.c
+
+diff --git a/drivers/gpu/drm/Kconfig b/drivers/gpu/drm/Kconfig
+index 61111d50b1c65..76abdfb25dc44 100644
+--- a/drivers/gpu/drm/Kconfig
++++ b/drivers/gpu/drm/Kconfig
+@@ -345,6 +345,7 @@ source "drivers/gpu/drm/renesas/Kconfig"
+ source "drivers/gpu/drm/rockchip/Kconfig"
+ source "drivers/gpu/drm/sitronix/Kconfig"
+ source "drivers/gpu/drm/solomon/Kconfig"
++source "drivers/gpu/drm/spacemit/Kconfig"
+ source "drivers/gpu/drm/sprd/Kconfig"
+ source "drivers/gpu/drm/sti/Kconfig"
+ source "drivers/gpu/drm/stm/Kconfig"
+diff --git a/drivers/gpu/drm/Makefile b/drivers/gpu/drm/Makefile
+index 2c6bc093a923a..a02d4c96b5593 100644
+--- a/drivers/gpu/drm/Makefile
++++ b/drivers/gpu/drm/Makefile
+@@ -234,6 +234,7 @@ obj-y			+= gud/
+ obj-$(CONFIG_DRM_HYPERV) += hyperv/
+ obj-y			+= sitronix/
+ obj-y			+= solomon/
++obj-y			+= spacemit/
+ obj-$(CONFIG_DRM_SPRD) += sprd/
+ obj-$(CONFIG_DRM_LOONGSON) += loongson/
+ obj-$(CONFIG_DRM_POWERVR) += imagination/
+diff --git a/drivers/gpu/drm/spacemit/Kconfig b/drivers/gpu/drm/spacemit/Kconfig
+new file mode 100644
+index 0000000000000..43bc82e8f4120
+--- /dev/null
++++ b/drivers/gpu/drm/spacemit/Kconfig
+@@ -0,0 +1,15 @@
++# SPDX-License-Identifier: GPL-2.0-only
++config DRM_SPACEMIT_K1_DSI
++	tristate "SpacemiT K1 MIPI DSI host"
++	depends on DRM && OF
++	depends on ARCH_SPACEMIT || COMPILE_TEST
++	select CRC_CCITT
++	select DRM_MIPI_DSI
++	select GENERIC_PHY
++	select GENERIC_PHY_MIPI_DPHY
++	help
++	  Support for the MIPI DSI host controller of the SpacemiT K1 SoC.
++	  The driver currently sends and receives DSI commands only, so a
++	  panel attached to it can be configured but shows no picture.
++
++	  If built as a module, it is called spacemit-k1-dsi.
+diff --git a/drivers/gpu/drm/spacemit/Makefile b/drivers/gpu/drm/spacemit/Makefile
+new file mode 100644
+index 0000000000000..093f16f567317
+--- /dev/null
++++ b/drivers/gpu/drm/spacemit/Makefile
+@@ -0,0 +1,2 @@
++# SPDX-License-Identifier: GPL-2.0-only
++obj-$(CONFIG_DRM_SPACEMIT_K1_DSI) += spacemit-k1-dsi.o
+diff --git a/drivers/gpu/drm/spacemit/spacemit-k1-dsi.c b/drivers/gpu/drm/spacemit/spacemit-k1-dsi.c
+new file mode 100644
+index 0000000000000..368299f2430da
+--- /dev/null
++++ b/drivers/gpu/drm/spacemit/spacemit-k1-dsi.c
+@@ -0,0 +1,510 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * SpacemiT K1 MIPI DSI host controller driver
++ *
++ * So far this only sends and receives commands. There is no video mode.
++ *
++ * Register layout and programming sequences are taken from the SpacemiT vendor
++ * kernel.
++ *
++ * Copyright (C) 2023 Spacemit Co., Ltd.
++ * Copyright (C) 2026 Stephano Cetola <stephano@cetola.net>
++ */
++
++#include <linux/bitfield.h>
++#include <linux/bitops.h>
++#include <linux/clk.h>
++#include <linux/crc-ccitt.h>
++#include <linux/delay.h>
++#include <linux/io.h>
++#include <linux/iopoll.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/phy/phy.h>
++#include <linux/phy/phy-mipi-dphy.h>
++#include <linux/platform_device.h>
++#include <linux/pm_runtime.h>
++#include <linux/reset.h>
++#include <linux/unaligned.h>
++
++#include <drm/drm_mipi_dsi.h>
++
++#include <video/mipi_display.h>
++
++#define K1_DSI_CTRL_0			0x000
++#define  K1_DSI_CTRL_0_RESET		(GENMASK(31, 26) | GENMASK(24, 23))
++
++#define K1_DSI_CTRL_1			0x004
++#define  K1_DSI_CTRL_1_EOTP_EN		BIT(8)
++
++#define K1_DSI_IRQ_ST			0x010
++#define  K1_DSI_IRQ_RX_PKT		BIT(2)
++#define  K1_DSI_IRQ_RX_ERR		BIT(25)
++
++#define K1_DSI_CPU_CMD_0		0x020
++#define  K1_DSI_CPU_CMD_0_REQ		BIT(31)
++#define  K1_DSI_CPU_CMD_0_SHORT		BIT(30)
++#define  K1_DSI_CPU_CMD_0_TURN		BIT(29)
++#define  K1_DSI_CPU_CMD_0_LP		BIT(27)
++#define  K1_DSI_CPU_CMD_0_LEN		GENMASK(15, 0)
++
++#define K1_DSI_CPU_CMD_1		0x024
++#define  K1_DSI_CPU_CMD_1_LP_LANES	GENMASK(23, 20)
++
++#define K1_DSI_CPU_CMD_3		0x02c
++#define  K1_DSI_CPU_CMD_3_REQ		BIT(31)
++#define  K1_DSI_CPU_CMD_3_WRITE		BIT(30)
++#define  K1_DSI_CPU_CMD_3_ADDR		GENMASK(29, 16)
++
++#define K1_DSI_CPU_WDAT			0x030
++
++#define K1_DSI_RX_PKT_ST_0		0x060
++#define  K1_DSI_RX_PKT_ST_0_PTR		GENMASK(21, 16)
++
++#define K1_DSI_RX_PKT_CTRL		0x070
++#define  K1_DSI_RX_PKT_CTRL_REQ		BIT(31)
++#define  K1_DSI_RX_PKT_CTRL_PTR		GENMASK(21, 16)
++#define  K1_DSI_RX_PKT_CTRL_DATA	GENMASK(7, 0)
++
++#define K1_DSI_RX_PKT_CTRL_1		0x074
++#define  K1_DSI_RX_PKT_CTRL_1_COUNT	GENMASK(7, 0)
++
++#define K1_DSI_LCD_BDG_CTRL0		0x084
++#define  K1_DSI_LCD_BDG_CTRL0_SPLIT_EN	BIT(0)
++
++#define K1_DSI_MAX_LANES		4
++#define K1_DSI_TX_FIFO_SIZE		256
++#define K1_DSI_RX_FIFO_SIZE		64
++#define K1_DSI_PACKET_CRC_SIZE		2
++/* Used until a video mode provides a pixel clock to derive the rate from. */
++#define K1_DSI_COMMAND_HS_RATE		1000000000UL
++
++struct k1_dsi {
++	struct device *dev;
++	void __iomem *base;
++	struct mipi_dsi_host host;
++	struct clk_bulk_data clks[3];
++	struct reset_control *resets;
++	struct phy *phy;
++	/* Protects the link state and serializes transfers. */
++	struct mutex lock;
++	unsigned int lanes;
++	unsigned long mode_flags;
++	bool attached;
++	bool link_up;
++};
++
++static inline struct k1_dsi *host_to_k1_dsi(struct mipi_dsi_host *host)
++{
++	return container_of(host, struct k1_dsi, host);
++}
++
++/* Error correction code of a packet header, MIPI DSI specification. */
++static u8 k1_dsi_ecc(const u8 *header)
++{
++	static const u32 parity_mask[] = {
++		0xf12cb7, 0xf2555b, 0x749a6d, 0xb8e38e, 0xdf03f0, 0xeffc00,
++	};
++	u32 data = header[0] | header[1] << 8 | header[2] << 16;
++	u8 ecc = 0;
++	unsigned int i;
++
++	for (i = 0; i < ARRAY_SIZE(parity_mask); i++)
++		ecc |= (hweight32(data & parity_mask[i]) & 1) << i;
++
++	return ecc;
++}
++
++static int k1_dsi_link_up(struct k1_dsi *dsi)
++{
++	union phy_configure_opts opts = { };
++	int ret;
++
++	ret = pm_runtime_resume_and_get(dsi->dev);
++	if (ret)
++		return ret;
++
++	ret = reset_control_deassert(dsi->resets);
++	if (ret)
++		goto err_pm;
++
++	ret = clk_bulk_prepare_enable(ARRAY_SIZE(dsi->clks), dsi->clks);
++	if (ret)
++		goto err_reset;
++
++	writel(K1_DSI_CTRL_0_RESET, dsi->base + K1_DSI_CTRL_0);
++	usleep_range(1000, 2000);
++	writel(0, dsi->base + K1_DSI_CTRL_0);
++	writel(~0, dsi->base + K1_DSI_IRQ_ST);
++
++	ret = phy_init(dsi->phy);
++	if (ret)
++		goto err_clk;
++
++	ret = phy_mipi_dphy_get_default_config_for_hsclk(K1_DSI_COMMAND_HS_RATE,
++							 dsi->lanes,
++							 &opts.mipi_dphy);
++	if (ret)
++		goto err_phy_exit;
++
++	ret = phy_set_mode(dsi->phy, PHY_MODE_MIPI_DPHY);
++	if (ret)
++		goto err_phy_exit;
++
++	ret = phy_configure(dsi->phy, &opts);
++	if (ret)
++		goto err_phy_exit;
++
++	ret = phy_power_on(dsi->phy);
++	if (ret)
++		goto err_phy_exit;
++
++	writel(readl(dsi->base + K1_DSI_LCD_BDG_CTRL0) &
++	       ~K1_DSI_LCD_BDG_CTRL0_SPLIT_EN,
++	       dsi->base + K1_DSI_LCD_BDG_CTRL0);
++	writel(FIELD_PREP(K1_DSI_CPU_CMD_1_LP_LANES, GENMASK(dsi->lanes - 1, 0)),
++	       dsi->base + K1_DSI_CPU_CMD_1);
++	writel((readl(dsi->base + K1_DSI_CTRL_1) & ~K1_DSI_CTRL_1_EOTP_EN) |
++	       (dsi->mode_flags & MIPI_DSI_MODE_NO_EOT_PACKET ?
++		0 : K1_DSI_CTRL_1_EOTP_EN),
++	       dsi->base + K1_DSI_CTRL_1);
++
++	dsi->link_up = true;
++	dev_info(dsi->dev, "link up, %u lanes\n", dsi->lanes);
++
++	return 0;
++
++err_phy_exit:
++	phy_exit(dsi->phy);
++err_clk:
++	clk_bulk_disable_unprepare(ARRAY_SIZE(dsi->clks), dsi->clks);
++err_reset:
++	reset_control_assert(dsi->resets);
++err_pm:
++	pm_runtime_put_sync(dsi->dev);
++	dev_err(dsi->dev, "failed to bring up the link: %d\n", ret);
++
++	return ret;
++}
++
++static void k1_dsi_link_down(struct k1_dsi *dsi)
++{
++	if (!dsi->link_up)
++		return;
++
++	phy_power_off(dsi->phy);
++	phy_exit(dsi->phy);
++	clk_bulk_disable_unprepare(ARRAY_SIZE(dsi->clks), dsi->clks);
++	reset_control_assert(dsi->resets);
++	pm_runtime_put_sync(dsi->dev);
++	dsi->link_up = false;
++}
++
++static int k1_dsi_write_fifo(struct k1_dsi *dsi, const u8 *buf, size_t len)
++{
++	size_t offset;
++	u32 val;
++	int ret;
++
++	for (offset = 0; offset < len; offset += 4) {
++		writel(get_unaligned_le32(buf + offset),
++		       dsi->base + K1_DSI_CPU_WDAT);
++		writel(K1_DSI_CPU_CMD_3_REQ | K1_DSI_CPU_CMD_3_WRITE |
++		       FIELD_PREP(K1_DSI_CPU_CMD_3_ADDR, offset),
++		       dsi->base + K1_DSI_CPU_CMD_3);
++
++		ret = readl_poll_timeout(dsi->base + K1_DSI_CPU_CMD_3, val,
++					 !(val & K1_DSI_CPU_CMD_3_REQ), 1, 1000);
++		if (ret) {
++			dev_err(dsi->dev, "timeout filling the packet FIFO\n");
++			return ret;
++		}
++	}
++
++	return 0;
++}
++
++static int k1_dsi_send(struct k1_dsi *dsi, const struct mipi_dsi_msg *msg)
++{
++	u8 buf[K1_DSI_TX_FIFO_SIZE] __aligned(4) = { };
++	struct mipi_dsi_packet packet;
++	size_t len;
++	u32 cmd, val;
++	int ret;
++
++	ret = mipi_dsi_create_packet(&packet, msg);
++	if (ret)
++		return ret;
++
++	len = sizeof(packet.header);
++	if (mipi_dsi_packet_format_is_long(msg->type))
++		len += packet.payload_length + K1_DSI_PACKET_CRC_SIZE;
++	if (len > sizeof(buf))
++		return -EMSGSIZE;
++
++	memcpy(buf, packet.header, sizeof(packet.header));
++	buf[3] = k1_dsi_ecc(buf);
++
++	if (mipi_dsi_packet_format_is_long(msg->type)) {
++		u8 *payload = buf + sizeof(packet.header);
++
++		if (packet.payload_length)
++			memcpy(payload, packet.payload, packet.payload_length);
++		put_unaligned_le16(crc_ccitt(0xffff, payload,
++					     packet.payload_length),
++				   payload + packet.payload_length);
++	}
++
++	ret = k1_dsi_write_fifo(dsi, buf, len);
++	if (ret)
++		return ret;
++
++	writel(~0, dsi->base + K1_DSI_IRQ_ST);
++
++	cmd = K1_DSI_CPU_CMD_0_REQ | FIELD_PREP(K1_DSI_CPU_CMD_0_LEN, len);
++	if (len == sizeof(packet.header))
++		cmd |= K1_DSI_CPU_CMD_0_SHORT;
++	if (msg->rx_len)
++		cmd |= K1_DSI_CPU_CMD_0_TURN;
++	if (msg->flags & MIPI_DSI_MSG_USE_LPM)
++		cmd |= K1_DSI_CPU_CMD_0_LP;
++	writel(cmd, dsi->base + K1_DSI_CPU_CMD_0);
++
++	ret = readl_poll_timeout(dsi->base + K1_DSI_CPU_CMD_0, val,
++				 !(val & K1_DSI_CPU_CMD_0_REQ), 50, 50000);
++	if (ret)
++		dev_err(dsi->dev, "timeout sending packet type 0x%02x, IRQ status 0x%08x\n",
++			msg->type, readl(dsi->base + K1_DSI_IRQ_ST));
++
++	return ret;
++}
++
++static ssize_t k1_dsi_receive(struct k1_dsi *dsi, const struct mipi_dsi_msg *msg)
++{
++	u8 rx[K1_DSI_RX_FIFO_SIZE];
++	unsigned int i, first, count;
++	const u8 *data;
++	size_t len;
++	u32 status, val;
++	int ret;
++
++	ret = readl_poll_timeout(dsi->base + K1_DSI_IRQ_ST, status,
++				 status & K1_DSI_IRQ_RX_PKT, 50, 50000);
++	if (ret) {
++		dev_err(dsi->dev, "no response from the peripheral, IRQ status 0x%08x\n",
++			status);
++		return ret;
++	}
++
++	if (status & K1_DSI_IRQ_RX_ERR)
++		dev_warn(dsi->dev, "peripheral reported an error, IRQ status 0x%08x\n",
++			 status);
++
++	first = FIELD_GET(K1_DSI_RX_PKT_ST_0_PTR,
++			  readl(dsi->base + K1_DSI_RX_PKT_ST_0));
++	count = FIELD_GET(K1_DSI_RX_PKT_CTRL_1_COUNT,
++			  readl(dsi->base + K1_DSI_RX_PKT_CTRL_1));
++	if (count < 4 || count > sizeof(rx)) {
++		dev_err(dsi->dev, "bad response length %u\n", count);
++		return -EPROTO;
++	}
++
++	for (i = 0; i < count; i++) {
++		val = readl(dsi->base + K1_DSI_RX_PKT_CTRL);
++		val &= ~K1_DSI_RX_PKT_CTRL_PTR;
++		val |= K1_DSI_RX_PKT_CTRL_REQ |
++		       FIELD_PREP(K1_DSI_RX_PKT_CTRL_PTR, first + i);
++		writel(val, dsi->base + K1_DSI_RX_PKT_CTRL);
++
++		ret = readl_poll_timeout(dsi->base + K1_DSI_RX_PKT_CTRL, val,
++					 !(val & K1_DSI_RX_PKT_CTRL_REQ),
++					 1, 1000);
++		if (ret) {
++			dev_err(dsi->dev, "timeout reading the response FIFO\n");
++			return ret;
++		}
++		rx[i] = FIELD_GET(K1_DSI_RX_PKT_CTRL_DATA, val);
++	}
++
++	dev_dbg(dsi->dev, "response: %*ph\n", count, rx);
++
++	switch (rx[0] & 0x3f) {
++	case MIPI_DSI_RX_GENERIC_SHORT_READ_RESPONSE_1BYTE:
++	case MIPI_DSI_RX_DCS_SHORT_READ_RESPONSE_1BYTE:
++		data = &rx[1];
++		len = 1;
++		break;
++	case MIPI_DSI_RX_GENERIC_SHORT_READ_RESPONSE_2BYTE:
++	case MIPI_DSI_RX_DCS_SHORT_READ_RESPONSE_2BYTE:
++		data = &rx[1];
++		len = 2;
++		break;
++	case MIPI_DSI_RX_GENERIC_LONG_READ_RESPONSE:
++	case MIPI_DSI_RX_DCS_LONG_READ_RESPONSE:
++		data = &rx[4];
++		len = get_unaligned_le16(&rx[1]);
++		if (len > count - 4) {
++			dev_err(dsi->dev, "truncated response: %*ph\n", count, rx);
++			return -EPROTO;
++		}
++		break;
++	case MIPI_DSI_RX_ACKNOWLEDGE_AND_ERROR_REPORT:
++		dev_err(dsi->dev, "error report from the peripheral: %*ph\n",
++			count, rx);
++		return -EIO;
++	default:
++		dev_err(dsi->dev, "unknown response: %*ph\n", count, rx);
++		return -EPROTO;
++	}
++
++	len = min(len, msg->rx_len);
++	memcpy(msg->rx_buf, data, len);
++
++	return len;
++}
++
++static ssize_t k1_dsi_host_transfer(struct mipi_dsi_host *host,
++				    const struct mipi_dsi_msg *msg)
++{
++	struct k1_dsi *dsi = host_to_k1_dsi(host);
++	ssize_t ret;
++
++	guard(mutex)(&dsi->lock);
++
++	if (!dsi->attached)
++		return -ENODEV;
++
++	if (!dsi->link_up) {
++		ret = k1_dsi_link_up(dsi);
++		if (ret)
++			return ret;
++	}
++
++	ret = k1_dsi_send(dsi, msg);
++	if (!ret)
++		ret = msg->rx_len ? k1_dsi_receive(dsi, msg) : msg->tx_len;
++
++	/*
++	 * A transfer that did not complete leaves the controller busy. Reset
++	 * it, so that the next transfer starts from a clean state.
++	 */
++	if (ret < 0)
++		k1_dsi_link_down(dsi);
++
++	return ret;
++}
++
++static int k1_dsi_host_attach(struct mipi_dsi_host *host,
++			      struct mipi_dsi_device *device)
++{
++	struct k1_dsi *dsi = host_to_k1_dsi(host);
++
++	guard(mutex)(&dsi->lock);
++
++	if (dsi->attached)
++		return -EBUSY;
++
++	if (!device->lanes || device->lanes > K1_DSI_MAX_LANES)
++		return -EINVAL;
++
++	dsi->lanes = device->lanes;
++	dsi->mode_flags = device->mode_flags;
++	dsi->attached = true;
++
++	return 0;
++}
++
++static int k1_dsi_host_detach(struct mipi_dsi_host *host,
++			      struct mipi_dsi_device *device)
++{
++	struct k1_dsi *dsi = host_to_k1_dsi(host);
++
++	guard(mutex)(&dsi->lock);
++
++	k1_dsi_link_down(dsi);
++	dsi->attached = false;
++
++	return 0;
++}
++
++static const struct mipi_dsi_host_ops k1_dsi_host_ops = {
++	.attach = k1_dsi_host_attach,
++	.detach = k1_dsi_host_detach,
++	.transfer = k1_dsi_host_transfer,
++};
++
++static int k1_dsi_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct k1_dsi *dsi;
++	int ret;
++
++	dsi = devm_kzalloc_obj(dev, *dsi);
++	if (!dsi)
++		return -ENOMEM;
++
++	dsi->dev = dev;
++	platform_set_drvdata(pdev, dsi);
++
++	ret = devm_mutex_init(dev, &dsi->lock);
++	if (ret)
++		return ret;
++
++	dsi->base = devm_platform_ioremap_resource(pdev, 0);
++	if (IS_ERR(dsi->base))
++		return PTR_ERR(dsi->base);
++
++	dsi->clks[0].id = "bus";
++	dsi->clks[1].id = "core";
++	dsi->clks[2].id = "esc";
++	ret = devm_clk_bulk_get(dev, ARRAY_SIZE(dsi->clks), dsi->clks);
++	if (ret)
++		return dev_err_probe(dev, ret, "failed to get clocks\n");
++
++	/* Shared with the D-PHY and, later, the display controller. */
++	dsi->resets = devm_reset_control_array_get_shared(dev);
++	if (IS_ERR(dsi->resets))
++		return dev_err_probe(dev, PTR_ERR(dsi->resets),
++				     "failed to get resets\n");
++
++	dsi->phy = devm_phy_get(dev, "dphy");
++	if (IS_ERR(dsi->phy))
++		return dev_err_probe(dev, PTR_ERR(dsi->phy),
++				     "failed to get the D-PHY\n");
++
++	ret = devm_pm_runtime_enable(dev);
++	if (ret)
++		return ret;
++
++	/* The hardware is left alone until the first transfer. */
++	dsi->host.dev = dev;
++	dsi->host.ops = &k1_dsi_host_ops;
++
++	return mipi_dsi_host_register(&dsi->host);
++}
++
++static void k1_dsi_remove(struct platform_device *pdev)
++{
++	struct k1_dsi *dsi = platform_get_drvdata(pdev);
++
++	mipi_dsi_host_unregister(&dsi->host);
++}
++
++static const struct of_device_id k1_dsi_of_match[] = {
++	{ .compatible = "spacemit,k1-mipi-dsi" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, k1_dsi_of_match);
++
++static struct platform_driver k1_dsi_driver = {
++	.probe = k1_dsi_probe,
++	.remove = k1_dsi_remove,
++	.driver = {
++		.name = "spacemit-k1-dsi",
++		.of_match_table = k1_dsi_of_match,
++	},
++};
++module_platform_driver(k1_dsi_driver);
++
++MODULE_DESCRIPTION("SpacemiT K1 MIPI DSI host driver");
++MODULE_LICENSE("GPL");

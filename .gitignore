@@ -19,3 +19,4 @@ barebox*.log
 /dtbs/
 /mnt-linux/
 /reform-tools/
+/configs/k1/fsbl-signing-key.pem

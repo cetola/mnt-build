@@ -1,0 +1,71 @@
+From f4fbf1c75fcd87cc9d8dfde72c165917eee8f4e5 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Thu, 26 Nov 2026 03:22:41 +0000
+Subject: [PATCH] phy: spacemit: k1-usb2: raise the HS TX current as the vendor
+ driver does
+
+The SpacemiT vendor kernel sets HSDAC_ISEL to +15% and enables
+HSDAC_IREG in ANALOG_REG14_13 (0xa4) at PHY init. The upstream driver
+leaves the reset value (ISEL 0x8, IREG off).
+
+On a BPI-CM6 in the MNT RCM4 adapter, devices behind a second-tier hub
+fail to enumerate or drop off with the reset value.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/phy/spacemit/phy-k1-usb2.c | 25 ++++++++++++++++++++++++-
+ 1 file changed, 24 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/phy/spacemit/phy-k1-usb2.c b/drivers/phy/spacemit/phy-k1-usb2.c
+index 8df12eeb20b18..c00da74519432 100644
+--- a/drivers/phy/spacemit/phy-k1-usb2.c
++++ b/drivers/phy/spacemit/phy-k1-usb2.c
+@@ -75,6 +75,11 @@
+ 					 PHY_FDIV_FRACT_8_15)
+ #define  FDIV_REG_VAL			0x1ec4		/* 0x100 selects 24MHz, rest are default */
+ 
++#define PHY_ANALOG_HSDAC		0xa4
++#define  PHY_HSDAC_ISEL			GENMASK(3, 0)
++#define  PHY_HSDAC_ISEL_15_INC		0xc
++#define  PHY_HSDAC_IREG_EN		BIT(4)
++
+ #define K1_USB2PHY_RESET_TIME_MS	50
+ 
+ struct spacemit_usb2phy {
+@@ -138,6 +143,24 @@ static int spacemit_usb2phy_init(struct phy *phy)
+ 	return 0;
+ }
+ 
++static int spacemit_k1_usb2phy_init(struct phy *phy)
++{
++	struct spacemit_usb2phy *sphy = phy_get_drvdata(phy);
++	int ret;
++
++	ret = spacemit_usb2phy_init(phy);
++	if (ret)
++		return ret;
++
++	/* raise the HS TX current by 15%, as the vendor driver does */
++	regmap_update_bits(sphy->regmap_base, PHY_ANALOG_HSDAC,
++			   PHY_HSDAC_ISEL | PHY_HSDAC_IREG_EN,
++			   FIELD_PREP(PHY_HSDAC_ISEL, PHY_HSDAC_ISEL_15_INC) |
++			   PHY_HSDAC_IREG_EN);
++
++	return 0;
++}
++
+ static int spacemit_usb2phy_exit(struct phy *phy)
+ {
+ 	struct spacemit_usb2phy *sphy = phy_get_drvdata(phy);
+@@ -168,7 +191,7 @@ static int spacemit_k3_usb2phy_disconnect(struct phy *phy, int port)
+ }
+ 
+ static const struct phy_ops spacemit_k1_usb2phy_ops = {
+-	.init = spacemit_usb2phy_init,
++	.init = spacemit_k1_usb2phy_init,
+ 	.exit = spacemit_usb2phy_exit,
+ 	.disconnect = spacemit_k1_usb2phy_disconnect,
+ 	.owner = THIS_MODULE,
+-- 
+2.43.0
+

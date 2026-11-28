@@ -1,0 +1,163 @@
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.remote-ip=52.59.177.22
+ARC-Seal: i=1; d=subspace.kernel.org; s=arc20261015; a=rsa-sha256; cv=none;
+	t=1795095735;
+	b=lALPMKfi1ezshwUkq2KBDhifTgMww8GaCGUocQLcznLOt8KWCuygTw1twsgyNRxl9khF
+	 gGWhbPrDewygeOCGbX+1M8+T6yVXYspDI54t90EBuPPb49mwjtjgiLRtq2lGvQAisA840
+	 u222X0twlBU+3vUxzFtwE4bfNOox+TOrSs95ZtHkM5f9NxMnLxvaVeVfXimY5KrFq/5Vx
+	 ZjX7VXGYaKZqw2KuUcitY5V2nV10IQ76ppGsGb9H9q0L/Dqo6qBHwTueKwplAU5zuutlm
+	 oWiYvZLW7lxGsqS/9LoD4ymR0GrJaZPNjftXLiQ0uKUwnLofwMv0PV/05epmb1fr1Jw==
+ARC-Message-Signature: i=1; d=subspace.kernel.org; s=arc20261015;
+	a=rsa-sha256; c=relaxed/relaxed; t=1795095735;
+	h=DMARC-Filter:DKIM-Signature:X-QQ-mid:X-QQ-Originating-IP:Received:
+	 X-QQ-SSF:X-QQ-GoodBg:X-BIZMAIL-ID:EX-QQ-RecipientCnt:From:Date:
+	 Subject:MIME-Version:Content-Type:Content-Transfer-Encoding:
+	 Message-Id:References:In-Reply-To:To:Cc:X-Mailer:
+	 X-Developer-Signature:X-Developer-Key:X-QQ-SENDSIZE:Feedback-ID:
+	 X-QQ-XMAILINFO:X-QQ-XMRINFO:X-QQ-RECHKSPAM;
+	bh=WyrNoNNu/NB86HpPrgRxwPVRhvTuGwuFy/4c8+oY+lk=;
+	b=095mZGd0bUSguP6hsgVYcuDsG8uwrAxNQLVBlssPiBzfiFsf+aghg4Omx6QY4HLLojZ+
+	 dczzr50YQWLFl2psOKcQ5GQC0eJT4Cw+KvMNWJ7I4RKqik6QCDjA/4/rlQh3ADAn0G8+Q
+	 YV8jTxsfEo2QZWpRhr99LXU79pk1WjY8D6GEpqELUiTPyR9hkwrvI3oi/QGt0m9beMp/w
+	 1x4STMY48+43TSbfh2bhK5Xc4+6M2xW4eRuSOvTvUbteGqybcTvqvAmntABhx2rsOQd2l
+	 tkrJcR7AlFgvEkULN4IkAQoy6KlJzjOiLPD15pHZo4ajw4IbsZT0slIBhiZhaBUFcLw==
+ARC-Authentication-Results: i=1; smtp.subspace.kernel.org;
+	dmarc=none header.from=linux.spacemit.com;
+	spf=none smtp.mailfrom=linux.spacemit.com;
+	dkim=pass header.d=linux.spacemit.com header.i=@linux.spacemit.com header.a=rsa-sha256 header.s=mxsw2412 header.b="NNr/6WYC";
+	arc=none smtp.remote-ip=52.59.177.22
+Received: from smtpbgeu1.qq.com (smtpbgeu1.qq.com [52.59.177.22])
+	(using TLSv1.2 with cipher ECDHE-ECDSA-AES256-GCM-SHA384 (256/256 bits))
+	(No client certificate requested)
+	by smtp.subspace.kernel.org (Postfix) with ESMTPS id 5C1E160A3804
+	for <spacemit@lists.linux.dev>; Thu, 19 Nov 2026 13:42:11 +0000 (UTC)
+DMARC-Filter: OpenDMARC Filter v1.4.2 smtp.subspace.kernel.org 5C1E160A3804
+Authentication-Results: smtp.subspace.kernel.org; dmarc=none (p=none dis=none) header.from=linux.spacemit.com
+Authentication-Results: smtp.subspace.kernel.org; spf=none smtp.mailfrom=linux.spacemit.com
+Authentication-Results: smtp.subspace.kernel.org;
+	dkim=pass (1024-bit key) header.d=linux.spacemit.com header.i=@linux.spacemit.com header.a=rsa-sha256 header.s=mxsw2412 header.b=NNr/6WYC
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=linux.spacemit.com;
+	s=mxsw2412; t=1795095717;
+	bh=WyrNoNNu/NB86HpPrgRxwPVRhvTuGwuFy/4c8+oY+lk=;
+	h=From:Date:Subject:MIME-Version:Message-Id:To;
+	b=NNr/6WYC9tXzBsD7pqBkOyATmvKBwzca+PXKIgzOlFgmBo/xx0cv5My7K0WYCSJED
+	 +3j+82W0TPrpCUXI1YcjbIe1i+Lxz3n1knSy965uhiHXCZ9JnAGrDjXBsCc/AkGkbD
+	 9uc4IvZWe+6lhzS104hjdCkpBaL9FxDkQyLj1Upw=
+X-QQ-mid: zesmtpgz7t1795095715t5be17480
+X-QQ-Originating-IP: Y8sIaLKPPl5t+ErH1LS3S8rlSC2LFGNGgku0BOew9xc=
+Received: from LT-PANJUNZHONG.dc.com ( [120.237.158.181])
+	by bizesmtp.qq.com (ESMTP) with
+	id ; Thu, 19 Nov 2026 21:41:53 +0800 (CST)
+X-QQ-SSF: 0000000000000000000000000000000
+X-QQ-GoodBg: 0
+X-BIZMAIL-ID: 1261305453111228185
+EX-QQ-RecipientCnt: 15
+From: Junzhong Pan <panjunzhong@linux.spacemit.com>
+Date: Thu, 19 Nov 2026 21:41:50 +0800
+Subject: [PATCH v6 1/5] dt-bindings: usb: ci-hdrc-usb2: add
+ spacemit,k1-usb2 compatible
+X-Mailing-List: spacemit@lists.linux.dev
+List-Id: <spacemit.lists.linux.dev>
+List-Post: <mailto:spacemit@lists.linux.dev>
+List-Help: <mailto:spacemit+help@lists.linux.dev>
+List-Subscribe: <mailto:spacemit+subscribe@lists.linux.dev>
+List-Unsubscribe: <mailto:spacemit+unsubscribe@lists.linux.dev>
+List-Owner: <mailto:spacemit+owner@lists.linux.dev>
+Precedence: list
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+Message-Id: <20261119-b4-spacemit-k1-usb2-v6-1-4a9add848728@linux.spacemit.com>
+References: <20261119-b4-spacemit-k1-usb2-v6-0-4a9add848728@linux.spacemit.com>
+In-Reply-To: <20261119-b4-spacemit-k1-usb2-v6-0-4a9add848728@linux.spacemit.com>
+To: Greg Kroah-Hartman <gregkh@linuxfoundation.org>,
+ Rob Herring <robh@kernel.org>, Krzysztof Kozlowski <krzk+dt@kernel.org>,
+ Conor Dooley <conor+dt@kernel.org>, Peter Chen <peter.chen@kernel.org>,
+ Xu Yang <xu.yang_2@nxp.com>, Peng Fan <peng.fan@nxp.com>
+Cc: linux-usb@vger.kernel.org, devicetree@vger.kernel.org,
+ linux-kernel@vger.kernel.org, Yixun Lan <dlan@kernel.org>,
+ Troy Mitchell <troy.mitchell@linux.spacemit.com>, spacemit@lists.linux.dev,
+ Junzhong Pan <panjunzhong@linux.spacemit.com>,
+ Conor Dooley <conor.dooley@microchip.com>
+X-Mailer: b4 0.14.3
+X-Developer-Signature: v=1; a=ed25519-sha256; t=1795095710; l=1574;
+ i=panjunzhong@linux.spacemit.com; s=20260306; h=from:subject:message-id;
+ bh=vJgNan3VXHrPIUL1xi2lNNcRCVH0/pu/PtlpRHIGzOA=;
+ b=suW/0d+TTe/BTUivj5qmol4YydrbDyr809Icxb//O3zz3N/Bsiv025Y4RuF3cxVHBPVwRhoeo
+ In1dQ6pvutWC5NniL5R3uTu5YBEqTjO+m0G7wf1DUurVTSqHjppS9zG
+X-Developer-Key: i=panjunzhong@linux.spacemit.com; a=ed25519;
+ pk=bY08BOg2T9H93/jG8fEE/tVmdXoQQMp9M2rtzPFoyJg=
+X-QQ-SENDSIZE: 520
+Feedback-ID: zesmtpgz:linux.spacemit.com:qybglogicsvrgz:qybglogicsvrgz5b-2
+X-QQ-XMAILINFO: NNUJeUDV+0gUaRPLzw+7eju6lDXKTdjPAX1h7d5KRtAQrlHREtmmzjxX
+	SPdK2pRpz4fKxDbRKi7ATqctWEImNlQCNxAFwuL6y3hlijdB255sfkY++JQm35tLQqsn5l1
+	DgJJjL/yO3SALHDQjNB6vUG0yOu4aZYJJs1ftIsda2+vMYkUWOopQeusSFD9x1LjoMXZb6k
+	05ZFyOFls2XJapVneXMrYfCmhOrKVkVeEVPGvn2JfmwB0D54QLPPy03h/nFJ+NyJyMUQGDy
+	STqVuUhf8mm2oPfJWNxdBrUDPYweiMITc1fOXpv1q2pKjID/qXfEyD3aPOCAnAFx9odfGuc
+	4Ca1uGRi7/b7yC9OORX4ipZhmpciZ1ldGWCW5trys34JR4al6AVdWiyO+0dVW65QcxbLIMz
+	H5wECJe9oR3ta9APkFLd3AZ/jxiLZw2N9CW+mSROSLowmKLB2NgwZGtph3C0wM1OjNoxB+r
+	FM+jlljwQ6QHMFayBF1CA0x9Wy+FaYEgPYYuGVZXlm2x+kBrtlqik+pZcG5zN33aAJ1FfPR
+	KcgQ/emSsG3CKBJVDeivRe0Tevhocym7G7eg8ZIvsFfm5/xQmpzHajCGYJAUOva2KqW3BYI
+	2MaoPAOibpDSDA0bnHO8LttUW4KOGVSj99bU266AMYTiJLecbQC9XvjqGE/Ud19xDiq+/pj
+	yObg08kGSAckNXN2CADuT+iQALYySVL9KIVLwr3ge5/ZgrkZ2Gx33p479ty1DkMYl6hALKq
+	hCM5FFmuWnedWzwgoaaL+FvawCznE7xzQDuPzCZeXSyfMW/l6ao7P4DDlFbijJIOP/kUUiO
+	yifMRMZUoufsWOG4fxm1etYG4OztoNSprS+KdSuqcs7WJaRfw7dpAOMjQFYEK7MhFFTo/SI
+	Ew3tX6Cf+qu6/K04JJQYzLpME0CouFrMGiJHFtGzGl9wt5B6zbAUhuLzIJGNrAQhCuFM8m1
+	3dmMtuITkFrYtq3xYNR3NCcF0pi6AspSsePXnVGOP52w3z9LvM/RsrI4XjKVGXMRvwfzoZh
+	GGU7/o5z0eE2gU1TWK89ooatLFKHdfM2CV2h8FKh+t+J58jkJcg6kCTc0PMyraOsVmC4wN3
+	g==
+X-QQ-XMRINFO: OD9hHCdaPRBwH5bRRRw8tsiH4UAatJqXfg==
+X-QQ-RECHKSPAM: 0
+
+The USB2.0 controller on the SpacemiT K1 SoC is dual-role capable but
+has no internal OTG registers, this requires flags which disable
+related features set in platform data. Add a compatible string to match
+the platform data.
+
+Chipidea USB2 Controller on SpacemiT K1 requires 1 clock and 1 reset to
+work, add constraints for it.
+
+Reviewed-by: Yixun Lan <dlan@kernel.org>
+Acked-by: Conor Dooley <conor.dooley@microchip.com>
+Signed-off-by: Junzhong Pan <panjunzhong@linux.spacemit.com>
+---
+ Documentation/devicetree/bindings/usb/ci-hdrc-usb2.yaml | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/usb/ci-hdrc-usb2.yaml b/Documentation/devicetree/bindings/usb/ci-hdrc-usb2.yaml
+index 620b564914d4..5c2b7eb1a6ff 100644
+--- a/Documentation/devicetree/bindings/usb/ci-hdrc-usb2.yaml
++++ b/Documentation/devicetree/bindings/usb/ci-hdrc-usb2.yaml
+@@ -25,6 +25,7 @@ properties:
+           - nvidia,tegra124-udc
+           - nxp,s32g2-usb
+           - qcom,ci-hdrc
++          - spacemit,k1-usb2
+       - items:
+           - enum:
+               - nvidia,tegra114-ehci
+@@ -113,6 +114,20 @@ allOf:
+           maxItems: 2
+         clock-names:
+           maxItems: 2
++  - if:
++      properties:
++        compatible:
++          contains:
++            const: spacemit,k1-usb2
++    then:
++      properties:
++        clocks:
++          maxItems: 1
++        resets:
++          minItems: 1
++      required:
++        - clocks
++        - resets
+ 
+ unevaluatedProperties: false
+ 
+
+-- 
+2.34.1
+

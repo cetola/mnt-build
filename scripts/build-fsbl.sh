@@ -385,6 +385,16 @@ fsbl_run_source_build() {
     return 0
   fi
 
+  if [[ -n "${BOOTLOADER_BUILD_SCRIPT:-}" ]]; then
+    fsbl_log "Running mnt-build bootloader script: ${BOOTLOADER_BUILD_SCRIPT}"
+    MAKEFLAGS="$makeflags_jobs" UBOOT_DEFCONFIG="$UBOOT_DEFCONFIG" CROSS_COMPILE="$UBOOT_CROSS_COMPILE" \
+      bash "$FSBL_SCRIPT_DIR/${BOOTLOADER_BUILD_SCRIPT}" "$FSBL_SOURCE_REPO_DIR" "$BOOTLOADER_FILENAME" || {
+      fsbl_die "${BOOTLOADER_BUILD_SCRIPT} failed"
+      return 1
+    }
+    return 0
+  fi
+
   if ! command -v "${UBOOT_CROSS_COMPILE}gcc" >/dev/null 2>&1; then
     fsbl_die "Missing required cross compiler: ${UBOOT_CROSS_COMPILE}gcc"
     return 1
@@ -460,6 +470,10 @@ fsbl_resolve_source_artifact() {
 }
 
 fsbl_handle_prebuilt() {
+  if declare -F is_uboot_source_only_sysimage >/dev/null && is_uboot_source_only_sysimage "${SYSIMAGE:-}"; then
+    fsbl_die "${SYSIMAGE} has no prebuilt bootloader. Use --mode source."
+    return 1
+  fi
   local bootloader_url="https://source.mnt.re/reform/${BOOTLOADER_PROJECT}/-/jobs/artifacts/${BOOTLOADER_TAG}/raw/${BOOTLOADER_FILENAME}?job=build"
   local bootloader_path="$DOWNLOADS_DIR/$BOOTLOADER_FILENAME"
 

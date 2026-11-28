@@ -1,0 +1,63 @@
+From 8bfd56e2c4cdbd1b29b0ef2e337701f03e2506f7 Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Thu, 26 Nov 2026 00:14:02 +0000
+Subject: [PATCH 3/3] mmc: spacemit: keep the base clock when max-frequency is
+ lower
+
+Probe sets the io clock, which is the SDHCI base clock, to the
+max-frequency value. A board that caps the SD bus below the 204.8 MHz
+base clock then runs the controller from a slow base clock, and reads
+fail. The binding defines max-frequency as the bus limit.
+
+Keep the io clock at least at 204.8 MHz and pass max-frequency to
+sdhci_setup_cfg() as the bus limit only. Boards that set 204.8 MHz or
+more see no change.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/mmc/spacemit_sdhci.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mmc/spacemit_sdhci.c b/drivers/mmc/spacemit_sdhci.c
+index 4474c709..e69e6695 100644
+--- a/drivers/mmc/spacemit_sdhci.c
++++ b/drivers/mmc/spacemit_sdhci.c
+@@ -186,6 +186,7 @@ static void spacemit_sdhci_prepare_tuning(struct sdhci_host *host)
+  * During start-up, use a 200 kHz frequency.
+  */
+ #define SDHC_MIN_CLOCK (200 * 1000)
++#define SDHC_BASE_CLOCK (204800000)
+ 
+ static void spacemit_sdhci_phy_init(struct udevice *dev,
+ 				    struct sdhci_host *host)
+@@ -555,6 +556,7 @@ static int spacemit_sdhci_probe(struct udevice *dev)
+ 	struct spacemit_sdhci_plat *plat = dev_get_plat(dev);
+ 	struct sdhci_host *host = &priv->host;
+ 	struct clk clk;
++	u32 base_clk;
+ 	int ret = 0;
+ 
+ 	host->mmc = &plat->mmc;
+@@ -595,7 +597,9 @@ static int spacemit_sdhci_probe(struct udevice *dev)
+ 		goto err_clk;
+ 	}
+ 
+-	ret = clk_set_rate(&clk, plat->cfg.f_max);
++	/* The io clock is the SDHCI base clock; a lower max-frequency only caps the bus. */
++	base_clk = max_t(u32, plat->cfg.f_max, SDHC_BASE_CLOCK);
++	ret = clk_set_rate(&clk, base_clk);
+ 	if (ret) {
+ 		log_err("Failed to set io clk: %d\n", ret);
+ 		goto err_clk;
+@@ -607,7 +611,7 @@ static int spacemit_sdhci_probe(struct udevice *dev)
+ 	if (dev_read_bool(dev, "no-1-8-v"))
+ 		host->quirks |= SDHCI_QUIRK_NO_1_8_V;
+ 	host->host_caps = MMC_MODE_HS | MMC_MODE_HS_52MHz;
+-	host->max_clk = plat->cfg.f_max;
++	host->max_clk = base_clk;
+ 
+ 	plat->cfg.f_min = SDHC_MIN_CLOCK;
+ 	host->ops = &spacemit_sdhci_ops;
+-- 
+2.43.0
+

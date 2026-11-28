@@ -6,6 +6,7 @@ readonly SUPPORTED_SYSIMAGES=(
   pocket-reform-system-rk3588
   pocket-reform-system-imx8mp
   pocket-reform-system-rk3588s
+  pocket-reform-system-k1jin
 )
 
 # Sysimages for which barebox is a supported bootloader option.
@@ -32,9 +33,25 @@ is_barebox_only_sysimage() {
   return 1
 }
 
+# Sysimages with no MNT prebuilt U-Boot. They default to uboot-source and
+# refuse uboot-prebuilt.
+readonly UBOOT_SOURCE_ONLY_SYSIMAGES=(
+  pocket-reform-system-k1jin
+)
+
+is_uboot_source_only_sysimage() {
+  local s
+  for s in "${UBOOT_SOURCE_ONLY_SYSIMAGES[@]}"; do
+    [[ "$s" == "$1" ]] && return 0
+  done
+  return 1
+}
+
 default_bootloader_for() {
   if is_barebox_only_sysimage "$1"; then
     printf 'barebox-source'
+  elif is_uboot_source_only_sysimage "$1"; then
+    printf 'uboot-source'
   else
     printf 'uboot-prebuilt'
   fi
@@ -50,6 +67,8 @@ readonly BAREBOX_DEFAULT_PROJECT="mnt-reform-barebox"
 readonly BAREBOX_DEFAULT_TAG="1cd690cc061990e2bcef2cd5b1c5aa4cfa749e09"
 
 reset_sysimage_config() {
+  # Userspace architecture of the image (aarch64 unless the machine conf says otherwise)
+  TARGET_ARCH=""
   DTBPATH=""
   KERNEL_DTB_STEM=""
   IMAGE_PLATFORM=""
@@ -63,6 +82,12 @@ reset_sysimage_config() {
   BAREBOX_PROJECT=""
   BAREBOX_TAG=""
   BAREBOX_ARTIFACT=""
+  # Script under scripts/ that builds the bootloader in its checkout, instead
+  # of the project's build.sh or make. Called as: <script> <checkout> <artifact name>
+  BOOTLOADER_BUILD_SCRIPT=""
+  # Leading bytes of the artifact that also go into sector 0 (boot code area,
+  # before the partition table at byte 440).
+  BOOTLOADER_HEAD_BYTES=0
 }
 
 set_sysimage_config() {
@@ -185,6 +210,10 @@ set_image_identity_for_sysimage() {
       IMAGE_PLATFORM="pocket"
       IMAGE_SOM="imx8mp"
       ;;
+    pocket-reform-system-k1jin)
+      IMAGE_PLATFORM="pocket"
+      IMAGE_SOM="k1jin"
+      ;;
     *)
       IMAGE_PLATFORM=""
       IMAGE_SOM=""
@@ -208,6 +237,9 @@ set_kernel_dtb_stem_for_sysimage() {
       ;;
     pocket-reform-system-imx8mp)
       KERNEL_DTB_STEM="imx8mp-mnt-pocket-reform"
+      ;;
+    pocket-reform-system-k1jin)
+      KERNEL_DTB_STEM="k1-bananapi-cm6-mnt-pocket-reform"
       ;;
     *)
       KERNEL_DTB_STEM=""

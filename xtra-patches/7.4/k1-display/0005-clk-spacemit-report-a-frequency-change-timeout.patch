@@ -1,0 +1,45 @@
+From b9565aa0683e0bc7d5f36fafebca6ca660ada54e Mon Sep 17 00:00:00 2001
+From: Stephano Cetola <stephano@cetola.net>
+Date: Fri, 27 Nov 2026 22:47:46 +0000
+Subject: [PATCH] clk: spacemit: report a frequency change timeout
+
+The clock core ignores the return values of set_parent and set_rate, so a
+frequency change that never completes goes unnoticed. Log it.
+
+Signed-off-by: Stephano Cetola <stephano@cetola.net>
+---
+ drivers/clk/spacemit/ccu_mix.c | 15 +++++++++++----
+ 1 file changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/clk/spacemit/ccu_mix.c b/drivers/clk/spacemit/ccu_mix.c
+index a8b407049bf4d..043133c65270a 100644
+--- a/drivers/clk/spacemit/ccu_mix.c
++++ b/drivers/clk/spacemit/ccu_mix.c
+@@ -72,16 +72,23 @@ static int ccu_mix_trigger_fc(struct clk_hw *hw)
+ {
+ 	struct ccu_common *common = hw_to_ccu_common(hw);
+ 	unsigned int val;
++	int ret;
+ 
+ 	if (!common->reg_fc)
+ 		return 0;
+ 
+ 	ccu_update(common, fc, common->mask_fc, common->mask_fc);
+ 
+-	return regmap_read_poll_timeout_atomic(common->regmap, common->reg_fc,
+-					       val, !(val & common->mask_fc),
+-					       MIX_FC_DELAY_US,
+-					       MIX_FC_TIMEOUT_US);
++	ret = regmap_read_poll_timeout_atomic(common->regmap, common->reg_fc,
++					      val, !(val & common->mask_fc),
++					      MIX_FC_DELAY_US,
++					      MIX_FC_TIMEOUT_US);
++	/* The clock core ignores errors from set_parent and set_rate. */
++	if (ret)
++		pr_warn("%s: frequency change did not complete\n",
++			clk_hw_get_name(hw));
++
++	return ret;
+ }
+ 
+ static int ccu_factor_determine_rate(struct clk_hw *hw,

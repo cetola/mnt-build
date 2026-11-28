@@ -61,6 +61,15 @@
     },
     "reform-rk3588-uboot": {
       "url": "https://source.mnt.re/reform/reform-rk3588-uboot.git"
+    },
+    "u-boot": {
+      "url": "https://source.denx.de/u-boot/u-boot.git"
+    },
+    "opensbi": {
+      "url": "https://github.com/riscv-software-src/opensbi.git"
+    },
+    "spacemit-firmware": {
+      "url": "https://github.com/spacemit-com/spacemit-firmware.git"
     }
   }
 }

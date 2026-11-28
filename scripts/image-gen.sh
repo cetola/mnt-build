@@ -28,12 +28,13 @@ readonly ROOT_MNT="$MOUNT_DIR/root"
 readonly CHROOT_INSTALLER_TARGET="$ROOT_MNT/tmp/install_kernel.sh"
 readonly KERNEL_VERSION_FILE="$ROOT_MNT/tmp/linux-mnt-reform-bin.version"
 
-# The target is aarch64. A foreign host needs qemu-user for the chroot.
+# Set from the machine conf (TARGET_ARCH) by set_target_arch. A host of
+# another architecture needs qemu-user for the chroot.
+TARGET_ARCH="aarch64"
 NEEDS_QEMU=1
-if [[ "$(uname -m)" == "aarch64" ]]; then
-  NEEDS_QEMU=0
-fi
-readonly NEEDS_QEMU
+QEMU_STATIC=""
+KERNEL_TARBALL=""
+LOCAL_BOOTLOADER_ARTIFACT=""
 
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 readonly TIMESTAMP
@@ -44,7 +45,7 @@ LOGFILE="$DOWNLOADS_DIR/image-gen-${TIMESTAMP}.log"
 source "$SCRIPT_DIR/common.sh"
 
 # Global state
-DISTRO="arch"
+DISTRO=""
 LOOPDEV=""
 BOOT_PART=""
 ROOT_PART=""
@@ -102,6 +103,7 @@ Options:
                             - pocket-reform-system-rk3588
                             - pocket-reform-system-imx8mp
                             - pocket-reform-system-rk3588s
+                            - pocket-reform-system-k1jin
   --bootloader <choice>     Bootloader to use. One of:
                               uboot-prebuilt  fetch MNT's prebuilt U-Boot
                               uboot-source    build U-Boot from source
@@ -113,9 +115,32 @@ Options:
                             (reform-next-system-rk3588, pocket-reform-system-rk3588,
                             pocket-reform-system-rk3588s).
   --distro <name>           Root filesystem distro. One of the directories under
-                            scripts/distros/ (default: arch).
+                            scripts/distros/ (default: arch, or archriscv for
+                            riscv64 sysimages).
+  --kernel-tarball <path>   Kernel tarball from "mnt-build build" to install,
+                            for distros without a kernel package (archriscv).
+  --bootloader-artifact <path>
+                            Use this bootloader file (e.g. from "mnt-build uboot"
+                            in the build container) instead of building or
+                            downloading one.
   -h, --help                Show this help.
 EOF
+}
+
+set_target_arch() {
+  TARGET_ARCH="${TARGET_ARCH:-aarch64}"
+  QEMU_STATIC="/usr/bin/qemu-${TARGET_ARCH}-static"
+  NEEDS_QEMU=1
+  if [[ "$(uname -m)" == "$TARGET_ARCH" ]]; then
+    NEEDS_QEMU=0
+  fi
+  if [[ -z "$DISTRO" ]]; then
+    case "$TARGET_ARCH" in
+      riscv64) DISTRO="archriscv" ;;
+      *)       DISTRO="arch" ;;
+    esac
+  fi
+  log "Target arch: $TARGET_ARCH (qemu chroot: $([[ $NEEDS_QEMU -eq 1 ]] && echo yes || echo no)), distro: $DISTRO"
 }
 
 load_distro() {
@@ -128,6 +153,16 @@ load_distro() {
   # shellcheck source=/dev/null
   source "$distro_file"
   IMAGE="$DOWNLOADS_DIR/${DISTRO_IMAGE_PREFIX}-sys-mnt-image.img"
+
+  if [[ -n "${DISTRO_ARCH:-}" && "$DISTRO_ARCH" != "$TARGET_ARCH" ]]; then
+    die "Distro $DISTRO is $DISTRO_ARCH, but $SYSIMAGE needs $TARGET_ARCH"
+  fi
+  if [[ "${DISTRO_NEEDS_KERNEL_TARBALL:-false}" == "true" ]]; then
+    [[ -n "$KERNEL_TARBALL" ]] || die "Distro $DISTRO installs the kernel from a tarball: pass --kernel-tarball"
+    [[ -f "$KERNEL_TARBALL" ]] || die "Kernel tarball not found: $KERNEL_TARBALL"
+  elif [[ -n "$KERNEL_TARBALL" ]]; then
+    die "--kernel-tarball is only used by distros that install the kernel from a tarball"
+  fi
 }
 
 parse_args() {
@@ -152,6 +187,16 @@ parse_args() {
       --distro)
         [[ $# -lt 2 ]] && die "--distro requires an argument"
         DISTRO="$2"
+        shift 2
+        ;;
+      --kernel-tarball)
+        [[ $# -lt 2 ]] && die "--kernel-tarball requires an argument"
+        KERNEL_TARBALL="$(realpath "$2")"
+        shift 2
+        ;;
+      --bootloader-artifact)
+        [[ $# -lt 2 ]] && die "--bootloader-artifact requires an argument"
+        LOCAL_BOOTLOADER_ARTIFACT="$(realpath "$2")"
         shift 2
         ;;
       -h|--help)
@@ -189,6 +234,8 @@ apply_bootloader_choice() {
     SELECTED_BOOTLOADER="$(default_bootloader_for "$SYSIMAGE")"
   elif [[ "${SELECTED_BOOTLOADER}" == uboot-* ]] && is_barebox_only_sysimage "$SYSIMAGE"; then
     die "--bootloader ${SELECTED_BOOTLOADER}: $SYSIMAGE has no U-Boot support, use barebox-source"
+  elif [[ "${SELECTED_BOOTLOADER}" == uboot-prebuilt ]] && is_uboot_source_only_sysimage "$SYSIMAGE"; then
+    die "--bootloader uboot-prebuilt: $SYSIMAGE has no prebuilt U-Boot, use uboot-source"
   fi
 
   case "${SELECTED_BOOTLOADER}" in
@@ -234,6 +281,7 @@ check_required_tools() {
     "tar:tar"
     "chroot:coreutils"
     "cpio:cpio"
+    "zstd:zstd"
   )
 
   log "Checking for required tools..."
@@ -245,8 +293,8 @@ check_required_tools() {
     fi
   done
 
-  # A non-aarch64 host needs qemu-aarch64-static for the chroot
-  if (( NEEDS_QEMU )) && [[ ! -f /usr/bin/qemu-aarch64-static ]]; then
+  # A host of another architecture needs qemu-user-static for the chroot
+  if (( NEEDS_QEMU )) && [[ ! -f "$QEMU_STATIC" ]]; then
     missing_tools+=("qemu-user-static qemu-user-static-binfmt")
   fi
 
@@ -387,10 +435,23 @@ download_dependencies() {
   log "Downloading dependencies..."
   cd "$DOWNLOADS_DIR"
   download_if_missing "$DISTRO_ROOTFS_URL" "$DISTRO_ROOTFS_FILE"
+  if [[ -n "${DISTRO_ROOTFS_SHA256:-}" ]]; then
+    log "Verifying $DISTRO_ROOTFS_FILE..."
+    echo "$DISTRO_ROOTFS_SHA256  $DISTRO_ROOTFS_FILE" | sha256sum --check --quiet - \
+      || die "$DISTRO_ROOTFS_FILE does not match the pinned SHA-256. Delete it to download again."
+  fi
 }
 
 preflight_bootloader_artifact() {
   log_section "Preflight: resolving bootloader artifact"
+  if [[ -n "$LOCAL_BOOTLOADER_ARTIFACT" ]]; then
+    [[ -f "$LOCAL_BOOTLOADER_ARTIFACT" ]] || die "Bootloader artifact not found: $LOCAL_BOOTLOADER_ARTIFACT"
+    BOOTLOADER_ARTIFACT_PATH="$LOCAL_BOOTLOADER_ARTIFACT"
+    # A local build has no pinned checksum to verify.
+    BOOTLOADER_SOURCE_MODE="source"
+    log "Using local bootloader artifact: $BOOTLOADER_ARTIFACT_PATH ($(sha256sum "$BOOTLOADER_ARTIFACT_PATH" | awk '{print $1}'))"
+    return 0
+  fi
   log "BOOTLOADER_SOURCE_MODE=${BOOTLOADER_SOURCE_MODE:-prebuilt}"
   get_fsbl_artifact
 
@@ -451,6 +512,14 @@ install_bootloader_to_image() {
   log "Writing bootloader to image (offset=$BOOTLOADER_OFFSET, skip=$FLASHBIN_OFFSET)..."
   dd if="$bootloader_path" of="$IMAGE" conv=notrunc bs=512 \
     seek="$((BOOTLOADER_OFFSET / 512))" skip="$((FLASHBIN_OFFSET / 512))"
+
+  if (( ${BOOTLOADER_HEAD_BYTES:-0} > 0 )); then
+    if (( BOOTLOADER_HEAD_BYTES > 440 )); then
+      die "BOOTLOADER_HEAD_BYTES=$BOOTLOADER_HEAD_BYTES would overwrite the partition table (max 440)."
+    fi
+    log "Writing first $BOOTLOADER_HEAD_BYTES bytes of the bootloader into sector 0..."
+    dd if="$bootloader_path" of="$IMAGE" conv=notrunc bs=1 count="$BOOTLOADER_HEAD_BYTES"
+  fi
 }
 
 install_bootloader_to_boot_partition() {
@@ -484,7 +553,7 @@ setup_chroot_environment() {
   
   if (( NEEDS_QEMU )); then
     log "Setting up qemu-user-static for cross-architecture chroot..."
-    cp /usr/bin/qemu-aarch64-static "$ROOT_MNT/usr/bin/"
+    cp "$QEMU_STATIC" "$ROOT_MNT/usr/bin/"
   fi
 
   log "Mounting /boot inside root filesystem..."
@@ -631,7 +700,7 @@ cleanup_chroot_environment() {
   rm -f "$CHROOT_INSTALLER_TARGET"
   rm -f "$KERNEL_VERSION_FILE"
   if (( NEEDS_QEMU )); then
-    rm -f "$ROOT_MNT/usr/bin/qemu-aarch64-static"
+    rm -f "$ROOT_MNT/usr/bin/$(basename "$QEMU_STATIC")"
   fi
 }
 
@@ -769,8 +838,9 @@ print_summary() {
 
 main() {
   parse_args "$@"
-  load_distro
   configure_sysimage
+  set_target_arch
+  load_distro
   apply_bootloader_choice
 
   # Create working directories before opening the logfile in downloads/.
@@ -802,6 +872,9 @@ main() {
   install_bootloader_to_boot_partition
   extract_rootfs
   distro_prepare_rootfs
+  if declare -F distro_install_kernel_files >/dev/null; then
+    distro_install_kernel_files
+  fi
   
   create_fstab
   setup_chroot_environment
