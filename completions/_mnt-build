@@ -22,7 +22,7 @@ _mnt_build() {
   if (( CURRENT == 2 )); then
     _arguments -s \
       $global_opts \
-      '1:subcommand:(build setup clean dev-kernel uboot)'
+      '1:subcommand:(build module setup clean dev-kernel uboot)'
     return
   fi
 
@@ -48,6 +48,18 @@ _mnt_build() {
         '(--kernel-only --modules-only)--dtbs-only[build DTBs only (ARM64)]' \
         '(--kernel-only --dtbs-only)--modules-only[build and install in-tree modules only]' \
         '--kernel=[kernel checkout dir under build_dir (default: mnt-linux)]:kernel:'
+      ;;
+    module)
+      _arguments -s \
+        '--help[show module help]' \
+        '--kversion=[kernel version of the last build]:kversion:' \
+        '--build-dir=[build directory]:directory:_files -/' \
+        '(-j --jobs)'{-j,--jobs}'[parallel jobs]:jobs:' \
+        '--localversion-rev=[kernel localversion revision]:rev:' \
+        '--arch=[kernel ARCH]:arch:' \
+        '--cross-compile=[cross compile prefix]:prefix:' \
+        '--kernel=[kernel checkout dir under build_dir (default: mnt-linux)]:kernel:' \
+        '*:module name, .ko path or directory:'
       ;;
     setup)
       _arguments -s \
